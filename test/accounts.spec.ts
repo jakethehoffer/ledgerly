@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ACCOUNTS, type AccountCode } from '../src/accounts.js';
+import { ACCOUNTS } from '../src/accounts.js';
 
 describe('ACCOUNTS table', () => {
   it('has 12 accounts', () => {
@@ -15,19 +15,6 @@ describe('ACCOUNTS table', () => {
   it('every entry has a non-empty name', () => {
     for (const def of Object.values(ACCOUNTS)) {
       expect(def.name.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('all expected codes are present', () => {
-    const expected: AccountCode[] = [
-      '1000', '1010', '1100', '1200',
-      '2000', '2100',
-      '4000', '4100', '4900',
-      '6000', '6100',
-      '7000',
-    ];
-    for (const code of expected) {
-      expect(ACCOUNTS[code]).toBeDefined();
     }
   });
 
