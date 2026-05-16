@@ -1,0 +1,27 @@
+{
+  "id": "evt_test_payout_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1737633600,
+  "type": "payout.paid",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "po_test_001",
+      "object": "payout",
+      "amount": 500000,
+      "arrival_date": 1737676800,
+      "automatic": true,
+      "balance_transaction": "txn_test_payout_001",
+      "created": 1737374400,
+      "currency": "usd",
+      "destination": "ba_test_001",
+      "method": "standard",
+      "source_type": "card",
+      "status": "paid",
+      "type": "bank_account"
+    }
+  }
+}

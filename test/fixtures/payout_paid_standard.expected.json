@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-24",
+      "currency": "USD",
+      "memo": "Stripe payout po_test_001 to ba_test_001",
+      "sourceEventId": "evt_test_payout_001",
+      "sourceEventType": "payout.paid",
+      "sourceObjectId": "po_test_001",
+      "lines": [
+        { "accountCode": "1000", "side": "debit", "amount": 500000, "memo": "Funds arrived in bank" },
+        { "accountCode": "1010", "side": "credit", "amount": 500000, "memo": "Funds left Stripe balance" }
+      ]
+    }
+  ],
+  "schedule": null
+}
