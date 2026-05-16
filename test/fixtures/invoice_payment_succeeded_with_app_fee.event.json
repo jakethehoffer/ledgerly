@@ -1,0 +1,74 @@
+{
+  "id": "evt_test_invoice_appfee_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "invoice.payment_succeeded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "in_test_appfee_001",
+      "object": "invoice",
+      "amount_due": 5000,
+      "amount_paid": 5000,
+      "amount_remaining": 0,
+      "application_fee_amount": 1000,
+      "billing_reason": "subscription_cycle",
+      "charge": {
+        "id": "ch_test_appfee_inv_001",
+        "object": "charge",
+        "amount": 5000,
+        "application_fee_amount": 1000,
+        "balance_transaction": {
+          "id": "txn_test_appfee_inv_001",
+          "object": "balance_transaction",
+          "amount": 1000,
+          "currency": "usd",
+          "exchange_rate": null,
+          "fee": 30,
+          "fee_details": [
+            { "amount": 30, "currency": "usd", "description": "Stripe processing fees", "type": "stripe_fee" }
+          ],
+          "net": 970,
+          "reporting_category": "charge",
+          "status": "available",
+          "type": "charge",
+          "created": 1736942400,
+          "available_on": 1737158400
+        },
+        "currency": "usd",
+        "paid": true,
+        "status": "succeeded",
+        "transfer_data": { "destination": "acct_test_connected_inv_001" }
+      },
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_appfee_inv_001",
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_test_appfee_inv_001",
+            "object": "line_item",
+            "amount": 5000,
+            "currency": "usd",
+            "period": { "start": 1736942400, "end": 1739620800 },
+            "proration": false,
+            "subscription": "sub_test_appfee_inv_001",
+            "type": "subscription"
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/invoices/in_test_appfee_001/lines"
+      },
+      "paid": true,
+      "status": "paid",
+      "subscription": "sub_test_appfee_inv_001",
+      "tax": null,
+      "total": 5000
+    }
+  }
+}

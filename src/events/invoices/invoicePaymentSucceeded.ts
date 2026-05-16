@@ -80,6 +80,34 @@ function buildMonthlyEntry(
   };
 }
 
+function buildPlatformEntry(
+  event: Stripe.Event,
+  invoice: Stripe.Invoice,
+  appFee: Cents,
+  fee: Cents,
+  net: Cents,
+): JournalEntry {
+  // Platform's view of a Connect destination-charge invoice:
+  // - revenue is the application fee (not the gross subscription amount)
+  // - tax is the connected account's concern; platform does NOT book sales tax
+  // - no deferred recognition: platform fees are earned at collection, not pro-rated
+  //   over the subscription's service period
+  const lines: ReadonlyArray<JournalLine> = sortLines([
+    { accountCode: '1010', side: 'debit',  amount: net,    memo: 'Net to Stripe balance' },
+    { accountCode: '6000', side: 'debit',  amount: fee,    memo: 'Stripe processing fee' },
+    { accountCode: '4100', side: 'credit', amount: appFee, memo: 'Application fee revenue' },
+  ]);
+  return {
+    date: epochToUtcDate(event.created),
+    currency: 'USD',
+    memo: invoiceMemo(invoice),
+    sourceEventId: event.id,
+    sourceEventType: event.type,
+    sourceObjectId: invoice.id,
+    lines,
+  };
+}
+
 function buildAnnualCashEntry(
   event: Stripe.Event,
   invoice: Stripe.Invoice,
@@ -169,9 +197,22 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   const charge = getCharge(invoice, event.id);
   const bt = getBalanceTxn(charge, event.id);
 
-  const gross = cents(invoice.amount_paid);
+  const appFee = invoice.application_fee_amount ?? 0;
+  const isPlatformInvoice = appFee > 0;
+
   const fee = cents(bt.fee);
   const net = cents(bt.net);
+
+  if (isPlatformInvoice) {
+    // Connect destination charge on the platform's side: revenue = app fee,
+    // no tax, no deferred recognition (force monthly-cash regardless of period).
+    return {
+      entries: [buildPlatformEntry(event, invoice, cents(appFee), fee, net)],
+      schedule: null,
+    };
+  }
+
+  const gross = cents(invoice.amount_paid);
 
   const span = periodSpanDays(invoice);
   if (span <= MONTHLY_THRESHOLD_DAYS) {

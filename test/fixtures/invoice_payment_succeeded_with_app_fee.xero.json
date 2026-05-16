@@ -1,0 +1,10 @@
+{
+  "Narration": "Stripe invoice in_test_appfee_001 (customer cus_test_appfee_inv_001)",
+  "Date": "2025-01-15",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 9.70, "AccountCode": "1010", "Description": "Net to Stripe balance" },
+    { "LineAmount": 0.30, "AccountCode": "6000", "Description": "Stripe processing fee" },
+    { "LineAmount": -10.00, "AccountCode": "4100", "Description": "Application fee revenue" }
+  ]
+}

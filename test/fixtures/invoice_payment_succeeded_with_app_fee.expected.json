@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-15",
+      "currency": "USD",
+      "memo": "Stripe invoice in_test_appfee_001 (customer cus_test_appfee_inv_001)",
+      "sourceEventId": "evt_test_invoice_appfee_001",
+      "sourceEventType": "invoice.payment_succeeded",
+      "sourceObjectId": "in_test_appfee_001",
+      "lines": [
+        { "accountCode": "1010", "side": "debit", "amount": 970, "memo": "Net to Stripe balance" },
+        { "accountCode": "6000", "side": "debit", "amount": 30, "memo": "Stripe processing fee" },
+        { "accountCode": "4100", "side": "credit", "amount": 1000, "memo": "Application fee revenue" }
+      ]
+    }
+  ],
+  "schedule": null
+}
