@@ -1,0 +1,9 @@
+{
+  "Narration": "Stripe refund re_test_multi_002 for charge ch_test_multi_001",
+  "Date": "2025-01-18",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 20.00, "AccountCode": "4900", "Description": "Refund issued" },
+    { "LineAmount": -20.00, "AccountCode": "1010", "Description": "Refund deducted from Stripe balance" }
+  ]
+}

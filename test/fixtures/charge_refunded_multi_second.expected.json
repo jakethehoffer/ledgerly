@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-18",
+      "currency": "USD",
+      "memo": "Stripe refund re_test_multi_002 for charge ch_test_multi_001",
+      "sourceEventId": "evt_test_multi_002",
+      "sourceEventType": "charge.refunded",
+      "sourceObjectId": "re_test_multi_002",
+      "lines": [
+        { "accountCode": "4900", "side": "debit", "amount": 2000, "memo": "Refund issued" },
+        { "accountCode": "1010", "side": "credit", "amount": 2000, "memo": "Refund deducted from Stripe balance" }
+      ]
+    }
+  ],
+  "schedule": null
+}

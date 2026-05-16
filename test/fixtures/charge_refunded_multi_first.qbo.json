@@ -1,0 +1,25 @@
+{
+  "TxnDate": "2025-01-17",
+  "DocNumber": "evt_test_multi_001",
+  "PrivateNote": "Stripe refund re_test_multi_001 for charge ch_test_multi_001",
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 30.00,
+      "Description": "Refund issued",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-4900", "name": "QBO 4900" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 30.00,
+      "Description": "Refund deducted from Stripe balance",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-1010", "name": "QBO 1010" }
+      }
+    }
+  ]
+}

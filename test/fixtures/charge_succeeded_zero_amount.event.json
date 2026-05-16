@@ -1,0 +1,43 @@
+{
+  "id": "evt_test_charge_zero_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "charge.succeeded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "ch_test_zero_001",
+      "object": "charge",
+      "amount": 0,
+      "amount_captured": 0,
+      "amount_refunded": 0,
+      "application_fee_amount": null,
+      "balance_transaction": {
+        "id": "txn_test_zero_001",
+        "object": "balance_transaction",
+        "amount": 0,
+        "available_on": 1737158400,
+        "created": 1736942400,
+        "currency": "usd",
+        "exchange_rate": null,
+        "fee": 0,
+        "fee_details": [],
+        "net": 0,
+        "reporting_category": "charge",
+        "status": "available",
+        "type": "charge"
+      },
+      "captured": true,
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_zero_001",
+      "metadata": {},
+      "paid": true,
+      "refunded": false,
+      "status": "succeeded"
+    }
+  }
+}
