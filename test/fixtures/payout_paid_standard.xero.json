@@ -1,0 +1,9 @@
+{
+  "Narration": "Stripe payout po_test_001 to ba_test_001",
+  "Date": "2025-01-24",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 5000.00, "AccountCode": "1000", "Description": "Funds arrived in bank" },
+    { "LineAmount": -5000.00, "AccountCode": "1010", "Description": "Funds left Stripe balance" }
+  ]
+}

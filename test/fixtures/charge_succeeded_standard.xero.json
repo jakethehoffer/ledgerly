@@ -1,0 +1,10 @@
+{
+  "Narration": "Stripe charge ch_test_001 (customer cus_test_001)",
+  "Date": "2025-01-15",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 96.80, "AccountCode": "1010", "Description": "Net to Stripe balance" },
+    { "LineAmount": 3.20, "AccountCode": "6000", "Description": "Stripe processing fee" },
+    { "LineAmount": -100.00, "AccountCode": "4000", "Description": "Subscription revenue" }
+  ]
+}
