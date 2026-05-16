@@ -1,0 +1,29 @@
+{
+  "id": "evt_test_dispute_warning_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1738410000,
+  "type": "charge.dispute.closed",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "dp_test_warning_001",
+      "object": "dispute",
+      "amount": 5000,
+      "balance_transactions": [],
+      "charge": "ch_test_warning_001",
+      "created": 1737115200,
+      "currency": "usd",
+      "evidence": {},
+      "evidence_details": {},
+      "is_charge_refundable": false,
+      "livemode": false,
+      "metadata": {},
+      "payment_intent": null,
+      "reason": "duplicate",
+      "status": "warning_closed"
+    }
+  }
+}

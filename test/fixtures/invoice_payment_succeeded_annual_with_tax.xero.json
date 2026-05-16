@@ -1,0 +1,11 @@
+{
+  "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001)",
+  "Date": "2025-01-15",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 1067.00, "AccountCode": "1010", "Description": "Net to Stripe balance" },
+    { "LineAmount": 33.00, "AccountCode": "6000", "Description": "Stripe processing fee" },
+    { "LineAmount": -100.00, "AccountCode": "2000", "Description": "Sales tax collected" },
+    { "LineAmount": -1000.00, "AccountCode": "2100", "Description": "Annual subscription deferred" }
+  ]
+}
