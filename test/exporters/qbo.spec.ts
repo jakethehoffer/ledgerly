@@ -16,6 +16,7 @@ function loadJson(file: string): unknown {
 
 const FIXTURES = [
   'charge_succeeded_standard',
+  'charge_succeeded_with_app_fee',
   'charge_refunded_partial',
   'dispute_closed_lost',
   'dispute_funds_reinstated_won',

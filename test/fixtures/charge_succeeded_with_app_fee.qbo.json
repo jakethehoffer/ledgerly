@@ -1,0 +1,34 @@
+{
+  "TxnDate": "2025-01-15",
+  "DocNumber": "evt_test_charge_appfe",
+  "PrivateNote": "Stripe charge ch_test_appfee_001 (customer cus_test_appfee_001)",
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 9.70,
+      "Description": "Net to Stripe balance",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-1010", "name": "QBO 1010" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 0.30,
+      "Description": "Stripe processing fee",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-6000", "name": "QBO 6000" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 10.00,
+      "Description": "Application fee revenue",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-4100", "name": "QBO 4100" }
+      }
+    }
+  ]
+}

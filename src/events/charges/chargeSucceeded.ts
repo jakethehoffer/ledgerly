@@ -26,14 +26,21 @@ export function handleChargeSucceeded(event: Stripe.Event): MapResult {
     event.id,
   );
 
-  const gross = cents(charge.amount);
+  const appFee = charge.application_fee_amount ?? 0;
+  const isPlatformCharge = appFee > 0;
+
+  const gross = isPlatformCharge ? cents(appFee) : cents(charge.amount);
   const fee = cents(bt.fee);
   const net = cents(bt.net);
+
+  const revenueLine: JournalLine = isPlatformCharge
+    ? { accountCode: '4100', side: 'credit', amount: gross, memo: 'Application fee revenue' }
+    : { accountCode: '4000', side: 'credit', amount: gross, memo: 'Subscription revenue' };
 
   const lines: ReadonlyArray<JournalLine> = sortLines([
     { accountCode: '1010', side: 'debit',  amount: net,   memo: 'Net to Stripe balance' },
     { accountCode: '6000', side: 'debit',  amount: fee,   memo: 'Stripe processing fee' },
-    { accountCode: '4000', side: 'credit', amount: gross, memo: 'Subscription revenue' },
+    revenueLine,
   ]);
 
   const entry: JournalEntry = {
