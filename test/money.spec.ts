@@ -28,6 +28,14 @@ describe('cents()', () => {
     expect(() => cents(Infinity)).toThrow(RangeError);
   });
 
+  it('accepts Number.MAX_SAFE_INTEGER', () => {
+    expect(cents(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('rejects -Infinity', () => {
+    expect(() => cents(-Infinity)).toThrow(RangeError);
+  });
+
   it('ZERO_CENTS equals 0', () => {
     expect(ZERO_CENTS).toBe(0);
   });
