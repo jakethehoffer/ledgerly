@@ -56,7 +56,8 @@ export function assertBalanced(entry: JournalEntry): void {
   const report = checkBalance(entry);
   if (!report.balanced) {
     throw new Error(
-      `Unbalanced journal entry (event ${entry.sourceEventId}): ` +
+      `Unbalanced journal entry (event ${entry.sourceEventId}, ` +
+        `date=${entry.date}, currency=${entry.currency}): ` +
         `debits=${String(report.debitTotal)} credits=${String(report.creditTotal)} ` +
         `difference=${String(report.difference)}`,
     );

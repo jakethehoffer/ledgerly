@@ -53,6 +53,15 @@ describe('checkBalance', () => {
     expect(report.difference).toBe(-1);
   });
 
+  it('reports unbalanced for a single-line entry', () => {
+    const entry = baseEntry([
+      { accountCode: '1010', side: 'debit', amount: cents(10000) },
+    ]);
+    const report = checkBalance(entry);
+    expect(report.balanced).toBe(false);
+    expect(report.difference).toBe(10000);
+  });
+
   it('handles empty lines as balanced zero', () => {
     const entry = baseEntry([]);
     const report = checkBalance(entry);
