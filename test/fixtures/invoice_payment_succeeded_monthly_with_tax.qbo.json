@@ -1,0 +1,43 @@
+{
+  "TxnDate": "2025-01-15",
+  "DocNumber": "evt_test_invoice_tax_",
+  "PrivateNote": "Stripe invoice in_test_tax_001 (customer cus_test_tax_001)",
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 53.07,
+      "Description": "Net to Stripe balance",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-1010", "name": "QBO 1010" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 1.93,
+      "Description": "Stripe processing fee",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-6000", "name": "QBO 6000" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 5.00,
+      "Description": "Sales tax collected",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-2000", "name": "QBO 2000" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 50.00,
+      "Description": "Subscription revenue (1-month period)",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-4000", "name": "QBO 4000" }
+      }
+    }
+  ]
+}

@@ -58,11 +58,17 @@ function buildMonthlyEntry(
   fee: Cents,
   net: Cents,
 ): JournalEntry {
-  const lines: ReadonlyArray<JournalLine> = sortLines([
-    { accountCode: '1010', side: 'debit',  amount: net,   memo: 'Net to Stripe balance' },
-    { accountCode: '6000', side: 'debit',  amount: fee,   memo: 'Stripe processing fee' },
-    { accountCode: '4000', side: 'credit', amount: gross, memo: 'Subscription revenue (1-month period)' },
-  ]);
+  const tax = invoice.tax ?? 0;
+  const preTax = cents(gross - tax);
+  const draft: JournalLine[] = [
+    { accountCode: '1010', side: 'debit',  amount: net,    memo: 'Net to Stripe balance' },
+    { accountCode: '6000', side: 'debit',  amount: fee,    memo: 'Stripe processing fee' },
+    { accountCode: '4000', side: 'credit', amount: preTax, memo: 'Subscription revenue (1-month period)' },
+  ];
+  if (tax > 0) {
+    draft.push({ accountCode: '2000', side: 'credit', amount: cents(tax), memo: 'Sales tax collected' });
+  }
+  const lines: ReadonlyArray<JournalLine> = sortLines(draft);
   return {
     date: epochToUtcDate(event.created),
     currency: 'USD',
@@ -81,11 +87,17 @@ function buildAnnualCashEntry(
   fee: Cents,
   net: Cents,
 ): JournalEntry {
-  const lines: ReadonlyArray<JournalLine> = sortLines([
-    { accountCode: '1010', side: 'debit',  amount: net,   memo: 'Net to Stripe balance' },
-    { accountCode: '6000', side: 'debit',  amount: fee,   memo: 'Stripe processing fee' },
-    { accountCode: '2100', side: 'credit', amount: gross, memo: 'Annual subscription deferred' },
-  ]);
+  const tax = invoice.tax ?? 0;
+  const preTax = cents(gross - tax);
+  const draft: JournalLine[] = [
+    { accountCode: '1010', side: 'debit',  amount: net,    memo: 'Net to Stripe balance' },
+    { accountCode: '6000', side: 'debit',  amount: fee,    memo: 'Stripe processing fee' },
+    { accountCode: '2100', side: 'credit', amount: preTax, memo: 'Annual subscription deferred' },
+  ];
+  if (tax > 0) {
+    draft.push({ accountCode: '2000', side: 'credit', amount: cents(tax), memo: 'Sales tax collected' });
+  }
+  const lines: ReadonlyArray<JournalLine> = sortLines(draft);
   return {
     date: epochToUtcDate(event.created),
     currency: 'USD',
@@ -170,8 +182,10 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   }
 
   const months = periodMonths(invoice);
+  const tax = invoice.tax ?? 0;
+  const preTax = cents(gross - tax);
   return {
     entries: [buildAnnualCashEntry(event, invoice, gross, fee, net)],
-    schedule: buildRecognitionSchedule(event, invoice, gross, months),
+    schedule: buildRecognitionSchedule(event, invoice, preTax, months),
   };
 }

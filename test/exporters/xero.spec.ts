@@ -21,6 +21,7 @@ const FIXTURES = [
   'dispute_funds_reinstated_won',
   'dispute_funds_withdrawn_standard',
   'invoice_payment_succeeded_monthly',
+  'invoice_payment_succeeded_monthly_with_tax',
   'invoice_payment_succeeded_annual',
   'payout_paid_standard',
 ];
