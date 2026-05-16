@@ -29,3 +29,11 @@ export function invoiceMemo(invoice: Stripe.Invoice): string {
 export function payoutMemo(payout: Stripe.Payout): string {
   return `Stripe payout ${payout.id} to ${destinationLabel(payout.destination)}`;
 }
+
+function disputeChargeId(charge: Stripe.Dispute['charge']): string {
+  return typeof charge === 'string' ? charge : charge.id;
+}
+
+export function disputeMemo(dispute: Stripe.Dispute, kind: 'funds withdrawn'): string {
+  return `Stripe dispute ${dispute.id} ${kind} (charge ${disputeChargeId(dispute.charge)})`;
+}
