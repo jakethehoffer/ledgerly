@@ -22,18 +22,35 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     return { entries: [], schedule: null };
   }
 
-  // Emit one entry per refund created at this event's `created` time.
-  // Stripe redelivers prior refunds in the list; we only post the ones with
-  // created === event.created to avoid double-posting on subsequent refunds.
-  const newRefunds = refundsList.data.filter((r) => r.created === event.created);
-  const targetRefunds = newRefunds.length > 0 ? newRefunds : refundsList.data;
+  // Emit one entry per refund whose `created` matches the event's `created` time.
+  // Stripe redelivers prior refunds in the list; matching by created timestamp
+  // isolates the new refund(s) this event is about. If clock skew causes no match,
+  // throwing is safer than silently re-posting all refunds (would double-count
+  // on every subsequent refund event for the same charge).
+  const targetRefunds = refundsList.data.filter((r) => r.created === event.created);
+  if (targetRefunds.length === 0) {
+    throw new Error(
+      `charge.refunded event ${event.id} has no refund matching event.created=${String(event.created)}; ` +
+        `refunds.data has ${String(refundsList.data.length)} item(s) with created times ` +
+        `[${refundsList.data.map((r) => String(r.created)).join(', ')}]`,
+    );
+  }
 
   const entries: JournalEntry[] = targetRefunds.map((refund) => {
-    requireExpanded<Stripe.BalanceTransaction>(
+    const bt = requireExpanded<Stripe.BalanceTransaction>(
       refund.balance_transaction,
       `refund[${refund.id}].balance_transaction`,
       event.id,
     );
+
+    // Sanity invariant: the BT for a refund should net to the inverse of the refund amount.
+    // If they differ, Stripe is doing something we don't yet model (e.g., partial fee clawback).
+    if (bt.net !== -refund.amount) {
+      throw new Error(
+        `Refund ${refund.id} balance_transaction net (${String(bt.net)}) does not equal ` +
+          `-amount (${String(-refund.amount)}); fee clawback or unmodeled case`,
+      );
+    }
 
     const amount = cents(refund.amount);
     const lines: ReadonlyArray<JournalLine> = sortLines([
