@@ -147,6 +147,12 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   if (invoice.amount_paid === 0) {
     return { entries: [], schedule: null };
   }
+  if (invoice.lines.has_more) {
+    throw new Error(
+      `Invoice ${invoice.id} has paginated line items (lines.has_more=true); ` +
+        `caller must expand all pages before invoking the engine`,
+    );
+  }
 
   const charge = getCharge(invoice, event.id);
   const bt = getBalanceTxn(charge, event.id);

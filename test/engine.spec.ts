@@ -57,5 +57,18 @@ describe('mapEvent fixture-driven', () => {
         }
       }
     });
+
+    it(`${name}: every entry satisfies spec invariants`, () => {
+      const event = loadJson(`${name}.event.json`) as Stripe.Event;
+      const result = mapEvent(event);
+      const allEntries = [
+        ...result.entries,
+        ...(result.schedule ? result.schedule.entries : []),
+      ];
+      for (const entry of allEntries) {
+        expect(entry.memo.length).toBeGreaterThan(0);
+        expect(entry.sourceEventId.startsWith('evt_')).toBe(true);
+      }
+    });
   }
 });
