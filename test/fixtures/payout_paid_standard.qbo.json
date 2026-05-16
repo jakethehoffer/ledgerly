@@ -1,0 +1,25 @@
+{
+  "TxnDate": "2025-01-24",
+  "DocNumber": "evt_test_payout_001",
+  "PrivateNote": "Stripe payout po_test_001 to ba_test_001",
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 5000.00,
+      "Description": "Funds arrived in bank",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-1000", "name": "QBO 1000" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 5000.00,
+      "Description": "Funds left Stripe balance",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-1010", "name": "QBO 1010" }
+      }
+    }
+  ]
+}
