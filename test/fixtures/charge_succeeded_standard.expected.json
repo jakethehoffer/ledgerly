@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-15",
+      "currency": "USD",
+      "memo": "Stripe charge ch_test_001 (customer cus_test_001)",
+      "sourceEventId": "evt_test_charge_succeeded_001",
+      "sourceEventType": "charge.succeeded",
+      "sourceObjectId": "ch_test_001",
+      "lines": [
+        { "accountCode": "1010", "side": "debit", "amount": 9680, "memo": "Net to Stripe balance" },
+        { "accountCode": "6000", "side": "debit", "amount": 320, "memo": "Stripe processing fee" },
+        { "accountCode": "4000", "side": "credit", "amount": 10000, "memo": "Subscription revenue" }
+      ]
+    }
+  ],
+  "schedule": null
+}
