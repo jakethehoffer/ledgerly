@@ -49,8 +49,10 @@ describe('toQboSchedule', () => {
       expect(qbo.Line).toHaveLength(2);
       const debit = qbo.Line.find((l) => l.JournalEntryLineDetail.PostingType === 'Debit');
       const credit = qbo.Line.find((l) => l.JournalEntryLineDetail.PostingType === 'Credit');
-      expect(debit?.Amount).toBe(100);
-      expect(credit?.Amount).toBe(100);
+      expect(debit).toBeDefined();
+      expect(credit).toBeDefined();
+      expect(debit!.Amount).toBe(100);
+      expect(credit!.Amount).toBe(100);
     }
   });
 });
