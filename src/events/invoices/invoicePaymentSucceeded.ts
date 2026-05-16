@@ -15,6 +15,11 @@ function periodSpanDays(invoice: Stripe.Invoice): number {
     const span = (line.period.end - line.period.start) / SECONDS_PER_DAY;
     if (span > maxSpan) maxSpan = span;
   }
+  if (maxSpan === 0) {
+    throw new Error(
+      `Invoice ${invoice.id} has no line-item periods; cannot classify subscription term`,
+    );
+  }
   return maxSpan;
 }
 
@@ -43,7 +48,7 @@ function resolveSubscriptionId(invoice: Stripe.Invoice): string {
   if (invoice.subscription && typeof invoice.subscription === 'object') {
     return invoice.subscription.id;
   }
-  return 'unknown';
+  return `invoice:${invoice.id}`;
 }
 
 function buildMonthlyEntry(
