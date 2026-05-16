@@ -1,0 +1,23 @@
+{
+  "id": "evt_test_dispute_created_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "charge.dispute.created",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "dp_test_created_001",
+      "object": "dispute",
+      "amount": 10000,
+      "charge": "ch_test_001",
+      "created": 1736942400,
+      "currency": "usd",
+      "reason": "fraudulent",
+      "status": "needs_response",
+      "balance_transactions": []
+    }
+  }
+}

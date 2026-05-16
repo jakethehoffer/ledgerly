@@ -1,0 +1,43 @@
+{
+  "id": "evt_test_sub_deleted_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "customer.subscription.deleted",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "sub_test_deleted_001",
+      "object": "subscription",
+      "created": 1731672000,
+      "currency": "usd",
+      "current_period_start": 1734350400,
+      "current_period_end": 1736942400,
+      "customer": "cus_test_deleted_001",
+      "status": "canceled",
+      "canceled_at": 1736942400,
+      "ended_at": 1736942400,
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_test_deleted_001",
+            "object": "subscription_item",
+            "price": {
+              "id": "price_test_deleted_001",
+              "object": "price",
+              "currency": "usd",
+              "unit_amount": 5000
+            },
+            "quantity": 1
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/subscription_items"
+      }
+    }
+  }
+}

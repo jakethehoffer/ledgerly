@@ -1,0 +1,29 @@
+{
+  "id": "evt_test_invoice_failed_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "invoice.payment_failed",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "in_test_failed_001",
+      "object": "invoice",
+      "amount_due": 5000,
+      "amount_paid": 0,
+      "amount_remaining": 5000,
+      "attempt_count": 1,
+      "billing_reason": "subscription_cycle",
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_failed_001",
+      "next_payment_attempt": 1737201600,
+      "paid": false,
+      "status": "open",
+      "subscription": "sub_test_failed_001",
+      "total": 5000
+    }
+  }
+}

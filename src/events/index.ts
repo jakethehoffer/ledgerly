@@ -5,6 +5,7 @@ import { handleChargeRefunded } from './charges/chargeRefunded.js';
 import { handleDisputeClosed } from './disputes/disputeClosed.js';
 import { handleDisputeFundsReinstated } from './disputes/disputeFundsReinstated.js';
 import { handleDisputeFundsWithdrawn } from './disputes/disputeFundsWithdrawn.js';
+import { handleInformational } from './informational.js';
 import { handleInvoicePaymentSucceeded } from './invoices/invoicePaymentSucceeded.js';
 import { handlePayoutFailed } from './payouts/payoutFailed.js';
 import { handlePayoutPaid } from './payouts/payoutPaid.js';
@@ -20,4 +21,9 @@ export const HANDLERS: Readonly<Record<string, Handler>> = {
   'invoice.payment_succeeded': handleInvoicePaymentSucceeded,
   'payout.failed': handlePayoutFailed,
   'payout.paid': handlePayoutPaid,
+  'charge.failed': handleInformational,
+  'charge.dispute.created': handleInformational,
+  'invoice.payment_failed': handleInformational,
+  'customer.subscription.updated': handleInformational,
+  'customer.subscription.deleted': handleInformational,
 };

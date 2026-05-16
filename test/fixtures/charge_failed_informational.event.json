@@ -1,0 +1,31 @@
+{
+  "id": "evt_test_charge_failed_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "charge.failed",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "ch_test_failed_001",
+      "object": "charge",
+      "amount": 10000,
+      "amount_captured": 0,
+      "amount_refunded": 0,
+      "application_fee_amount": null,
+      "balance_transaction": null,
+      "captured": false,
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_failed_001",
+      "failure_code": "card_declined",
+      "failure_message": "Your card was declined.",
+      "metadata": {},
+      "paid": false,
+      "refunded": false,
+      "status": "failed"
+    }
+  }
+}
