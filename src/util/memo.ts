@@ -34,6 +34,13 @@ function disputeChargeId(charge: Stripe.Dispute['charge']): string {
   return typeof charge === 'string' ? charge : charge.id;
 }
 
-export function disputeMemo(dispute: Stripe.Dispute, kind: 'funds withdrawn'): string {
+export type DisputeMemoKind =
+  | 'funds withdrawn'
+  | 'funds reinstated'
+  | 'closed lost'
+  | 'closed won'
+  | 'warning closed';
+
+export function disputeMemo(dispute: Stripe.Dispute, kind: DisputeMemoKind): string {
   return `Stripe dispute ${dispute.id} ${kind} (charge ${disputeChargeId(dispute.charge)})`;
 }

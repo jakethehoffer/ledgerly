@@ -1,0 +1,9 @@
+{
+  "Narration": "Stripe dispute dp_test_001 closed lost (charge ch_test_001)",
+  "Date": "2025-02-01",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 100.00, "AccountCode": "6100", "Description": "Dispute lost — writeoff of receivable" },
+    { "LineAmount": -100.00, "AccountCode": "1200", "Description": "Release receivable to expense" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "date": "2025-02-01",
+      "currency": "USD",
+      "memo": "Stripe dispute dp_test_001 closed lost (charge ch_test_001)",
+      "sourceEventId": "evt_test_dispute_closed_001",
+      "sourceEventType": "charge.dispute.closed",
+      "sourceObjectId": "dp_test_001",
+      "lines": [
+        { "accountCode": "6100", "side": "debit", "amount": 10000, "memo": "Dispute lost — writeoff of receivable" },
+        { "accountCode": "1200", "side": "credit", "amount": 10000, "memo": "Release receivable to expense" }
+      ]
+    }
+  ],
+  "schedule": null
+}
