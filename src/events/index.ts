@@ -6,6 +6,7 @@ import { handleDisputeClosed } from './disputes/disputeClosed.js';
 import { handleDisputeFundsReinstated } from './disputes/disputeFundsReinstated.js';
 import { handleDisputeFundsWithdrawn } from './disputes/disputeFundsWithdrawn.js';
 import { handleInvoicePaymentSucceeded } from './invoices/invoicePaymentSucceeded.js';
+import { handlePayoutFailed } from './payouts/payoutFailed.js';
 import { handlePayoutPaid } from './payouts/payoutPaid.js';
 
 export type Handler = (event: Stripe.Event) => MapResult;
@@ -17,5 +18,6 @@ export const HANDLERS: Readonly<Record<string, Handler>> = {
   'charge.dispute.funds_reinstated': handleDisputeFundsReinstated,
   'charge.dispute.funds_withdrawn': handleDisputeFundsWithdrawn,
   'invoice.payment_succeeded': handleInvoicePaymentSucceeded,
+  'payout.failed': handlePayoutFailed,
   'payout.paid': handlePayoutPaid,
 };

@@ -1,0 +1,29 @@
+{
+  "id": "evt_test_payout_failed_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1737763200,
+  "type": "payout.failed",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "po_test_001",
+      "object": "payout",
+      "amount": 500000,
+      "arrival_date": 1737676800,
+      "automatic": true,
+      "balance_transaction": "txn_test_payout_001",
+      "created": 1737374400,
+      "currency": "usd",
+      "destination": "ba_test_001",
+      "failure_code": "account_closed",
+      "failure_message": "The bank account has been closed.",
+      "method": "standard",
+      "source_type": "card",
+      "status": "failed",
+      "type": "bank_account"
+    }
+  }
+}

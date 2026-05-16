@@ -1,0 +1,25 @@
+{
+  "TxnDate": "2025-01-25",
+  "DocNumber": "evt_test_payout_faile",
+  "PrivateNote": "Stripe payout po_test_001 failed (returned from ba_test_001)",
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 5000.00,
+      "Description": "Funds returned to Stripe balance",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-1010", "name": "QBO 1010" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 5000.00,
+      "Description": "Failed payout reversal",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-1000", "name": "QBO 1000" }
+      }
+    }
+  ]
+}

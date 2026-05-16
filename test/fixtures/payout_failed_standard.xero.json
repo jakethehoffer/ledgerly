@@ -1,0 +1,9 @@
+{
+  "Narration": "Stripe payout po_test_001 failed (returned from ba_test_001)",
+  "Date": "2025-01-25",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 5000.00, "AccountCode": "1010", "Description": "Funds returned to Stripe balance" },
+    { "LineAmount": -5000.00, "AccountCode": "1000", "Description": "Failed payout reversal" }
+  ]
+}

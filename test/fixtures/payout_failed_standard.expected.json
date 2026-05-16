@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-25",
+      "currency": "USD",
+      "memo": "Stripe payout po_test_001 failed (returned from ba_test_001)",
+      "sourceEventId": "evt_test_payout_failed_001",
+      "sourceEventType": "payout.failed",
+      "sourceObjectId": "po_test_001",
+      "lines": [
+        { "accountCode": "1010", "side": "debit", "amount": 500000, "memo": "Funds returned to Stripe balance" },
+        { "accountCode": "1000", "side": "credit", "amount": 500000, "memo": "Failed payout reversal" }
+      ]
+    }
+  ],
+  "schedule": null
+}
