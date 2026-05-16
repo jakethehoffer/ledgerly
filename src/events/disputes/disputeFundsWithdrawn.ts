@@ -33,15 +33,23 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
     ),
   );
 
-  // Sum the non-refundable dispute fee across any BTs Stripe classifies as
-  // payment_dispute_fee. Stripe's BalanceTransaction.Type union in stripe@16
-  // does not yet enumerate 'payment_dispute_fee', so compare via String() to
-  // satisfy strict-type-checked without an unsafe cast.
-  const feeTotal = balanceTransactions
-    .filter((bt) => String(bt.type) === 'payment_dispute_fee')
-    .reduce((sum, bt) => sum + Math.abs(bt.amount), 0);
-
+  // Stripe represents the non-refundable dispute fee in two shapes:
+  //   (1) A single adjustment BT carrying the fee inline in bt.fee
+  //       (amount = -dispute.amount, fee = dispute_fee, net = -(amount + fee)).
+  //   (2) Two adjustment BTs, both with reporting_category='dispute': one
+  //       whose |amount| equals dispute.amount (the clawback), and a separate
+  //       fee BT whose |amount| is the dispute_fee.
+  // Sum bt.fee on every dispute-category BT, and add |bt.amount| from any BT
+  // whose magnitude doesn't equal the disputed amount (the split-fee BT).
   const disputedAmount = dispute.amount;
+  const feeTotal = balanceTransactions
+    .filter((bt) => bt.reporting_category === 'dispute')
+    .reduce((sum, bt) => {
+      const inlineFee = bt.fee;
+      const splitFee = Math.abs(bt.amount) === disputedAmount ? 0 : Math.abs(bt.amount);
+      return sum + inlineFee + splitFee;
+    }, 0);
+
   const totalWithdrawn = disputedAmount + feeTotal;
 
   const rawLines: JournalLine[] = [

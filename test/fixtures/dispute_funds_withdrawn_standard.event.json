@@ -25,28 +25,23 @@
           "available_on": 1737331200,
           "created": 1737115200,
           "currency": "usd",
+          "description": "Chargeback withdrawal for dp_test_001",
           "exchange_rate": null,
-          "fee": 0,
-          "fee_details": [],
-          "net": -10000,
+          "fee": 1500,
+          "fee_details": [
+            {
+              "amount": 1500,
+              "application": null,
+              "currency": "usd",
+              "description": "Dispute fee",
+              "type": "dispute"
+            }
+          ],
+          "net": -11500,
           "reporting_category": "dispute",
+          "source": "dp_test_001",
           "status": "available",
           "type": "adjustment"
-        },
-        {
-          "id": "txn_test_dispute_fee_001",
-          "object": "balance_transaction",
-          "amount": -1500,
-          "available_on": 1737331200,
-          "created": 1737115200,
-          "currency": "usd",
-          "exchange_rate": null,
-          "fee": 0,
-          "fee_details": [],
-          "net": -1500,
-          "reporting_category": "dispute",
-          "status": "available",
-          "type": "payment_dispute_fee"
         }
       ]
     }
