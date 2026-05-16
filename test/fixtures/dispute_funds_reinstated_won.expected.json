@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "date": "2025-02-02",
+      "currency": "USD",
+      "memo": "Stripe dispute dp_test_001 funds reinstated (charge ch_test_001)",
+      "sourceEventId": "evt_test_dispute_reinstated_001",
+      "sourceEventType": "charge.dispute.funds_reinstated",
+      "sourceObjectId": "dp_test_001",
+      "lines": [
+        { "accountCode": "1010", "side": "debit", "amount": 10000, "memo": "Funds reinstated to Stripe balance" },
+        { "accountCode": "1200", "side": "credit", "amount": 10000, "memo": "Release receivable on dispute win" }
+      ]
+    }
+  ],
+  "schedule": null
+}

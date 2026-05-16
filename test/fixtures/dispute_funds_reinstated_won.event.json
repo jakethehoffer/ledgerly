@@ -1,0 +1,45 @@
+{
+  "id": "evt_test_dispute_reinstated_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1738497600,
+  "type": "charge.dispute.funds_reinstated",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "dp_test_001",
+      "object": "dispute",
+      "amount": 10000,
+      "balance_transactions": [
+        {
+          "id": "txn_test_dispute_reinstated_001",
+          "object": "balance_transaction",
+          "amount": 10000,
+          "available_on": 1738713600,
+          "created": 1738497600,
+          "currency": "usd",
+          "exchange_rate": null,
+          "fee": 0,
+          "fee_details": [],
+          "net": 10000,
+          "reporting_category": "dispute",
+          "status": "available",
+          "type": "adjustment"
+        }
+      ],
+      "charge": "ch_test_001",
+      "created": 1737115200,
+      "currency": "usd",
+      "evidence": {},
+      "evidence_details": {},
+      "is_charge_refundable": false,
+      "livemode": false,
+      "metadata": {},
+      "payment_intent": null,
+      "reason": "fraudulent",
+      "status": "won"
+    }
+  }
+}

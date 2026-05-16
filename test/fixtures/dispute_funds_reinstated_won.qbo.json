@@ -1,0 +1,25 @@
+{
+  "TxnDate": "2025-02-02",
+  "DocNumber": "evt_test_dispute_rein",
+  "PrivateNote": "Stripe dispute dp_test_001 funds reinstated (charge ch_test_001)",
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 100.00,
+      "Description": "Funds reinstated to Stripe balance",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-1010", "name": "QBO 1010" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 100.00,
+      "Description": "Release receivable on dispute win",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-1200", "name": "QBO 1200" }
+      }
+    }
+  ]
+}

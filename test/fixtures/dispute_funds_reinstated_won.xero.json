@@ -1,0 +1,9 @@
+{
+  "Narration": "Stripe dispute dp_test_001 funds reinstated (charge ch_test_001)",
+  "Date": "2025-02-02",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 100.00, "AccountCode": "1010", "Description": "Funds reinstated to Stripe balance" },
+    { "LineAmount": -100.00, "AccountCode": "1200", "Description": "Release receivable on dispute win" }
+  ]
+}
