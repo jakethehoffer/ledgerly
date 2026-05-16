@@ -1,0 +1,61 @@
+{
+  "id": "evt_test_charge_refunded_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1737115200,
+  "type": "charge.refunded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "ch_test_001",
+      "object": "charge",
+      "amount": 10000,
+      "amount_captured": 10000,
+      "amount_refunded": 3000,
+      "balance_transaction": "txn_test_001",
+      "captured": true,
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_001",
+      "metadata": {},
+      "paid": true,
+      "refunded": false,
+      "status": "succeeded",
+      "refunds": {
+        "object": "list",
+        "data": [
+          {
+            "id": "re_test_001",
+            "object": "refund",
+            "amount": 3000,
+            "balance_transaction": {
+              "id": "txn_test_refund_001",
+              "object": "balance_transaction",
+              "amount": -3000,
+              "available_on": 1737331200,
+              "created": 1737115200,
+              "currency": "usd",
+              "exchange_rate": null,
+              "fee": 0,
+              "fee_details": [],
+              "net": -3000,
+              "reporting_category": "refund",
+              "status": "available",
+              "type": "refund"
+            },
+            "charge": "ch_test_001",
+            "created": 1737115200,
+            "currency": "usd",
+            "reason": "requested_by_customer",
+            "status": "succeeded"
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/charges/ch_test_001/refunds"
+      }
+    }
+  }
+}
