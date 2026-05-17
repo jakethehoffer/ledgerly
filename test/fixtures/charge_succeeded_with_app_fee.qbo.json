@@ -1,6 +1,6 @@
 {
   "TxnDate": "2025-01-15",
-  "DocNumber": "evt_test_charge_appfe",
+  "DocNumber": "est_charge_appfee_001",
   "PrivateNote": "Stripe charge ch_test_appfee_001 (customer cus_test_appfee_001)",
   "Line": [
     {

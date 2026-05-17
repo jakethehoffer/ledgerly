@@ -1,6 +1,6 @@
 {
   "TxnDate": "2025-01-15",
-  "DocNumber": "evt_test_invoice_mont",
+  "DocNumber": "t_invoice_monthly_001",
   "PrivateNote": "Stripe invoice in_test_monthly_001 (customer cus_test_monthly_001)",
   "Line": [
     {

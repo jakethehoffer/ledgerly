@@ -1,6 +1,6 @@
 {
   "TxnDate": "2025-01-15",
-  "DocNumber": "evt_test_charge_succe",
+  "DocNumber": "_charge_succeeded_001",
   "PrivateNote": "Stripe charge ch_test_001 (customer cus_test_001)",
   "Line": [
     {

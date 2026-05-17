@@ -1,6 +1,6 @@
 {
   "TxnDate": "2025-01-25",
-  "DocNumber": "evt_test_payout_faile",
+  "DocNumber": "est_payout_failed_001",
   "PrivateNote": "Stripe payout po_test_001 failed (returned from ba_test_001)",
   "Line": [
     {

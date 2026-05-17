@@ -1,6 +1,6 @@
 {
   "TxnDate": "2025-02-01",
-  "DocNumber": "evt_test_dispute_clos",
+  "DocNumber": "st_dispute_closed_001",
   "PrivateNote": "Stripe dispute dp_test_001 closed lost (charge ch_test_001)",
   "Line": [
     {

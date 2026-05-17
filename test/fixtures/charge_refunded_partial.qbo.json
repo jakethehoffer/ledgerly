@@ -1,6 +1,6 @@
 {
   "TxnDate": "2025-01-17",
-  "DocNumber": "evt_test_charge_refun",
+  "DocNumber": "t_charge_refunded_001",
   "PrivateNote": "Stripe refund re_test_001 for charge ch_test_001",
   "Line": [
     {

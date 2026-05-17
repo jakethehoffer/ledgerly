@@ -26,7 +26,10 @@ function centsToMajor(amount: number): number {
 }
 
 function truncateDocNumber(eventId: string): string {
-  return eventId.length <= QBO_DOCNUMBER_MAX ? eventId : eventId.slice(0, QBO_DOCNUMBER_MAX);
+  // Take the LAST 21 chars (Stripe IDs and our test IDs put unique entropy at
+  // the suffix; slicing the prefix produces collisions for shared event-type
+  // naming schemes). Full event ID is preserved in PrivateNote.
+  return eventId.length <= QBO_DOCNUMBER_MAX ? eventId : eventId.slice(-QBO_DOCNUMBER_MAX);
 }
 
 function lineToQbo(line: JournalLine, accountMap: QboAccountMap): QboLine {

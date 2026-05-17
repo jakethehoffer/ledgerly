@@ -1,6 +1,6 @@
 {
   "TxnDate": "2025-02-02",
-  "DocNumber": "evt_test_dispute_rein",
+  "DocNumber": "ispute_reinstated_001",
   "PrivateNote": "Stripe dispute dp_test_001 funds reinstated (charge ch_test_001)",
   "Line": [
     {
