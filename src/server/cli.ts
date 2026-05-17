@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import Stripe from 'stripe';
+import type { QboAccountMap } from '../exporters/types.js';
 import { consoleDispatcher } from './dispatchers/console.js';
+import { qboDispatcher } from './dispatchers/qbo.js';
+import type { QboDispatcherConfig } from './dispatchers/qbo.js';
 import { createServer } from './index.js';
 import { createScheduler } from './scheduler.js';
-import type { Scheduler } from './scheduler.js';
+import type { Dispatcher, Scheduler } from './scheduler.js';
 import { inMemoryStorage } from './storage/inMemory.js';
 import { openSqliteDatabase, sqliteStorage } from './storage/sqlite.js';
 import type { Storage } from './storage/types.js';
@@ -46,6 +49,64 @@ const scheduleInterval = Number(
   process.env['LEDGERLY_SCHEDULER_INTERVAL_MS'] ?? 60_000,
 );
 
+function buildDispatcher(): Dispatcher {
+  const qboToken = process.env['LEDGERLY_QBO_ACCESS_TOKEN'];
+  const qboRealm = process.env['LEDGERLY_QBO_REALM_ID'];
+  const qboAccountMapJson = process.env['LEDGERLY_QBO_ACCOUNT_MAP_JSON'];
+  const qboApiBase = process.env['LEDGERLY_QBO_API_BASE'];
+
+  const anyQboVarSet =
+    (qboToken !== undefined && qboToken !== '') ||
+    (qboRealm !== undefined && qboRealm !== '') ||
+    (qboAccountMapJson !== undefined && qboAccountMapJson !== '');
+  const allQboVarsSet =
+    qboToken !== undefined &&
+    qboToken !== '' &&
+    qboRealm !== undefined &&
+    qboRealm !== '' &&
+    qboAccountMapJson !== undefined &&
+    qboAccountMapJson !== '';
+
+  if (allQboVarsSet) {
+    let accountMap: QboAccountMap;
+    try {
+      accountMap = JSON.parse(qboAccountMapJson) as QboAccountMap;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to parse LEDGERLY_QBO_ACCOUNT_MAP_JSON', err);
+      process.exit(1);
+    }
+    // eslint-disable-next-line no-console
+    console.log(
+      `QBO dispatcher enabled: realm=${qboRealm} apiBase=${qboApiBase ?? 'production'}`,
+    );
+    const cfg: QboDispatcherConfig = {
+      accessToken: qboToken,
+      realmId: qboRealm,
+      accountMap,
+      log: {
+        info: (msg, meta): void => {
+          // eslint-disable-next-line no-console
+          console.log(msg, meta ?? '');
+        },
+      },
+      ...(qboApiBase !== undefined && qboApiBase !== '' ? { apiBase: qboApiBase } : {}),
+    };
+    return qboDispatcher(cfg);
+  }
+
+  if (anyQboVarSet) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'Partial QBO configuration detected (need ALL of LEDGERLY_QBO_ACCESS_TOKEN, LEDGERLY_QBO_REALM_ID, LEDGERLY_QBO_ACCOUNT_MAP_JSON); falling back to console dispatcher.',
+    );
+  } else {
+    // eslint-disable-next-line no-console
+    console.log('No QBO env vars set; using console dispatcher.');
+  }
+  return consoleDispatcher();
+}
+
 let scheduler: Scheduler | null = null;
 if (scheduleEnabled) {
   if (dbPath === undefined || dbPath === '') {
@@ -56,7 +117,7 @@ if (scheduleEnabled) {
   }
   scheduler = createScheduler({
     storage,
-    dispatcher: consoleDispatcher(),
+    dispatcher: buildDispatcher(),
     intervalMs: scheduleInterval,
   });
   scheduler.start();

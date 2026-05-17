@@ -339,6 +339,30 @@ The default dispatcher logs each due entry to console. Production deployments wi
 
 **Multi-process safety:** the scheduler assumes single-writer access to `scheduled_entries`. Running multiple scheduler instances against the same SQLite database may double-post entries. For multi-process deployments, use a separate locking mechanism or a queue-based dispatcher.
 
+#### QBO API dispatcher
+
+The default scheduler dispatcher logs entries to console. For production, swap in the QBO dispatcher which POSTs each entry to QuickBooks Online's `JournalEntry` endpoint.
+
+Configure via env vars alongside the scheduler:
+
+```bash
+LEDGERLY_DB_PATH=./ledger.db \
+LEDGERLY_SCHEDULER_ENABLED=true \
+LEDGERLY_QBO_ACCESS_TOKEN=ya29.a0AfH6S... \
+LEDGERLY_QBO_REALM_ID=4620816365209... \
+LEDGERLY_QBO_ACCOUNT_MAP_JSON='{"1010":{"qboId":"83","name":"Stripe Clearing"}, ...}' \
+LEDGERLY_QBO_API_BASE=https://sandbox-quickbooks.api.intuit.com \
+pnpm start
+```
+
+All three of `LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_QBO_REALM_ID`, and `LEDGERLY_QBO_ACCOUNT_MAP_JSON` must be set to enable the QBO dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_QBO_API_BASE` is optional and defaults to the QBO production base URL — point it at `https://sandbox-quickbooks.api.intuit.com` for testing.
+
+The `LEDGERLY_QBO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your real QBO account IDs and display names. All 12 codes must be present.
+
+**OAuth is not handled by ledgerly.** The access token must be obtained out-of-band (via QBO's OAuth 2.0 authorization code flow) and refreshed before expiry (QBO tokens expire hourly). For a real SaaS deployment, you'll need a separate OAuth service that stores refresh tokens per-tenant and rotates access tokens; that's a future iteration.
+
+**Idempotency caveat:** QBO does not enforce `DocNumber` uniqueness by default. A scheduler retry after a partial failure could create duplicate journal entries. Mitigations: use QBO's idempotency support (currently in beta), or query for an existing entry by `DocNumber` before posting.
+
 #### Production caveats
 
 The persistence layer is intentionally minimal — it solves "don't lose events on restart" and "give me a queryable audit log of every journal entry" without dragging in a separate database server. Things it does *not* do:
