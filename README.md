@@ -337,6 +337,25 @@ The default dispatcher logs each due entry to console. Production deployments wi
 
 **Contract:** dispatchers must be idempotent. The scheduler may invoke a dispatcher more than once for the same entry if a prior attempt failed after dispatch but before the database recorded the success.
 
+**Retry behavior:** when a dispatcher throws, the scheduler increments the entry's attempt counter and schedules the next retry via exponential backoff (default: 60s × 2^(attempts-1), capped at 24h — so attempt 1 waits 60s, attempt 2 waits 120s, attempt 10 waits ~8.5h). After `maxAttempts` failures (default 10, configurable via `LEDGERLY_SCHEDULER_MAX_ATTEMPTS`), the entry is moved to the `failed` state — operator intervention required.
+
+**Dead-letter queue:** entries in `status='failed'` are surfaced via the `/health` endpoint's `failedScheduled` counter and via raw SQL:
+
+```sql
+SELECT id, event_id, subscription_id, scheduled_date, attempts, last_error
+  FROM scheduled_entries WHERE status = 'failed';
+```
+
+To re-queue a failed entry after fixing the underlying issue (e.g., a missing account in your account map):
+
+```sql
+UPDATE scheduled_entries
+   SET status = 'pending', attempts = 0, next_attempt_at = NULL, last_error = NULL
+ WHERE id = <id>;
+```
+
+A future iteration will add an admin API for this; for now, direct SQL is the pattern.
+
 **Multi-process safety:** the scheduler assumes single-writer access to `scheduled_entries`. Running multiple scheduler instances against the same SQLite database may double-post entries. For multi-process deployments, use a separate locking mechanism or a queue-based dispatcher.
 
 #### QBO API dispatcher

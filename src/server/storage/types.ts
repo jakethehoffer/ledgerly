@@ -48,14 +48,32 @@ export interface SavedImmediateEntry {
 /**
  * A future-dated journal entry that is part of a recognition schedule. Status
  * starts as `'pending'`; a downstream poster transitions it to `'posted'` once
- * it has been pushed to QBO/Xero on or after `entry.date`.
+ * it has been pushed to QBO/Xero on or after `entry.date`. After enough
+ * consecutive dispatcher failures the scheduler moves the entry to `'failed'`
+ * (dead-letter); a human re-queues it via SQL after fixing the root cause.
+ *
+ * Attempt fields:
+ * - `attempts` — count of dispatch attempts that have been recorded (each
+ *   thrown dispatcher call increments this by 1). 0 for fresh entries.
+ * - `lastAttemptedAt` — epoch ms of the most recent failed dispatch attempt.
+ *   `null` for entries that have never been attempted (or where the most
+ *   recent attempt succeeded — but those rows are `'posted'` so the field is
+ *   moot).
+ * - `nextAttemptAt` — epoch ms after which the scheduler is allowed to retry.
+ *   `null` means "ready now" (fresh entry, or no backoff scheduled).
+ * - `lastError` — truncated error message from the most recent failed
+ *   dispatch attempt. `null` for entries that have never failed.
  */
 export interface SavedScheduledEntry {
   readonly id: number;
   readonly eventId: string;
   readonly subscriptionId: string;
   readonly entry: JournalEntry;
-  readonly status: 'pending' | 'posted' | 'cancelled';
+  readonly status: 'pending' | 'posted' | 'cancelled' | 'failed';
+  readonly attempts: number;
+  readonly lastAttemptedAt: number | null;
+  readonly nextAttemptAt: number | null;
+  readonly lastError: string | null;
 }
 
 /**
@@ -80,17 +98,42 @@ export interface JournalEntryStore {
   /** Query: immediate entries for an event ID, oldest-first. */
   findByEventId(eventId: string): SavedImmediateEntry[];
 
-  /** Query: pending scheduled entries with scheduled_date <= asOfDate (YYYY-MM-DD). */
-  findPendingScheduled(asOfDate: string): SavedScheduledEntry[];
+  /**
+   * Query: pending scheduled entries due for dispatch. Filter:
+   * `status='pending'` AND `scheduled_date <= asOfDate` AND
+   * (`next_attempt_at IS NULL` OR `next_attempt_at <= now`).
+   *
+   * `now` defaults to `Date.now()` and is overrideable for tests so the
+   * retry-backoff predicate can be exercised deterministically.
+   */
+  findPendingScheduled(asOfDate: string, now?: number): SavedScheduledEntry[];
 
   /** Mark a scheduled entry as posted. Throws if the ID does not exist. */
   markScheduledPosted(id: number): void;
+
+  /**
+   * Record a failed dispatch attempt. Storage just persists what it's told —
+   * the scheduler computes `attempts + 1`, `lastAttemptedAt = now`,
+   * `nextAttemptAt = now + backoffMs(...)` (or `null` when dead-lettering),
+   * and `status` (`'pending'` for a retry, `'failed'` for dead-letter).
+   */
+  recordScheduledAttempt(
+    id: number,
+    attempts: number,
+    lastAttemptedAt: number,
+    nextAttemptAt: number | null,
+    lastError: string,
+    status: 'pending' | 'failed',
+  ): void;
 
   /** Count of immediate journal entries (for /health). */
   countImmediate(): number;
 
   /** Count of pending scheduled entries (for /health). */
   countPendingScheduled(): number;
+
+  /** Count of dead-lettered scheduled entries in `'failed'` state (for /health). */
+  countFailedScheduled(): number;
 }
 
 /**

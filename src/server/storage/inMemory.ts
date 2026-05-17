@@ -78,6 +78,10 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
         subscriptionId: schedule.subscriptionId,
         entry,
         status: 'pending',
+        attempts: 0,
+        lastAttemptedAt: null,
+        nextAttemptAt: null,
+        lastError: null,
       };
       scheduled.push(saved);
       return saved;
@@ -87,9 +91,12 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
       return immediate.filter((row) => row.eventId === eventId);
     },
 
-    findPendingScheduled(asOfDate: string): SavedScheduledEntry[] {
+    findPendingScheduled(asOfDate: string, now: number = Date.now()): SavedScheduledEntry[] {
       return scheduled.filter(
-        (row) => row.status === 'pending' && row.entry.date <= asOfDate,
+        (row) =>
+          row.status === 'pending' &&
+          row.entry.date <= asOfDate &&
+          (row.nextAttemptAt === null || row.nextAttemptAt <= now),
       );
     },
 
@@ -106,12 +113,42 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
       scheduled[idx] = { ...existing, status: 'posted' };
     },
 
+    recordScheduledAttempt(
+      id: number,
+      attempts: number,
+      lastAttemptedAt: number,
+      nextAttemptAt: number | null,
+      lastError: string,
+      status: 'pending' | 'failed',
+    ): void {
+      const idx = scheduled.findIndex((row) => row.id === id);
+      if (idx === -1) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      const existing = scheduled[idx];
+      if (!existing) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      scheduled[idx] = {
+        ...existing,
+        status,
+        attempts,
+        lastAttemptedAt,
+        nextAttemptAt,
+        lastError,
+      };
+    },
+
     countImmediate(): number {
       return immediate.length;
     },
 
     countPendingScheduled(): number {
       return scheduled.reduce((acc, row) => acc + (row.status === 'pending' ? 1 : 0), 0);
+    },
+
+    countFailedScheduled(): number {
+      return scheduled.reduce((acc, row) => acc + (row.status === 'failed' ? 1 : 0), 0);
     },
   };
 }

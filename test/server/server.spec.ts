@@ -48,6 +48,7 @@ describe('createServer', () => {
         dedupSize: 0,
         journalEntries: 0,
         pendingScheduled: 0,
+        failedScheduled: 0,
       });
     });
   });

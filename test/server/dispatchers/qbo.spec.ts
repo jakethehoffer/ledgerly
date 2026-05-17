@@ -26,6 +26,10 @@ function makeEntry(overrides: Partial<SavedScheduledEntry> = {}): SavedScheduled
     eventId: 'evt_test_001',
     subscriptionId: 'sub_test_001',
     status: 'pending',
+    attempts: 0,
+    lastAttemptedAt: null,
+    nextAttemptAt: null,
+    lastError: null,
     entry: {
       date: '2025-02-15',
       currency: 'USD',

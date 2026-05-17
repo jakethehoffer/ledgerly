@@ -35,8 +35,12 @@ interface ScheduledEntryRow {
   readonly id: number;
   readonly event_id: string;
   readonly subscription_id: string;
-  readonly status: 'pending' | 'posted' | 'cancelled';
+  readonly status: 'pending' | 'posted' | 'cancelled' | 'failed';
   readonly payload: string;
+  readonly attempts: number;
+  readonly last_attempted_at: number | null;
+  readonly next_attempt_at: number | null;
+  readonly last_error: string | null;
 }
 
 /**
@@ -118,10 +122,13 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
       ORDER BY id ASC`,
   );
 
-  const selectPendingScheduled = db.prepare<[string], ScheduledEntryRow>(
-    `SELECT id, event_id, subscription_id, status, payload
+  const selectPendingScheduled = db.prepare<[string, number], ScheduledEntryRow>(
+    `SELECT id, event_id, subscription_id, status, payload,
+            attempts, last_attempted_at, next_attempt_at, last_error
        FROM scheduled_entries
-      WHERE status = 'pending' AND scheduled_date <= ?
+      WHERE status = 'pending'
+        AND scheduled_date <= ?
+        AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
       ORDER BY scheduled_date ASC, id ASC`,
   );
 
@@ -131,11 +138,26 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
       WHERE id = ? AND status = 'pending'`,
   );
 
+  const recordAttemptStmt = db.prepare<
+    [number, number, number | null, string, string, number]
+  >(
+    `UPDATE scheduled_entries
+        SET attempts = ?,
+            last_attempted_at = ?,
+            next_attempt_at = ?,
+            last_error = ?,
+            status = ?
+      WHERE id = ?`,
+  );
+
   const countImmediateStmt = db.prepare<[], { count: number }>(
     'SELECT COUNT(*) AS count FROM journal_entries',
   );
   const countPendingStmt = db.prepare<[], { count: number }>(
     `SELECT COUNT(*) AS count FROM scheduled_entries WHERE status = 'pending'`,
+  );
+  const countFailedStmt = db.prepare<[], { count: number }>(
+    `SELECT COUNT(*) AS count FROM scheduled_entries WHERE status = 'failed'`,
   );
 
   function saveImmediateInternal(
@@ -177,6 +199,10 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
       subscriptionId: schedule.subscriptionId,
       entry,
       status: 'pending',
+      attempts: 0,
+      lastAttemptedAt: null,
+      nextAttemptAt: null,
+      lastError: null,
     };
   }
 
@@ -199,14 +225,18 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
       }));
     },
 
-    findPendingScheduled(asOfDate: string): SavedScheduledEntry[] {
-      const rows = selectPendingScheduled.all(asOfDate);
+    findPendingScheduled(asOfDate: string, now: number = Date.now()): SavedScheduledEntry[] {
+      const rows = selectPendingScheduled.all(asOfDate, now);
       return rows.map((row) => ({
         id: row.id,
         eventId: row.event_id,
         subscriptionId: row.subscription_id,
         entry: JSON.parse(row.payload) as JournalEntry,
         status: row.status,
+        attempts: row.attempts,
+        lastAttemptedAt: row.last_attempted_at,
+        nextAttemptAt: row.next_attempt_at,
+        lastError: row.last_error,
       }));
     },
 
@@ -217,12 +247,37 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
       }
     },
 
+    recordScheduledAttempt(
+      id: number,
+      attempts: number,
+      lastAttemptedAt: number,
+      nextAttemptAt: number | null,
+      lastError: string,
+      status: 'pending' | 'failed',
+    ): void {
+      const info = recordAttemptStmt.run(
+        attempts,
+        lastAttemptedAt,
+        nextAttemptAt,
+        lastError,
+        status,
+        id,
+      );
+      if (info.changes === 0) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+    },
+
     countImmediate(): number {
       return countImmediateStmt.get()?.count ?? 0;
     },
 
     countPendingScheduled(): number {
       return countPendingStmt.get()?.count ?? 0;
+    },
+
+    countFailedScheduled(): number {
+      return countFailedStmt.get()?.count ?? 0;
     },
   };
 }

@@ -174,6 +174,125 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
           storage.entries.markScheduledPosted(99999);
         }).toThrow();
       });
+
+      it('saveScheduled defaults the retry-tracking fields', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_defaults',
+          sourceEventId: 'evt_defaults',
+        });
+        expect(saved.attempts).toBe(0);
+        expect(saved.lastAttemptedAt).toBeNull();
+        expect(saved.nextAttemptAt).toBeNull();
+        expect(saved.lastError).toBeNull();
+      });
+
+      it('recordScheduledAttempt updates attempts / timestamps / error / status', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_1',
+          sourceEventId: 'evt_1',
+        });
+        storage.entries.recordScheduledAttempt(
+          saved.id,
+          3,
+          1_000_000,
+          1_060_000,
+          'boom',
+          'pending',
+        );
+        // Query at a time past next_attempt_at so the entry surfaces.
+        const due = storage.entries.findPendingScheduled('2026-05-16', 2_000_000);
+        expect(due).toHaveLength(1);
+        expect(due[0]?.attempts).toBe(3);
+        expect(due[0]?.lastAttemptedAt).toBe(1_000_000);
+        expect(due[0]?.nextAttemptAt).toBe(1_060_000);
+        expect(due[0]?.lastError).toBe('boom');
+        expect(due[0]?.status).toBe('pending');
+      });
+
+      it('recordScheduledAttempt can transition to failed (dead-letter)', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_dl',
+          sourceEventId: 'evt_dl',
+        });
+        storage.entries.recordScheduledAttempt(
+          saved.id,
+          10,
+          5_000_000,
+          null,
+          'gave up',
+          'failed',
+        );
+        // 'failed' rows are excluded from findPendingScheduled at any time.
+        expect(
+          storage.entries.findPendingScheduled('2026-05-16', 9_999_999_999),
+        ).toEqual([]);
+        expect(storage.entries.countPendingScheduled()).toBe(0);
+        expect(storage.entries.countFailedScheduled()).toBe(1);
+      });
+
+      it('findPendingScheduled excludes entries whose next_attempt_at is in the future', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_backoff',
+          sourceEventId: 'evt_backoff',
+        });
+        // Backoff schedules retry at t=2000.
+        storage.entries.recordScheduledAttempt(
+          saved.id,
+          1,
+          1000,
+          2000,
+          'transient',
+          'pending',
+        );
+
+        // At t=1500 (before backoff expires) the entry is NOT due.
+        expect(storage.entries.findPendingScheduled('2026-05-16', 1500)).toEqual([]);
+        // At t=2000 (exactly) the entry IS due.
+        expect(
+          storage.entries.findPendingScheduled('2026-05-16', 2000).map((r) => r.id),
+        ).toEqual([saved.id]);
+        // At t=2500 (past backoff) the entry IS due.
+        expect(
+          storage.entries.findPendingScheduled('2026-05-16', 2500).map((r) => r.id),
+        ).toEqual([saved.id]);
+      });
+
+      it('findPendingScheduled includes entries with next_attempt_at = NULL (fresh)', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_fresh',
+          sourceEventId: 'evt_fresh',
+        });
+        // A fresh entry has next_attempt_at = null → always ready.
+        expect(
+          storage.entries.findPendingScheduled('2026-05-16', 0).map((r) => r.id),
+        ).toEqual([saved.id]);
+      });
+
+      it('countFailedScheduled reflects dead-lettered entries', () => {
+        const storage = factory();
+        const a = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_a',
+          sourceEventId: 'evt_a',
+        });
+        const b = storage.entries.saveScheduled(makeEntry({ date: '2026-05-02' }), {
+          subscriptionId: 'sub_b',
+          sourceEventId: 'evt_b',
+        });
+        storage.entries.saveScheduled(makeEntry({ date: '2026-05-03' }), {
+          subscriptionId: 'sub_c',
+          sourceEventId: 'evt_c',
+        });
+        expect(storage.entries.countFailedScheduled()).toBe(0);
+        storage.entries.recordScheduledAttempt(a.id, 10, 1, null, 'x', 'failed');
+        expect(storage.entries.countFailedScheduled()).toBe(1);
+        storage.entries.recordScheduledAttempt(b.id, 10, 1, null, 'y', 'failed');
+        expect(storage.entries.countFailedScheduled()).toBe(2);
+      });
     });
 
     describe('persistMapResult', () => {

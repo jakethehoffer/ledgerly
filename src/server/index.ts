@@ -92,6 +92,7 @@ export function createServer(config: ServerConfig): ServerInstance {
       dedupSize: storage.dedup.size(),
       journalEntries: storage.entries.countImmediate(),
       pendingScheduled: storage.entries.countPendingScheduled(),
+      failedScheduled: storage.entries.countFailedScheduled(),
     });
   });
 

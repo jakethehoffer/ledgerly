@@ -175,14 +175,39 @@ if (scheduleEnabled) {
       'LEDGERLY_SCHEDULER_ENABLED=true but LEDGERLY_DB_PATH is unset; scheduler will find no pending entries (in-memory store starts empty on every restart).',
     );
   }
+  // Optional override for the dead-letter threshold. Defaults inside the
+  // scheduler (currently 10) are reasonable for most deployments; expose this
+  // so operators can dial it for noisy integrations without code changes.
+  const maxAttemptsRaw = process.env['LEDGERLY_SCHEDULER_MAX_ATTEMPTS'];
+  const parsedMaxAttempts =
+    maxAttemptsRaw !== undefined && maxAttemptsRaw !== ''
+      ? Number.parseInt(maxAttemptsRaw, 10)
+      : undefined;
+  const maxAttempts =
+    parsedMaxAttempts !== undefined &&
+    Number.isFinite(parsedMaxAttempts) &&
+    parsedMaxAttempts > 0
+      ? parsedMaxAttempts
+      : undefined;
+  if (maxAttemptsRaw !== undefined && maxAttemptsRaw !== '' && maxAttempts === undefined) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `LEDGERLY_SCHEDULER_MAX_ATTEMPTS=${maxAttemptsRaw} is not a positive integer; using default.`,
+    );
+  }
   scheduler = createScheduler({
     storage,
     dispatcher: buildDispatcher(),
     intervalMs: scheduleInterval,
+    ...(maxAttempts !== undefined ? { maxAttempts } : {}),
   });
   scheduler.start();
   // eslint-disable-next-line no-console
-  console.log(`Scheduler enabled, polling every ${String(scheduleInterval)}ms`);
+  console.log(
+    `Scheduler enabled, polling every ${String(scheduleInterval)}ms${
+      maxAttempts !== undefined ? ` (maxAttempts=${String(maxAttempts)})` : ''
+    }`,
+  );
 }
 
 const port = Number(process.env['PORT'] ?? 3000);
