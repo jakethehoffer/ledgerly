@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { cents } from '../../../src/money.js';
 import type { JournalEntry, MapResult } from '../../../src/journal.js';
+import type { ConnectedTokens } from '../../../src/server/oauth/types.js';
 import type { Storage } from '../../../src/server/storage/types.js';
 
 /**
@@ -292,6 +293,89 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(storage.entries.countFailedScheduled()).toBe(1);
         storage.entries.recordScheduledAttempt(b.id, 10, 1, null, 'y', 'failed');
         expect(storage.entries.countFailedScheduled()).toBe(2);
+      });
+    });
+
+    describe('OAuthTokenStore', () => {
+      function makeTokens(overrides: Partial<ConnectedTokens> = {}): ConnectedTokens {
+        return {
+          provider: 'qbo',
+          tenantId: 'realm-1',
+          accessToken: 'access-1',
+          refreshToken: 'refresh-1',
+          expiresAt: 1_700_000_000,
+          scope: 'com.intuit.quickbooks.accounting',
+          ...overrides,
+        };
+      }
+
+      it('empty store returns null from get() and [] from list()', () => {
+        const storage = factory();
+        expect(storage.oauth.get('qbo')).toBeNull();
+        expect(storage.oauth.get('xero')).toBeNull();
+        expect(storage.oauth.list('qbo')).toEqual([]);
+      });
+
+      it('save + get round-trip', () => {
+        const storage = factory();
+        const tokens = makeTokens();
+        storage.oauth.save(tokens);
+        const got = storage.oauth.get('qbo');
+        expect(got).toEqual(tokens);
+      });
+
+      it('save is an upsert on (provider, tenant_id) — re-saving replaces the row', () => {
+        const storage = factory();
+        storage.oauth.save(makeTokens({ accessToken: 'v1' }));
+        storage.oauth.save(makeTokens({ accessToken: 'v2', refreshToken: 'r2' }));
+        const got = storage.oauth.get('qbo');
+        expect(got?.accessToken).toBe('v2');
+        expect(got?.refreshToken).toBe('r2');
+        // Only one row total.
+        expect(storage.oauth.list('qbo')).toHaveLength(1);
+      });
+
+      it('list returns all rows for a provider', () => {
+        const storage = factory();
+        storage.oauth.save(makeTokens({ provider: 'qbo', tenantId: 'realm-1' }));
+        storage.oauth.save(makeTokens({ provider: 'qbo', tenantId: 'realm-2' }));
+        storage.oauth.save(makeTokens({ provider: 'xero', tenantId: 'tenant-x' }));
+        expect(storage.oauth.list('qbo')).toHaveLength(2);
+        expect(storage.oauth.list('xero')).toHaveLength(1);
+      });
+
+      it('get() throws when multiple rows exist for the provider', () => {
+        const storage = factory();
+        storage.oauth.save(makeTokens({ tenantId: 'realm-a' }));
+        storage.oauth.save(makeTokens({ tenantId: 'realm-b' }));
+        expect(() => storage.oauth.get('qbo')).toThrow(/multi-tenant/i);
+      });
+
+      it('delete removes only the matching (provider, tenant_id)', () => {
+        const storage = factory();
+        storage.oauth.save(makeTokens({ tenantId: 'realm-a' }));
+        storage.oauth.save(makeTokens({ tenantId: 'realm-b' }));
+        storage.oauth.delete('qbo', 'realm-a');
+        const remaining = storage.oauth.list('qbo');
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0]?.tenantId).toBe('realm-b');
+      });
+
+      it('delete is a no-op for nonexistent rows', () => {
+        const storage = factory();
+        expect(() => {
+          storage.oauth.delete('qbo', 'never-existed');
+        }).not.toThrow();
+      });
+
+      it('isolates qbo and xero rows', () => {
+        const storage = factory();
+        storage.oauth.save(makeTokens({ provider: 'qbo', tenantId: 'realm-1' }));
+        storage.oauth.save(
+          makeTokens({ provider: 'xero', tenantId: 'tenant-1', scope: 'accounting.transactions' }),
+        );
+        expect(storage.oauth.get('qbo')?.tenantId).toBe('realm-1');
+        expect(storage.oauth.get('xero')?.tenantId).toBe('tenant-1');
       });
     });
 

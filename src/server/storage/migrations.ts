@@ -66,6 +66,17 @@ CREATE TABLE IF NOT EXISTS scheduled_entries (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_pending
   ON scheduled_entries(status, scheduled_date);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+  provider TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  scope TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (provider, tenant_id)
+);
 `;
 
 /**

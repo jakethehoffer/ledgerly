@@ -1,7 +1,9 @@
 import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal.js';
+import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
 import type {
   Deduplicator,
   JournalEntryStore,
+  OAuthTokenStore,
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
@@ -154,17 +156,57 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
 }
 
 /**
+ * In-memory OAuth token store. Backed by a `Map` keyed by
+ * `${provider}::${tenantId}` so it satisfies the same `(provider, tenantId)`
+ * primary-key semantics as the SQLite backend without any extra bookkeeping.
+ */
+export function inMemoryOAuthTokenStore(): OAuthTokenStore {
+  const rows = new Map<string, ConnectedTokens>();
+
+  function key(provider: OAuthProvider, tenantId: string): string {
+    return `${provider}::${tenantId}`;
+  }
+
+  return {
+    save(tokens: ConnectedTokens): void {
+      rows.set(key(tokens.provider, tokens.tenantId), tokens);
+    },
+
+    get(provider: OAuthProvider): ConnectedTokens | null {
+      const matches = [...rows.values()].filter((row) => row.provider === provider);
+      if (matches.length === 0) return null;
+      if (matches.length > 1) {
+        throw new Error(
+          `Multiple token rows for provider=${provider}; use list() in multi-tenant deployments`,
+        );
+      }
+      return matches[0] ?? null;
+    },
+
+    list(provider: OAuthProvider): ConnectedTokens[] {
+      return [...rows.values()].filter((row) => row.provider === provider);
+    },
+
+    delete(provider: OAuthProvider, tenantId: string): void {
+      rows.delete(key(provider, tenantId));
+    },
+  };
+}
+
+/**
  * Convenience factory: returns a fresh in-memory `Storage` (dedup + entries
- * + atomic `persistMapResult`). Under JS single-threaded semantics the
+ * + oauth + atomic `persistMapResult`). Under JS single-threaded semantics the
  * sequential writes inside `persistMapResult` are atomic w.r.t. other webhook
  * requests, so no extra locking is required.
  */
 export function inMemoryStorage(ttlMs?: number): Storage {
   const dedup = inMemoryDeduplicator(ttlMs);
   const entries = inMemoryJournalEntryStore();
+  const oauth = inMemoryOAuthTokenStore();
   return {
     dedup,
     entries,
+    oauth,
     persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): void {
       for (const entry of result.entries) {
         entries.saveImmediate(entry, eventId);

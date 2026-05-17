@@ -1,9 +1,11 @@
 import Database from 'better-sqlite3';
 import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal.js';
+import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
 import { applyMigrations } from './migrations.js';
 import type {
   Deduplicator,
   JournalEntryStore,
+  OAuthTokenStore,
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
@@ -283,6 +285,98 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
 }
 
 /**
+ * Shape of an `oauth_tokens` row.
+ */
+interface OAuthTokenRow {
+  readonly provider: string;
+  readonly tenant_id: string;
+  readonly access_token: string;
+  readonly refresh_token: string;
+  readonly expires_at: number;
+  readonly scope: string;
+  readonly updated_at: number;
+}
+
+/**
+ * SQLite-backed OAuth token store. Uses an upsert keyed by
+ * `(provider, tenant_id)` so re-saving a refreshed token set replaces the
+ * existing row in place.
+ */
+export function sqliteOAuthTokenStore(db: Database.Database): OAuthTokenStore {
+  const upsertStmt = db.prepare<[string, string, string, string, number, string, number]>(
+    `INSERT INTO oauth_tokens
+       (provider, tenant_id, access_token, refresh_token, expires_at, scope, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(provider, tenant_id) DO UPDATE SET
+       access_token = excluded.access_token,
+       refresh_token = excluded.refresh_token,
+       expires_at = excluded.expires_at,
+       scope = excluded.scope,
+       updated_at = excluded.updated_at`,
+  );
+
+  const listStmt = db.prepare<[string], OAuthTokenRow>(
+    `SELECT provider, tenant_id, access_token, refresh_token, expires_at, scope, updated_at
+       FROM oauth_tokens
+      WHERE provider = ?
+      ORDER BY updated_at DESC`,
+  );
+
+  const deleteStmt = db.prepare<[string, string]>(
+    `DELETE FROM oauth_tokens WHERE provider = ? AND tenant_id = ?`,
+  );
+
+  function rowToTokens(row: OAuthTokenRow): ConnectedTokens {
+    if (row.provider !== 'qbo' && row.provider !== 'xero') {
+      throw new Error(`Unknown OAuth provider in row: ${row.provider}`);
+    }
+    return {
+      provider: row.provider,
+      tenantId: row.tenant_id,
+      accessToken: row.access_token,
+      refreshToken: row.refresh_token,
+      expiresAt: row.expires_at,
+      scope: row.scope,
+    };
+  }
+
+  return {
+    save(tokens: ConnectedTokens): void {
+      upsertStmt.run(
+        tokens.provider,
+        tokens.tenantId,
+        tokens.accessToken,
+        tokens.refreshToken,
+        tokens.expiresAt,
+        tokens.scope,
+        Date.now(),
+      );
+    },
+
+    get(provider: OAuthProvider): ConnectedTokens | null {
+      const rows = listStmt.all(provider);
+      if (rows.length === 0) return null;
+      if (rows.length > 1) {
+        throw new Error(
+          `Multiple token rows for provider=${provider}; use list() in multi-tenant deployments`,
+        );
+      }
+      const row = rows[0];
+      if (!row) return null;
+      return rowToTokens(row);
+    },
+
+    list(provider: OAuthProvider): ConnectedTokens[] {
+      return listStmt.all(provider).map(rowToTokens);
+    },
+
+    delete(provider: OAuthProvider, tenantId: string): void {
+      deleteStmt.run(provider, tenantId);
+    },
+  };
+}
+
+/**
  * Convenience factory: returns a SQLite-backed `Storage`. `persistMapResult`
  * is wrapped in a single transaction so save + dedup record are atomic — if
  * any write throws (disk full, constraint violation), the whole bundle rolls
@@ -292,6 +386,7 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
 export function sqliteStorage(db: Database.Database): Storage {
   const dedup = sqliteDeduplicator(db);
   const entries = sqliteJournalEntryStore(db);
+  const oauth = sqliteOAuthTokenStore(db);
 
   // Prepared statements for the transactional path. We bypass the public
   // store/dedup methods here so the writes can share the transaction.
@@ -343,6 +438,7 @@ export function sqliteStorage(db: Database.Database): Storage {
   return {
     dedup,
     entries,
+    oauth,
     persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): void {
       persistTxn(eventId, result, now);
     },

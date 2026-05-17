@@ -1,4 +1,5 @@
 import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal.js';
+import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
 
 /**
  * Event deduplication interface.
@@ -137,6 +138,28 @@ export interface JournalEntryStore {
 }
 
 /**
+ * Persistence interface for OAuth token sets. Keyed by `(provider, tenantId)`
+ * so a future multi-tenant deployment can hold many token sets per provider
+ * without schema churn. MVP deployments store at most one row per provider
+ * and use the `get(provider)` convenience to read it back.
+ */
+export interface OAuthTokenStore {
+  /** Upsert by `(provider, tenantId)` primary key. */
+  save(tokens: ConnectedTokens): void;
+  /**
+   * Return the single token set for a provider. Convenience for MVP
+   * single-tenant deployments. Returns `null` if no row exists for the
+   * provider; throws if more than one row exists (multi-tenant deployments
+   * must use {@link list} instead).
+   */
+  get(provider: OAuthProvider): ConnectedTokens | null;
+  /** Return every token set for a provider. */
+  list(provider: OAuthProvider): ConnectedTokens[];
+  /** Delete the row at `(provider, tenantId)`. No-op if the row does not exist. */
+  delete(provider: OAuthProvider, tenantId: string): void;
+}
+
+/**
  * Aggregate persistence handle bundling a deduplicator and journal entry store.
  *
  * `persistMapResult` is the single-call entry point the server uses after a
@@ -148,6 +171,7 @@ export interface JournalEntryStore {
 export interface Storage {
   readonly dedup: Deduplicator;
   readonly entries: JournalEntryStore;
+  readonly oauth: OAuthTokenStore;
 
   /**
    * Persist every entry in `result` and record `eventId` as processed.

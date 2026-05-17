@@ -8,7 +8,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-180 tests · 13 event types · 25 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+437 tests · 13 event types · 25 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -424,6 +424,80 @@ The `LEDGERLY_XERO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your Xe
 **Idempotency:** Xero supports a native `Idempotency-Key` header which ledgerly populates with `scheduled_entry.id`. A scheduler retry after a partial failure is safe — Xero will deduplicate.
 
 **Precedence:** if both QBO and Xero env vars are configured, the QBO dispatcher wins (CLI selects the first match). For multi-target deployments, run two ledgerly processes — one per target — each with its own env config.
+
+#### OAuth setup (QBO + Xero)
+
+The static-token dispatchers above are fine for one-off testing, but for production you don't want to be copy-pasting access tokens every hour. ledgerly ships a built-in OAuth 2.0 authorization-code flow for both QBO and Xero: an operator clicks "Connect" once, completes consent in their browser, and ledgerly stores the tokens in its database. The managed dispatcher refreshes access tokens automatically before they expire and retries once on `401` after a fresh refresh.
+
+**Why OAuth?**
+
+Without it, you'd have to obtain access tokens out-of-band (via Postman, a curl script, the provider's playground, etc.) and rotate them every 60 minutes (QBO) or 30 minutes (Xero) by manually exchanging refresh tokens. The OAuth flow automates all of that: storage holds the refresh token, the managed dispatcher exchanges it for a new access token whenever needed.
+
+**1. Register an OAuth app in each provider's developer console.**
+
+QBO ([https://developer.intuit.com/app/developer/dashboard](https://developer.intuit.com/app/developer/dashboard)):
+
+- Create an app in the Intuit Developer dashboard
+- Add a redirect URI:
+  - Production: `https://your-domain.example.com/oauth/qbo/callback`
+  - Development: `http://localhost:3000/oauth/qbo/callback`
+- Copy the client ID + secret
+
+Xero ([https://developer.xero.com/app/manage](https://developer.xero.com/app/manage)):
+
+- Create an app in the Xero developer portal
+- Add a redirect URI: `https://your-domain.example.com/oauth/xero/callback` (same pattern as QBO)
+- Copy the client ID + secret
+
+**The redirect URI you register must match the URI ledgerly advertises EXACTLY** (down to scheme, host, port, and path). Mismatches produce opaque errors at the provider's end.
+
+**2. Generate a state signing secret.**
+
+The OAuth `state` parameter is HMAC-signed to prevent callback hijacking. The secret must be at least 32 characters; generate one with:
+
+```bash
+openssl rand -base64 48
+```
+
+**3. Set environment variables.**
+
+```bash
+LEDGERLY_DB_PATH=/var/lib/ledgerly/ledgerly.db \
+LEDGERLY_SCHEDULER_ENABLED=true \
+LEDGERLY_OAUTH_STATE_SECRET=<48+ char secret> \
+LEDGERLY_QBO_CLIENT_ID=ABcd1234... \
+LEDGERLY_QBO_CLIENT_SECRET=A1b2C3d4... \
+LEDGERLY_QBO_REDIRECT_URI=https://your-domain.example.com/oauth/qbo/callback \
+LEDGERLY_QBO_ACCOUNT_MAP_JSON='{"1010":{"qboId":"83","name":"Stripe Clearing"}, ...}' \
+LEDGERLY_XERO_CLIENT_ID=ABCDEF... \
+LEDGERLY_XERO_CLIENT_SECRET=GHIJKL... \
+LEDGERLY_XERO_REDIRECT_URI=https://your-domain.example.com/oauth/xero/callback \
+LEDGERLY_XERO_ACCOUNT_MAP_JSON='{"1010":{"accountCode":"611"}, ...}' \
+pnpm start
+```
+
+When `LEDGERLY_*_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` are all set for a provider, ledgerly:
+
+- Mounts `GET /oauth/<provider>/start` and `GET /oauth/<provider>/callback` routes.
+- Uses the `managed<Qbo|Xero>Dispatcher` for scheduler dispatch (reads tokens from storage, refreshes automatically). The account map env var is still required.
+
+The static-token variables (`LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_XERO_ACCESS_TOKEN`, etc.) continue to work for environments that prefer to manage tokens outside ledgerly — the OAuth client config takes precedence when both are set.
+
+**4. Complete the consent flow.**
+
+Visit `https://your-domain.example.com/oauth/qbo/start` (or `/oauth/xero/start`) in a browser. Sign in to the QBO / Xero org you want ledgerly to manage, approve the requested scopes, and the receiver will redirect back to the callback URL. On success you'll see a one-line "Connected" page; the receiver has now persisted the token set to the `oauth_tokens` table.
+
+**5. The scheduler dispatches automatically.**
+
+From this point on, the background scheduler dispatches due scheduled entries to QBO / Xero using the stored tokens. Access tokens are refreshed proactively (60 seconds before expiry) and reactively (on a `401` from the provider). Xero refresh tokens rotate on every use — ledgerly always persists the new pair before issuing further calls.
+
+**Production caveats:**
+
+- **HTTPS is required.** Intuit and Xero both reject HTTP redirect URIs except for `localhost`. Terminate TLS at a reverse proxy in front of ledgerly.
+- **Redirect URI must match the registered value exactly.** A trailing slash, port mismatch, or `http` vs. `https` will produce a hard error at consent.
+- **Tokens live in SQLite.** They sit in the `oauth_tokens` table at `LEDGERLY_DB_PATH`. Protect the file with appropriate filesystem permissions (mode `0600`, owned by the ledgerly service user) and include it in your backup strategy.
+- **Single-tenant MVP.** Storage is keyed by `(provider, tenant_id)` and ready for multi-tenant deployments, but the managed dispatchers and CLI currently use the first stored token set per provider. Connecting to a different QBO realm / Xero org overwrites the existing row.
+- **Refresh token revocation.** If an admin manually revokes the connection from the QBO / Xero side, the next refresh attempt will fail with `invalid_grant`. The scheduler will dead-letter the entry after `maxAttempts` failures (default 10); the operator must re-run the consent flow to restore the connection.
 
 #### Production caveats
 

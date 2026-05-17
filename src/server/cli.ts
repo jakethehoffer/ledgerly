@@ -2,15 +2,21 @@
 import Stripe from 'stripe';
 import type { QboAccountMap, XeroAccountMap } from '../exporters/types.js';
 import { consoleDispatcher } from './dispatchers/console.js';
+import { managedQboDispatcher } from './dispatchers/managedQbo.js';
+import type { ManagedQboDispatcherConfig } from './dispatchers/managedQbo.js';
+import { managedXeroDispatcher } from './dispatchers/managedXero.js';
+import type { ManagedXeroDispatcherConfig } from './dispatchers/managedXero.js';
 import { qboDispatcher } from './dispatchers/qbo.js';
 import type { QboDispatcherConfig } from './dispatchers/qbo.js';
 import { xeroDispatcher } from './dispatchers/xero.js';
 import type { XeroDispatcherConfig } from './dispatchers/xero.js';
 import { createServer } from './index.js';
+import type { OAuthServerConfig } from './index.js';
 import { consoleLogger } from './logger.js';
 import type { ConsoleLoggerOptions, Logger } from './logger.js';
 import { inMemoryMetrics } from './metrics.js';
 import type { InMemoryMetricsOptions, Metrics } from './metrics.js';
+import type { OAuthClientConfig } from './oauth/types.js';
 import { createScheduler } from './scheduler.js';
 import type { Dispatcher, Scheduler } from './scheduler.js';
 import { inMemoryStorage } from './storage/inMemory.js';
@@ -80,7 +86,77 @@ if (dbPath !== undefined && dbPath !== '') {
   );
 }
 
-const { app } = createServer({ stripe, webhookSecret, storage, log, metrics });
+/**
+ * Build an `OAuthClientConfig` from the env vars for one provider. Returns
+ * `null` when none of the vars are set (the provider is simply disabled);
+ * exits with code 1 when only some are set (operator misconfiguration).
+ */
+function buildOAuthClient(
+  prefix: 'QBO' | 'XERO',
+): OAuthClientConfig | null {
+  const clientId = process.env[`LEDGERLY_${prefix}_CLIENT_ID`];
+  const clientSecret = process.env[`LEDGERLY_${prefix}_CLIENT_SECRET`];
+  const redirectUri = process.env[`LEDGERLY_${prefix}_REDIRECT_URI`];
+  const anySet =
+    (clientId !== undefined && clientId !== '') ||
+    (clientSecret !== undefined && clientSecret !== '') ||
+    (redirectUri !== undefined && redirectUri !== '');
+  const allSet =
+    clientId !== undefined &&
+    clientId !== '' &&
+    clientSecret !== undefined &&
+    clientSecret !== '' &&
+    redirectUri !== undefined &&
+    redirectUri !== '';
+  if (!anySet) return null;
+  if (!allSet) {
+    log.error(
+      `Partial ${prefix} OAuth configuration: need all of LEDGERLY_${prefix}_CLIENT_ID, LEDGERLY_${prefix}_CLIENT_SECRET, LEDGERLY_${prefix}_REDIRECT_URI`,
+    );
+    process.exit(1);
+  }
+  return { clientId, clientSecret, redirectUri };
+}
+
+const qboOAuthClient = buildOAuthClient('QBO');
+const xeroOAuthClient = buildOAuthClient('XERO');
+const oauthStateSecret = process.env['LEDGERLY_OAUTH_STATE_SECRET'];
+
+let oauthConfig: OAuthServerConfig | undefined;
+if (qboOAuthClient !== null || xeroOAuthClient !== null) {
+  if (oauthStateSecret === undefined || oauthStateSecret === '') {
+    log.error(
+      'OAuth client config detected but LEDGERLY_OAUTH_STATE_SECRET is unset. Generate one with `openssl rand -base64 48`.',
+    );
+    process.exit(1);
+  }
+  if (oauthStateSecret.length < 32) {
+    log.error(
+      'LEDGERLY_OAUTH_STATE_SECRET is too short; must be at least 32 characters.',
+    );
+    process.exit(1);
+  }
+  oauthConfig = {
+    stateSecret: oauthStateSecret,
+    ...(qboOAuthClient !== null ? { qbo: qboOAuthClient } : {}),
+    ...(xeroOAuthClient !== null ? { xero: xeroOAuthClient } : {}),
+  };
+  log.info('OAuth endpoints enabled', {
+    providers: [
+      qboOAuthClient !== null ? 'qbo' : null,
+      xeroOAuthClient !== null ? 'xero' : null,
+    ].filter((p): p is string => p !== null),
+  });
+}
+
+const { app } = createServer({
+  stripe,
+  webhookSecret,
+  storage,
+  log,
+  metrics,
+  ...(oauthConfig !== undefined ? { oauth: oauthConfig } : {}),
+});
 
 // Optional background scheduler. Disabled by default; enable by setting
 // LEDGERLY_SCHEDULER_ENABLED=true. Polls `scheduled_entries` for rows due on or
@@ -95,6 +171,31 @@ function buildDispatcher(): Dispatcher {
   const qboRealm = process.env['LEDGERLY_QBO_REALM_ID'];
   const qboAccountMapJson = process.env['LEDGERLY_QBO_ACCOUNT_MAP_JSON'];
   const qboApiBase = process.env['LEDGERLY_QBO_API_BASE'];
+
+  // OAuth path wins over the static-token path. If the operator has
+  // configured a QBO OAuth client and there is an account map env var, use
+  // the managed dispatcher — the token comes from storage and is refreshed
+  // automatically.
+  if (qboOAuthClient !== null && qboAccountMapJson !== undefined && qboAccountMapJson !== '') {
+    let accountMap: QboAccountMap;
+    try {
+      accountMap = JSON.parse(qboAccountMapJson) as QboAccountMap;
+    } catch (err) {
+      log.error('Failed to parse LEDGERLY_QBO_ACCOUNT_MAP_JSON', { err });
+      process.exit(1);
+    }
+    log.info('Managed QBO dispatcher enabled (OAuth + storage-backed tokens)', {
+      apiBase: qboApiBase ?? 'production',
+    });
+    const cfg: ManagedQboDispatcherConfig = {
+      oauthClient: qboOAuthClient,
+      storage,
+      accountMap,
+      log,
+      ...(qboApiBase !== undefined && qboApiBase !== '' ? { apiBase: qboApiBase } : {}),
+    };
+    return managedQboDispatcher(cfg);
+  }
 
   const anyQboVarSet =
     (qboToken !== undefined && qboToken !== '') ||
@@ -142,6 +243,31 @@ function buildDispatcher(): Dispatcher {
   const xeroAccountMapJson = process.env['LEDGERLY_XERO_ACCOUNT_MAP_JSON'];
   const xeroApiBase = process.env['LEDGERLY_XERO_API_BASE'];
   const xeroStatusRaw = process.env['LEDGERLY_XERO_STATUS'];
+
+  if (xeroOAuthClient !== null && xeroAccountMapJson !== undefined && xeroAccountMapJson !== '') {
+    let accountMap: XeroAccountMap;
+    try {
+      accountMap = JSON.parse(xeroAccountMapJson) as XeroAccountMap;
+    } catch (err) {
+      log.error('Failed to parse LEDGERLY_XERO_ACCOUNT_MAP_JSON', { err });
+      process.exit(1);
+    }
+    const status: 'DRAFT' | 'POSTED' =
+      xeroStatusRaw === 'POSTED' || xeroStatusRaw === 'DRAFT' ? xeroStatusRaw : 'DRAFT';
+    log.info('Managed Xero dispatcher enabled (OAuth + storage-backed tokens)', {
+      status,
+      apiBase: xeroApiBase ?? 'production',
+    });
+    const cfg: ManagedXeroDispatcherConfig = {
+      oauthClient: xeroOAuthClient,
+      storage,
+      accountMap,
+      status,
+      log,
+      ...(xeroApiBase !== undefined && xeroApiBase !== '' ? { apiBase: xeroApiBase } : {}),
+    };
+    return managedXeroDispatcher(cfg);
+  }
 
   const anyXeroVarSet =
     (xeroToken !== undefined && xeroToken !== '') ||
