@@ -449,4 +449,6 @@ What's next: a webhook receiver layer that wraps this engine — verifying Strip
 
 ## License
 
-TBD.
+Copyright 2026 Jake Hoffman
+
+Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE) for the full text.
