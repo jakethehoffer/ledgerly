@@ -211,16 +211,59 @@ Imported from `ledgerly` (after build, the barrel is at `dist/index.js`):
 | `QboAccountMap`, `XeroAccountMap` | type | Per-tenant account-ID mapping |
 | `QboJournalEntry`, `QboLine`, `XeroManualJournal`, `XeroJournalLine` | type | Exporter output shapes |
 
+## Webhook receiver
+
+ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint: signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel — library consumers who only need `mapEvent` don't have to pull Express into their bundles.
+
+Required environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `STRIPE_SECRET_KEY` | Used for API expansion calls (e.g. `stripe.charges.retrieve` with `expand`) |
+| `STRIPE_WEBHOOK_SECRET` | Used to verify the `Stripe-Signature` header (HMAC over the raw body) |
+| `PORT` | Optional; defaults to `3000` |
+
+Run it:
+
+```bash
+pnpm build
+pnpm start
+# or, after publication:
+npx ledgerly-server
+```
+
+Endpoints:
+
+- `POST /webhook` — Stripe event endpoint. Verifies the signature, dedupes by `event.id`, expands nested fields via the Stripe API, then calls `mapEvent`. Returns `200` on success, `200 { duplicate: true }` for redeliveries, `200 { unhandled: true }` for events outside the supported list, `400` for missing/invalid signatures, and `500` for expansion or processing errors.
+- `GET /health` — Liveness probe; returns `{ ok: true, dedupSize }`.
+
+To embed the receiver in a larger Express app, import `createServer` directly:
+
+```typescript
+import Stripe from 'stripe';
+import { createServer } from 'ledgerly/dist/server/index.js';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+const { app } = createServer({
+  stripe,
+  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!,
+});
+app.listen(3000);
+```
+
+**Production caveat:** the default deduplicator is an in-memory `Map` with a 7-day TTL. That's fine for development and single-instance deployments but loses state on restart and doesn't survive horizontal scaling. Pass a custom `dedup` implementation (Redis, Postgres, etc.) via `createServer({ ..., dedup })` for production use.
+
 ## Scripts
 
 ```bash
-pnpm test           # Run all 180 tests
+pnpm test           # Run all tests
 pnpm test:watch     # Vitest in watch mode
 pnpm typecheck      # tsc --noEmit (strict mode + verbatimModuleSyntax)
 pnpm lint           # eslint over src/ and test/
 pnpm format         # prettier --write
 pnpm e2e:fixtures   # Just the fixture-driven engine + exporter tests
 pnpm build          # Emit dist/ for library publication
+pnpm start          # Run the built webhook receiver (requires pnpm build first)
 ```
 
 ## Tech stack

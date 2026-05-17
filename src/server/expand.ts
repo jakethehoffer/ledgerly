@@ -1,0 +1,73 @@
+import type Stripe from 'stripe';
+
+/**
+ * For each event type the engine handles, fetch the nested objects the engine
+ * requires (per the design spec's expansion table). Returns a new event with
+ * `data.object` replaced by the expanded version. Events that need no
+ * expansion are returned unchanged.
+ *
+ * Informational event types (`charge.failed`, `charge.dispute.created`,
+ * `invoice.payment_failed`, `customer.subscription.*`) need no expansion.
+ *
+ * Expansion calls are best-effort: if the Stripe API errors (e.g. rate limit,
+ * network), the error propagates and the caller decides how to respond.
+ */
+export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<Stripe.Event> {
+  switch (event.type) {
+    case 'charge.succeeded':
+    case 'charge.refunded': {
+      const charge = event.data.object;
+      const expanded = await stripe.charges.retrieve(charge.id, {
+        expand: ['balance_transaction', 'refunds.data.balance_transaction'],
+      });
+      return cloneEventWithObject(event, expanded);
+    }
+
+    case 'invoice.payment_succeeded': {
+      const invoice = event.data.object;
+      const expanded = await stripe.invoices.retrieve(invoice.id, {
+        expand: ['charge.balance_transaction'],
+      });
+      return cloneEventWithObject(event, expanded);
+    }
+
+    case 'charge.dispute.funds_withdrawn':
+    case 'charge.dispute.funds_reinstated':
+    case 'charge.dispute.closed': {
+      const dispute = event.data.object;
+      const expanded = await stripe.disputes.retrieve(dispute.id, {
+        expand: ['balance_transactions'],
+      });
+      return cloneEventWithObject(event, expanded);
+    }
+
+    // No expansion needed for these — handler reads only inline scalars.
+    case 'payout.paid':
+    case 'payout.failed':
+    case 'charge.failed':
+    case 'charge.dispute.created':
+    case 'invoice.payment_failed':
+    case 'customer.subscription.updated':
+    case 'customer.subscription.deleted':
+      return event;
+
+    default:
+      return event;
+  }
+}
+
+/**
+ * Returns a shallow clone of the event with `data.object` swapped for a
+ * freshly-expanded object. The Stripe `Event` type is a discriminated union
+ * keyed on `type`, so a generic clone via spread is the simplest way to
+ * preserve narrowing while replacing one field.
+ */
+function cloneEventWithObject(event: Stripe.Event, object: unknown): Stripe.Event {
+  return {
+    ...event,
+    data: {
+      ...event.data,
+      object: object as Stripe.Event.Data.Object,
+    },
+  } as Stripe.Event;
+}
