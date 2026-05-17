@@ -251,7 +251,84 @@ const { app } = createServer({
 app.listen(3000);
 ```
 
-**Production caveat:** the default deduplicator is an in-memory `Map` with a 7-day TTL. That's fine for development and single-instance deployments but loses state on restart and doesn't survive horizontal scaling. Pass a custom `dedup` implementation (Redis, Postgres, etc.) via `createServer({ ..., dedup })` for production use.
+**Production caveat:** the default deduplicator is an in-memory `Map` with a 7-day TTL. That's fine for development and single-instance deployments but loses state on restart and doesn't survive horizontal scaling. Either set `LEDGERLY_DB_PATH` to enable the bundled SQLite backend (see [Persistence](#persistence)) or pass a custom `storage` implementation via `createServer({ ..., storage })` for other backends.
+
+### Persistence
+
+The receiver persists two things: a record of processed Stripe event IDs (so redeliveries are deduplicated across restarts) and every journal entry emitted by `mapEvent` (so a downstream poster can batch-sync them to QBO/Xero, an audit job can review them, or a recognition-schedule poster can post future-dated entries on their scheduled date).
+
+Two backends ship in the box, both implementing the same `Storage` interface (`src/server/storage/types.ts`):
+
+- **In-memory** — the default. Fine for tests and quick demos; loses everything on restart.
+- **SQLite** (via `better-sqlite3`) — opt-in by setting `LEDGERLY_DB_PATH`. Survives restarts, uses WAL mode, durable across crashes by SQLite default.
+
+Enable SQLite:
+
+```bash
+export LEDGERLY_DB_PATH=/var/lib/ledgerly/ledgerly.db
+pnpm start
+```
+
+When the variable is unset (or empty), the receiver falls back to in-memory and logs a warning at startup.
+
+#### Schema
+
+The SQLite backend manages three tables. `openSqliteDatabase(path)` applies the schema on open (idempotent via `CREATE TABLE IF NOT EXISTS`):
+
+| Table | Purpose |
+|---|---|
+| `processed_events` | One row per Stripe `event.id` we've successfully processed. Backs the deduplicator. |
+| `journal_entries` | One row per emitted immediate `JournalEntry`. Full entry JSON in `payload`; `date`, `currency`, `memo`, `source_event_type`, `source_object_id` denormalized for indexed querying. |
+| `scheduled_entries` | Future-dated entries from a `RecognitionSchedule` (e.g. monthly draws against an annual subscription's deferred-revenue balance). `status` starts as `'pending'` and transitions to `'posted'` once a downstream poster pushes them. |
+
+#### What gets persisted
+
+After a successful `mapEvent`, the server calls `storage.persistMapResult(eventId, result)` which atomically (in a single SQLite transaction):
+
+1. Inserts every entry in `result.entries` into `journal_entries`.
+2. Inserts every entry in `result.schedule?.entries` (if present) into `scheduled_entries` with `status='pending'`.
+3. Records the event ID in `processed_events`.
+
+If any insert throws (disk full, constraint violation), the entire bundle rolls back and the event ID is *not* recorded — so Stripe's next redelivery retries cleanly.
+
+For unhandled event types (where `mapEvent` throws `UnhandledEventError` because there's nothing to emit), the event ID is recorded but no entries are written — Stripe redeliveries of the same unhandled event still get the dedup short-circuit.
+
+#### Querying
+
+The `JournalEntryStore` interface exposes three query methods used by downstream consumers:
+
+```typescript
+import { openSqliteDatabase, sqliteStorage } from 'ledgerly/dist/server/storage/sqlite.js';
+
+const db = openSqliteDatabase('/var/lib/ledgerly/ledgerly.db');
+const storage = sqliteStorage(db);
+
+// All immediate entries for a single Stripe event:
+storage.entries.findByEventId('evt_3OqXYZ...');
+
+// Every future-dated entry due on or before today (for a daily recognition job):
+storage.entries.findPendingScheduled('2026-05-16');
+
+// Mark one as posted once you've pushed it to QBO/Xero:
+storage.entries.markScheduledPosted(42);
+```
+
+For ad-hoc audit queries, the schema is straightforward and the SQLite CLI works fine:
+
+```bash
+sqlite3 /var/lib/ledgerly/ledgerly.db \
+  'SELECT id, date, memo FROM journal_entries ORDER BY id DESC LIMIT 20'
+```
+
+#### Production caveats
+
+The persistence layer is intentionally minimal — it solves "don't lose events on restart" and "give me a queryable audit log of every journal entry" without dragging in a separate database server. Things it does *not* do:
+
+- **No automatic backups.** `cp ledgerly.db ledgerly.db.bak` while the receiver is running is safe (SQLite WAL mode supports concurrent readers), but you need to schedule it yourself.
+- **No schema migrations beyond the initial DDL.** The schema is set in stone for v0; future changes will need a versioned migration runner.
+- **Single-writer.** SQLite is fine for one webhook receiver process. Horizontal scaling (multiple instances behind a load balancer) will need a real database — implement the `Storage` interface against Postgres / MySQL / DynamoDB to do that.
+- **No retention policy.** `processed_events` and `journal_entries` grow without bound. For a small SaaS that's many years of data before it matters, but plan for it.
+- **No PII redaction.** `JournalEntry.memo` may contain customer references inherited from Stripe (`subscriptionId`, `chargeId`). The receiver does not redact, encrypt, or otherwise sanitize — treat the database with the same care you'd give a Stripe export.
 
 ## Scripts
 

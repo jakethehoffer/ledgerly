@@ -39,11 +39,16 @@ describe('createServer', () => {
   });
 
   describe('GET /health', () => {
-    it('returns ok and dedup size', async () => {
+    it('returns ok and storage counters', async () => {
       const { app } = createServer({ stripe, webhookSecret: WEBHOOK_SECRET });
       const res = await request(app).get('/health');
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ ok: true, dedupSize: 0 });
+      expect(res.body).toEqual({
+        ok: true,
+        dedupSize: 0,
+        journalEntries: 0,
+        pendingScheduled: 0,
+      });
     });
   });
 
@@ -153,6 +158,26 @@ describe('createServer', () => {
         .send(raw);
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ ok: true, unhandled: true });
+    });
+
+    it('persists journal entries via the storage layer on success', async () => {
+      const { app, storage } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: { info: () => undefined, error: () => undefined },
+      });
+      const { raw, parsed } = loadFixture('payout_paid_standard');
+      const sig = signPayload(raw);
+      const res = await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig)
+        .send(raw);
+      expect(res.status).toBe(200);
+      expect(storage.entries.countImmediate()).toBeGreaterThan(0);
+      const found = storage.entries.findByEventId(parsed.id);
+      expect(found.length).toBeGreaterThan(0);
+      expect(found[0]?.entry.sourceEventId).toBe(parsed.id);
     });
 
     it('returns 500 when expansion throws', async () => {
