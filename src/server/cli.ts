@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Auto-load .env (if present) into process.env before any config reads.
+// Library consumers of ledgerly are unaffected — this only runs in the CLI entry point.
+import 'dotenv/config';
 import Stripe from 'stripe';
 import type { QboAccountMap, XeroAccountMap } from '../exporters/types.js';
 import { consoleDispatcher } from './dispatchers/console.js';
