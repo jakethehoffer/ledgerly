@@ -1,0 +1,34 @@
+{
+  "TxnDate": "2025-02-15",
+  "DocNumber": "evt_test_invoice_pror",
+  "PrivateNote": "Stripe invoice in_test_proration_down_001 (customer cus_test_proration_down_001)",
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 57.96,
+      "Description": "Net to Stripe balance",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-1010", "name": "QBO 1010" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 2.04,
+      "Description": "Stripe processing fee",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-6000", "name": "QBO 6000" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 60.00,
+      "Description": "Subscription revenue (1-month period)",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-4000", "name": "QBO 4000" }
+      }
+    }
+  ]
+}

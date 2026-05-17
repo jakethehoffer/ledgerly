@@ -1,0 +1,10 @@
+{
+  "Narration": "Stripe invoice in_test_proration_up_001 (customer cus_test_proration_up_001)",
+  "Date": "2025-01-15",
+  "Status": "DRAFT",
+  "JournalLines": [
+    { "LineAmount": 23.98, "AccountCode": "1010", "Description": "Net to Stripe balance" },
+    { "LineAmount": 1.02, "AccountCode": "6000", "Description": "Stripe processing fee" },
+    { "LineAmount": -25.00, "AccountCode": "4000", "Description": "Subscription revenue (1-month period)" }
+  ]
+}

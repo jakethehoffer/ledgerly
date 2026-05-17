@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-02-15",
+      "currency": "USD",
+      "memo": "Stripe invoice in_test_proration_down_001 (customer cus_test_proration_down_001)",
+      "sourceEventId": "evt_test_invoice_proration_down_001",
+      "sourceEventType": "invoice.payment_succeeded",
+      "sourceObjectId": "in_test_proration_down_001",
+      "lines": [
+        { "accountCode": "1010", "side": "debit", "amount": 5796, "memo": "Net to Stripe balance" },
+        { "accountCode": "6000", "side": "debit", "amount": 204, "memo": "Stripe processing fee" },
+        { "accountCode": "4000", "side": "credit", "amount": 6000, "memo": "Subscription revenue (1-month period)" }
+      ]
+    }
+  ],
+  "schedule": null
+}

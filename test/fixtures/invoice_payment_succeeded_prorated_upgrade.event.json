@@ -1,0 +1,82 @@
+{
+  "id": "evt_test_invoice_proration_up_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "invoice.payment_succeeded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "in_test_proration_up_001",
+      "object": "invoice",
+      "amount_due": 2500,
+      "amount_paid": 2500,
+      "amount_remaining": 0,
+      "billing_reason": "subscription_update",
+      "charge": {
+        "id": "ch_test_proration_up_001",
+        "object": "charge",
+        "amount": 2500,
+        "balance_transaction": {
+          "id": "txn_test_proration_up_001",
+          "object": "balance_transaction",
+          "amount": 2500,
+          "currency": "usd",
+          "exchange_rate": null,
+          "fee": 102,
+          "fee_details": [
+            { "amount": 102, "currency": "usd", "description": "Stripe processing fees", "type": "stripe_fee" }
+          ],
+          "net": 2398,
+          "reporting_category": "charge",
+          "status": "available",
+          "type": "charge",
+          "created": 1736942400,
+          "available_on": 1737158400
+        },
+        "currency": "usd",
+        "paid": true,
+        "status": "succeeded"
+      },
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_proration_up_001",
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_test_proration_up_old_001",
+            "object": "line_item",
+            "amount": -2500,
+            "currency": "usd",
+            "description": "Unused time on old plan after upgrade",
+            "period": { "start": 1736942400, "end": 1738238400 },
+            "proration": true,
+            "subscription": "sub_test_proration_up_001",
+            "type": "subscription"
+          },
+          {
+            "id": "il_test_proration_up_new_001",
+            "object": "line_item",
+            "amount": 5000,
+            "currency": "usd",
+            "description": "Remaining time on new plan after upgrade",
+            "period": { "start": 1736942400, "end": 1738238400 },
+            "proration": true,
+            "subscription": "sub_test_proration_up_001",
+            "type": "subscription"
+          }
+        ],
+        "has_more": false,
+        "total_count": 2,
+        "url": "/v1/invoices/in_test_proration_up_001/lines"
+      },
+      "paid": true,
+      "status": "paid",
+      "subscription": "sub_test_proration_up_001",
+      "total": 2500
+    }
+  }
+}

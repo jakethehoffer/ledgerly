@@ -1,0 +1,74 @@
+{
+  "id": "evt_test_invoice_proration_down_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1739620800,
+  "type": "invoice.payment_succeeded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "in_test_proration_down_001",
+      "object": "invoice",
+      "amount_due": 6000,
+      "amount_paid": 6000,
+      "amount_remaining": 0,
+      "billing_reason": "subscription_cycle",
+      "charge": {
+        "id": "ch_test_proration_down_001",
+        "object": "charge",
+        "amount": 6000,
+        "balance_transaction": {
+          "id": "txn_test_proration_down_001",
+          "object": "balance_transaction",
+          "amount": 6000,
+          "currency": "usd",
+          "exchange_rate": null,
+          "fee": 204,
+          "fee_details": [
+            { "amount": 204, "currency": "usd", "description": "Stripe processing fees", "type": "stripe_fee" }
+          ],
+          "net": 5796,
+          "reporting_category": "charge",
+          "status": "available",
+          "type": "charge",
+          "created": 1739620800,
+          "available_on": 1739836800
+        },
+        "currency": "usd",
+        "paid": true,
+        "status": "succeeded"
+      },
+      "created": 1739620800,
+      "currency": "usd",
+      "customer": "cus_test_proration_down_001",
+      "starting_balance": -2000,
+      "ending_balance": 0,
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_test_proration_down_001",
+            "object": "line_item",
+            "amount": 8000,
+            "currency": "usd",
+            "description": "Subscription to test_plan_80 × 1 month",
+            "period": { "start": 1739620800, "end": 1742299200 },
+            "proration": false,
+            "subscription": "sub_test_proration_down_001",
+            "type": "subscription"
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/invoices/in_test_proration_down_001/lines"
+      },
+      "paid": true,
+      "status": "paid",
+      "subscription": "sub_test_proration_down_001",
+      "total": 8000,
+      "total_excluding_tax": null
+    }
+  }
+}

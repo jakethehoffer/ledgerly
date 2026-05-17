@@ -29,6 +29,8 @@ const FIXTURES = [
   'invoice_payment_succeeded_monthly_with_tax',
   'invoice_payment_succeeded_annual',
   'invoice_payment_succeeded_annual_with_tax',
+  'invoice_payment_succeeded_prorated_upgrade',
+  'invoice_payment_succeeded_prorated_downgrade',
   'invoice_payment_succeeded_with_app_fee',
   'payout_failed_standard',
   'payout_paid_standard',
