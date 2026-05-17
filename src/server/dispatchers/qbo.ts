@@ -1,5 +1,7 @@
 import type { QboAccountMap } from '../../exporters/types.js';
 import { toQbo } from '../../exporters/qbo.js';
+import { consoleLogger } from '../logger.js';
+import type { Logger } from '../logger.js';
 import type { Dispatcher } from '../scheduler.js';
 import type { SavedScheduledEntry } from '../storage/types.js';
 
@@ -14,8 +16,8 @@ export interface QboDispatcherConfig {
   readonly apiBase?: string;
   /** Override fetch for testing. Defaults to globalThis.fetch. */
   readonly fetch?: typeof globalThis.fetch;
-  /** Optional logger for successful posts. */
-  readonly log?: { info: (msg: string, meta?: unknown) => void };
+  /** Optional logger for successful posts. Defaults to {@link consoleLogger}. */
+  readonly log?: Logger;
 }
 
 const DEFAULT_API_BASE = 'https://quickbooks.api.intuit.com';
@@ -37,7 +39,7 @@ const MAX_BODY_PREVIEW_CHARS = 500;
 export function qboDispatcher(config: QboDispatcherConfig): Dispatcher {
   const fetchImpl = config.fetch ?? globalThis.fetch;
   const apiBase = config.apiBase ?? DEFAULT_API_BASE;
-  const log = config.log;
+  const log: Logger = config.log ?? consoleLogger();
 
   return async (entry: SavedScheduledEntry): Promise<void> => {
     const qboEntry = toQbo(entry.entry, config.accountMap);
@@ -71,7 +73,7 @@ export function qboDispatcher(config: QboDispatcherConfig): Dispatcher {
       );
     }
 
-    log?.info(
+    log.info(
       `[qbo-dispatcher] posted entry id=${String(entry.id)} memo=${entry.entry.memo}`,
       { qboEntry },
     );

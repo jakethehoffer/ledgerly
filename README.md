@@ -420,6 +420,41 @@ The persistence layer is intentionally minimal — it solves "don't lose events 
 - **No retention policy.** `processed_events` and `journal_entries` grow without bound. For a small SaaS that's many years of data before it matters, but plan for it.
 - **No PII redaction.** `JournalEntry.memo` may contain customer references inherited from Stripe (`subscriptionId`, `chargeId`). The receiver does not redact, encrypt, or otherwise sanitize — treat the database with the same care you'd give a Stripe export.
 
+### Logging
+
+The receiver, scheduler, and dispatchers all log through a small `Logger` interface so you can wire ledgerly to pino, winston, datadog, etc. without dragging a logger dependency into ledgerly itself:
+
+```typescript
+interface Logger {
+  debug(message: string, meta?: unknown): void;
+  info(message: string, meta?: unknown): void;
+  warn(message: string, meta?: unknown): void;
+  error(message: string, meta?: unknown): void;
+}
+```
+
+The default logger writes to `console.*` with an `info`-level threshold. Override the threshold by setting `LEDGERLY_LOG_LEVEL` to `debug`, `info`, `warn`, or `error` (invalid values warn once and fall back to `info`). The CLI constructs one logger at startup and threads it through `createServer`, `createScheduler`, and the dispatcher factories.
+
+To plug in pino:
+
+```typescript
+import pino from 'pino';
+import { createServer } from 'ledgerly/dist/server/index.js';
+import type { Logger } from 'ledgerly/dist/server/logger.js';
+
+const p = pino();
+const log: Logger = {
+  debug: (msg, meta) => p.debug(meta, msg),
+  info:  (msg, meta) => p.info(meta, msg),
+  warn:  (msg, meta) => p.warn(meta, msg),
+  error: (msg, meta) => p.error(meta, msg),
+};
+
+const { app } = createServer({ stripe, webhookSecret, storage, log });
+```
+
+For tests, ledgerly also exports `silentLogger()` — a no-op `Logger` that discards everything.
+
 ## Scripts
 
 ```bash

@@ -1,3 +1,5 @@
+import { consoleLogger } from './logger.js';
+import type { Logger } from './logger.js';
 import type { SavedScheduledEntry, Storage } from './storage/types.js';
 
 /**
@@ -21,8 +23,10 @@ export interface SchedulerConfig {
   readonly dispatcher: Dispatcher;
   /** How often to poll for due entries. Default 60000ms. */
   readonly intervalMs?: number;
-  /** Called when a dispatch attempt throws. Defaults to console.error. */
+  /** Called when a dispatch attempt throws. Defaults to logging via `log.error`. */
   readonly onError?: (entry: SavedScheduledEntry, error: unknown) => void;
+  /** Optional logger. Defaults to {@link consoleLogger}. */
+  readonly log?: Logger;
   /** Function returning today's date as ISO YYYY-MM-DD. Defaults to UTC today. Override for tests. */
   readonly today?: () => string;
   /**
@@ -114,14 +118,11 @@ function truncate(s: string, maxLen: number): string {
  */
 export function createScheduler(config: SchedulerConfig): Scheduler {
   const interval = config.intervalMs ?? 60_000;
+  const log: Logger = config.log ?? consoleLogger();
   const onError =
     config.onError ??
     ((entry, err): void => {
-      // eslint-disable-next-line no-console
-      console.error(
-        `[scheduler] dispatch failed for entry id=${String(entry.id)}`,
-        err,
-      );
+      log.error('[scheduler] dispatch failed', { entryId: entry.id, err });
     });
   const today = config.today ?? ((): string => new Date().toISOString().slice(0, 10));
   const now = config.now ?? ((): number => Date.now());

@@ -324,7 +324,7 @@ describe('xeroDispatcher', () => {
         tenantId: 'tnt',
         accountMap,
         fetch: fetchImpl,
-        log: { info },
+        log: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
       });
 
       await dispatch(makeEntry());
@@ -345,7 +345,7 @@ describe('xeroDispatcher', () => {
         tenantId: 'tnt',
         accountMap,
         fetch: fetchImpl,
-        log: { info },
+        log: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
       });
 
       await expect(dispatch(makeEntry())).rejects.toThrow();

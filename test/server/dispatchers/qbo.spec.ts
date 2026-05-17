@@ -298,7 +298,7 @@ describe('qboDispatcher', () => {
         realmId: 'rlm',
         accountMap,
         fetch: fetchImpl,
-        log: { info },
+        log: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
       });
 
       await dispatch(makeEntry());
@@ -319,7 +319,7 @@ describe('qboDispatcher', () => {
         realmId: 'rlm',
         accountMap,
         fetch: fetchImpl,
-        log: { info },
+        log: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
       });
 
       await expect(dispatch(makeEntry())).rejects.toThrow();

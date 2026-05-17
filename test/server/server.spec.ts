@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createServer } from '../../src/server/index.js';
+import { silentLogger } from '../../src/server/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -58,7 +59,7 @@ describe('createServer', () => {
       const { app } = createServer({
         stripe,
         webhookSecret: WEBHOOK_SECRET,
-        log: { info: () => undefined, error: () => undefined },
+        log: silentLogger(),
       });
       const { raw } = loadFixture('payout_paid_standard');
       const res = await request(app)
@@ -73,7 +74,7 @@ describe('createServer', () => {
       const { app } = createServer({
         stripe,
         webhookSecret: WEBHOOK_SECRET,
-        log: { info: () => undefined, error: () => undefined },
+        log: silentLogger(),
       });
       const { raw } = loadFixture('payout_paid_standard');
       const res = await request(app)
@@ -89,7 +90,7 @@ describe('createServer', () => {
       const { app, dedup } = createServer({
         stripe,
         webhookSecret: WEBHOOK_SECRET,
-        log: { info: () => undefined, error: () => undefined },
+        log: silentLogger(),
       });
       const { raw } = loadFixture('payout_paid_standard');
       const sig = signPayload(raw);
@@ -108,7 +109,7 @@ describe('createServer', () => {
       const { app } = createServer({
         stripe,
         webhookSecret: WEBHOOK_SECRET,
-        log: { info: () => undefined, error: () => undefined },
+        log: silentLogger(),
       });
       const { raw } = loadFixture('payout_paid_standard');
 
@@ -137,7 +138,7 @@ describe('createServer', () => {
       const { app } = createServer({
         stripe,
         webhookSecret: WEBHOOK_SECRET,
-        log: { info: () => undefined, error: () => undefined },
+        log: silentLogger(),
       });
       const unknownEvent = {
         id: 'evt_test_unknown_001',
@@ -165,7 +166,7 @@ describe('createServer', () => {
       const { app, storage } = createServer({
         stripe,
         webhookSecret: WEBHOOK_SECRET,
-        log: { info: () => undefined, error: () => undefined },
+        log: silentLogger(),
       });
       const { raw, parsed } = loadFixture('payout_paid_standard');
       const sig = signPayload(raw);
@@ -194,7 +195,7 @@ describe('createServer', () => {
       const { app } = createServer({
         stripe: stubStripe,
         webhookSecret: WEBHOOK_SECRET,
-        log: { info: () => undefined, error: () => undefined },
+        log: silentLogger(),
       });
       const { raw } = loadFixture('charge_succeeded_standard');
       const sig = signPayload(raw);

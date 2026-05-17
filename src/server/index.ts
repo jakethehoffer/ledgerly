@@ -3,13 +3,10 @@ import type Stripe from 'stripe';
 import { mapEvent } from '../engine.js';
 import { UnhandledEventError } from '../errors.js';
 import { expandEvent } from './expand.js';
+import { consoleLogger } from './logger.js';
+import type { Logger } from './logger.js';
 import { inMemoryStorage } from './storage/inMemory.js';
 import type { Deduplicator, Storage } from './storage/types.js';
-
-export interface ServerLogger {
-  info: (msg: string, meta?: unknown) => void;
-  error: (msg: string, meta?: unknown) => void;
-}
 
 export interface ServerConfig {
   /** The Stripe SDK instance for signature verification and API expansion. */
@@ -27,8 +24,8 @@ export interface ServerConfig {
    * and an in-memory journal entry store.
    */
   dedup?: Deduplicator;
-  /** Optional logger. Defaults to console. */
-  log?: ServerLogger;
+  /** Optional logger. Defaults to {@link consoleLogger}. */
+  log?: Logger;
 }
 
 export interface ServerInstance {
@@ -37,17 +34,6 @@ export interface ServerInstance {
   /** Deprecated alias for `storage.dedup`. Kept for callers that still read it. */
   dedup: Deduplicator;
 }
-
-const defaultLogger: ServerLogger = {
-  info: (msg, meta) => {
-    // eslint-disable-next-line no-console
-    console.log(msg, meta ?? '');
-  },
-  error: (msg, meta) => {
-    // eslint-disable-next-line no-console
-    console.error(msg, meta ?? '');
-  },
-};
 
 /**
  * Build a `Storage` for the server. Resolution order:
@@ -83,7 +69,7 @@ function resolveStorage(config: ServerConfig): Storage {
 
 export function createServer(config: ServerConfig): ServerInstance {
   const storage = resolveStorage(config);
-  const log = config.log ?? defaultLogger;
+  const log: Logger = config.log ?? consoleLogger();
   const app = express();
 
   app.get('/health', (_req: Request, res: Response) => {
@@ -111,7 +97,7 @@ export function createServer(config: ServerConfig): ServerInstance {
         config.webhookSecret,
       );
     } catch (err) {
-      log.error('Signature verification failed', err);
+      log.error('Signature verification failed', { err });
       res.status(400).json({ error: 'Signature verification failed' });
       return;
     }
@@ -121,7 +107,7 @@ export function createServer(config: ServerConfig): ServerInstance {
     // bundled with persistence, so a crash mid-flight doesn't poison the
     // dedup state.
     if (storage.dedup.has(event.id)) {
-      log.info(`Duplicate event ${event.id} ignored`);
+      log.info('Duplicate event ignored', { eventId: event.id });
       res.status(200).json({ duplicate: true });
       return;
     }
@@ -130,7 +116,7 @@ export function createServer(config: ServerConfig): ServerInstance {
     try {
       expanded = await expandEvent(config.stripe, event);
     } catch (err) {
-      log.error(`Expansion failed for ${event.id}`, err);
+      log.error('Expansion failed', { eventId: event.id, err });
       res.status(500).json({ error: 'Expansion failed' });
       return;
     }
@@ -141,11 +127,13 @@ export function createServer(config: ServerConfig): ServerInstance {
         // Atomic per backend: persist all entries + record dedup, or roll back.
         storage.persistMapResult(event.id, result);
       } catch (err) {
-        log.error(`Persistence failed for ${event.id}`, err);
+        log.error('Persistence failed', { eventId: event.id, err });
         res.status(500).json({ error: 'Persistence failed' });
         return;
       }
-      log.info(`Processed ${event.id} (${event.type})`, {
+      log.info('Processed event', {
+        eventId: event.id,
+        eventType: event.type,
         entryCount: result.entries.length,
         scheduleEntryCount: result.schedule?.entries.length ?? 0,
       });
@@ -162,13 +150,19 @@ export function createServer(config: ServerConfig): ServerInstance {
         try {
           storage.dedup.record(event.id);
         } catch (recordErr) {
-          log.error(`Dedup record failed for unhandled ${event.id}`, recordErr);
+          log.error('Dedup record failed for unhandled event', {
+            eventId: event.id,
+            err: recordErr,
+          });
         }
-        log.info(`Unhandled event type ${event.type}; acknowledging`);
+        log.info('Unhandled event type; acknowledging', {
+          eventId: event.id,
+          eventType: event.type,
+        });
         res.status(200).json({ ok: true, unhandled: true });
         return;
       }
-      log.error(`mapEvent threw for ${event.id}`, err);
+      log.error('mapEvent threw', { eventId: event.id, err });
       res.status(500).json({ error: 'Processing failed' });
     }
   }

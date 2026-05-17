@@ -671,7 +671,12 @@ describe('consoleDispatcher', () => {
     const saved = seedScheduled(storage, '2026-05-16', 'sub_log', 'evt_log');
 
     const info = vi.fn();
-    const dispatcher = consoleDispatcher({ info });
+    const dispatcher = consoleDispatcher({
+      debug: vi.fn(),
+      info,
+      warn: vi.fn(),
+      error: vi.fn(),
+    });
     void dispatcher(saved);
 
     expect(info).toHaveBeenCalledTimes(1);

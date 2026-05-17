@@ -1,5 +1,7 @@
 import type { XeroAccountMap } from '../../exporters/types.js';
 import { toXero } from '../../exporters/xero.js';
+import { consoleLogger } from '../logger.js';
+import type { Logger } from '../logger.js';
 import type { Dispatcher } from '../scheduler.js';
 import type { SavedScheduledEntry } from '../storage/types.js';
 
@@ -16,8 +18,8 @@ export interface XeroDispatcherConfig {
   readonly status?: 'DRAFT' | 'POSTED';
   /** Override fetch for testing. Defaults to globalThis.fetch. */
   readonly fetch?: typeof globalThis.fetch;
-  /** Optional logger for successful posts. */
-  readonly log?: { info: (msg: string, meta?: unknown) => void };
+  /** Optional logger for successful posts. Defaults to {@link consoleLogger}. */
+  readonly log?: Logger;
 }
 
 const DEFAULT_API_BASE = 'https://api.xero.com';
@@ -43,7 +45,7 @@ export function xeroDispatcher(config: XeroDispatcherConfig): Dispatcher {
   const fetchImpl = config.fetch ?? globalThis.fetch;
   const apiBase = config.apiBase ?? DEFAULT_API_BASE;
   const status = config.status ?? 'DRAFT';
-  const log = config.log;
+  const log: Logger = config.log ?? consoleLogger();
 
   return async (entry: SavedScheduledEntry): Promise<void> => {
     const xeroJournal = toXero(entry.entry, config.accountMap, status);
@@ -79,7 +81,7 @@ export function xeroDispatcher(config: XeroDispatcherConfig): Dispatcher {
       );
     }
 
-    log?.info(
+    log.info(
       `[xero-dispatcher] posted entry id=${String(entry.id)} memo=${entry.entry.memo}`,
       { xeroJournal },
     );
