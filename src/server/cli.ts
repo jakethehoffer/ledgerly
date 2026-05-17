@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import Stripe from 'stripe';
-import type { QboAccountMap } from '../exporters/types.js';
+import type { QboAccountMap, XeroAccountMap } from '../exporters/types.js';
 import { consoleDispatcher } from './dispatchers/console.js';
 import { qboDispatcher } from './dispatchers/qbo.js';
 import type { QboDispatcherConfig } from './dispatchers/qbo.js';
+import { xeroDispatcher } from './dispatchers/xero.js';
+import type { XeroDispatcherConfig } from './dispatchers/xero.js';
 import { createServer } from './index.js';
 import { createScheduler } from './scheduler.js';
 import type { Dispatcher, Scheduler } from './scheduler.js';
@@ -100,10 +102,68 @@ function buildDispatcher(): Dispatcher {
     console.warn(
       'Partial QBO configuration detected (need ALL of LEDGERLY_QBO_ACCESS_TOKEN, LEDGERLY_QBO_REALM_ID, LEDGERLY_QBO_ACCOUNT_MAP_JSON); falling back to console dispatcher.',
     );
-  } else {
-    // eslint-disable-next-line no-console
-    console.log('No QBO env vars set; using console dispatcher.');
+    return consoleDispatcher();
   }
+
+  const xeroToken = process.env['LEDGERLY_XERO_ACCESS_TOKEN'];
+  const xeroTenant = process.env['LEDGERLY_XERO_TENANT_ID'];
+  const xeroAccountMapJson = process.env['LEDGERLY_XERO_ACCOUNT_MAP_JSON'];
+  const xeroApiBase = process.env['LEDGERLY_XERO_API_BASE'];
+  const xeroStatusRaw = process.env['LEDGERLY_XERO_STATUS'];
+
+  const anyXeroVarSet =
+    (xeroToken !== undefined && xeroToken !== '') ||
+    (xeroTenant !== undefined && xeroTenant !== '') ||
+    (xeroAccountMapJson !== undefined && xeroAccountMapJson !== '');
+  const allXeroVarsSet =
+    xeroToken !== undefined &&
+    xeroToken !== '' &&
+    xeroTenant !== undefined &&
+    xeroTenant !== '' &&
+    xeroAccountMapJson !== undefined &&
+    xeroAccountMapJson !== '';
+
+  if (allXeroVarsSet) {
+    let accountMap: XeroAccountMap;
+    try {
+      accountMap = JSON.parse(xeroAccountMapJson) as XeroAccountMap;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to parse LEDGERLY_XERO_ACCOUNT_MAP_JSON', err);
+      process.exit(1);
+    }
+    const status: 'DRAFT' | 'POSTED' =
+      xeroStatusRaw === 'POSTED' || xeroStatusRaw === 'DRAFT' ? xeroStatusRaw : 'DRAFT';
+    // eslint-disable-next-line no-console
+    console.log(
+      `Xero dispatcher enabled: tenant=${xeroTenant} status=${status} apiBase=${xeroApiBase ?? 'production'}`,
+    );
+    const cfg: XeroDispatcherConfig = {
+      accessToken: xeroToken,
+      tenantId: xeroTenant,
+      accountMap,
+      status,
+      log: {
+        info: (msg, meta): void => {
+          // eslint-disable-next-line no-console
+          console.log(msg, meta ?? '');
+        },
+      },
+      ...(xeroApiBase !== undefined && xeroApiBase !== '' ? { apiBase: xeroApiBase } : {}),
+    };
+    return xeroDispatcher(cfg);
+  }
+
+  if (anyXeroVarSet) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'Partial Xero configuration detected (need ALL of LEDGERLY_XERO_ACCESS_TOKEN, LEDGERLY_XERO_TENANT_ID, LEDGERLY_XERO_ACCOUNT_MAP_JSON); falling back to console dispatcher.',
+    );
+    return consoleDispatcher();
+  }
+
+  // eslint-disable-next-line no-console
+  console.log('No QBO/Xero env vars set; using console dispatcher.');
   return consoleDispatcher();
 }
 

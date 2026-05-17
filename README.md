@@ -363,6 +363,34 @@ The `LEDGERLY_QBO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your rea
 
 **Idempotency caveat:** QBO does not enforce `DocNumber` uniqueness by default. A scheduler retry after a partial failure could create duplicate journal entries. Mitigations: use QBO's idempotency support (currently in beta), or query for an existing entry by `DocNumber` before posting.
 
+#### Xero API dispatcher
+
+Like the QBO dispatcher, but for Xero's `ManualJournals` endpoint. Useful for indie SaaS founders outside the US (UK, AU, NZ — Xero's strongholds).
+
+Configure via env vars alongside the scheduler:
+
+```bash
+LEDGERLY_DB_PATH=./ledger.db \
+LEDGERLY_SCHEDULER_ENABLED=true \
+LEDGERLY_XERO_ACCESS_TOKEN=eyJhbGciOiJSUzI1NiI... \
+LEDGERLY_XERO_TENANT_ID=70784a6d-c1c5-... \
+LEDGERLY_XERO_ACCOUNT_MAP_JSON='{"1010":{"accountCode":"611"}, ...}' \
+LEDGERLY_XERO_STATUS=DRAFT \
+pnpm start
+```
+
+All three of `LEDGERLY_XERO_ACCESS_TOKEN`, `LEDGERLY_XERO_TENANT_ID`, and `LEDGERLY_XERO_ACCOUNT_MAP_JSON` must be set to enable the Xero dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_XERO_API_BASE` is optional and defaults to `https://api.xero.com` — Xero has no separate sandbox base (the demo company is a flag on the user's tenant).
+
+The `LEDGERLY_XERO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your Xero account codes. All 12 codes must be present.
+
+`LEDGERLY_XERO_STATUS` is `DRAFT` (default — entries land as drafts for user review) or `POSTED` (entries go straight into the ledger). DRAFT is safer for initial integration; switch to POSTED once you trust the mapping.
+
+**OAuth is not handled by ledgerly.** Obtain access tokens via Xero's OAuth 2.0 authorization code flow out-of-band, store refresh tokens per-tenant, and refresh access tokens before they expire (Xero tokens expire in 30 minutes). For a real SaaS deployment, you'll need a separate OAuth service; that's a future iteration.
+
+**Idempotency:** Xero supports a native `Idempotency-Key` header which ledgerly populates with `scheduled_entry.id`. A scheduler retry after a partial failure is safe — Xero will deduplicate.
+
+**Precedence:** if both QBO and Xero env vars are configured, the QBO dispatcher wins (CLI selects the first match). For multi-target deployments, run two ledgerly processes — one per target — each with its own env config.
+
 #### Production caveats
 
 The persistence layer is intentionally minimal — it solves "don't lose events on restart" and "give me a queryable audit log of every journal entry" without dragging in a separate database server. Things it does *not* do:
