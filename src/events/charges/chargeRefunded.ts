@@ -36,6 +36,20 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     );
   }
 
+  // Detect tax info from the expanded invoice, if present. When the caller has
+  // expanded `charge.invoice` and the invoice had Stripe Tax applied, refunds
+  // must drain 2000 Sales Tax Payable proportionally — otherwise the books
+  // accumulate phantom tax liability on refunded sales. If the invoice is not
+  // expanded (string ID), absent, or has no tax, fall back to the 2-line shape.
+  let taxRatio = 0;
+  const invoice = charge.invoice;
+  if (invoice && typeof invoice === 'object' && charge.amount > 0) {
+    const invoiceTax = invoice.tax;
+    if (invoiceTax !== null && invoiceTax > 0) {
+      taxRatio = invoiceTax / charge.amount;
+    }
+  }
+
   const entries: JournalEntry[] = targetRefunds.map((refund) => {
     const bt = requireExpanded<Stripe.BalanceTransaction>(
       refund.balance_transaction,
@@ -52,11 +66,34 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
       );
     }
 
-    const amount = cents(refund.amount);
-    const lines: ReadonlyArray<JournalLine> = sortLines([
-      { accountCode: '4900', side: 'debit', amount, memo: 'Refund issued' },
-      { accountCode: '1010', side: 'credit', amount, memo: 'Refund deducted from Stripe balance' },
-    ]);
+    const total = cents(refund.amount);
+    const taxPortion = cents(Math.round(refund.amount * taxRatio));
+    const revenuePortion = cents(refund.amount - taxPortion);
+
+    const draft: JournalLine[] = [];
+    if (revenuePortion > 0) {
+      draft.push({
+        accountCode: '4900',
+        side: 'debit',
+        amount: revenuePortion,
+        memo: 'Refund issued',
+      });
+    }
+    if (taxPortion > 0) {
+      draft.push({
+        accountCode: '2000',
+        side: 'debit',
+        amount: taxPortion,
+        memo: 'Sales tax portion refunded',
+      });
+    }
+    draft.push({
+      accountCode: '1010',
+      side: 'credit',
+      amount: total,
+      memo: 'Refund deducted from Stripe balance',
+    });
+    const lines: ReadonlyArray<JournalLine> = sortLines(draft);
 
     return {
       date: epochToUtcDate(refund.created),

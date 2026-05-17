@@ -127,6 +127,20 @@ app.post('/webhook', async (req, res) => {
 });
 ```
 
+**Tax-aware refunds:** to correctly book refunds of Stripe Tax-bearing charges (drains 2000 Sales Tax Payable proportionally instead of leaving phantom tax liability), expand the charge's invoice when handling `charge.refunded`:
+
+```typescript
+if (event.type === 'charge.refunded') {
+  const chargeId = (event.data.object as Stripe.Charge).id;
+  const expanded = await stripe.charges.retrieve(chargeId, {
+    expand: ['balance_transaction', 'refunds.data.balance_transaction', 'invoice'],
+  });
+  event.data.object = expanded;
+}
+```
+
+If `charge.invoice` is not expanded (a string ID or null), refunds are booked as a flat Dr 4900 / Cr 1010 — no tax split. This matches the engine's prior behavior for backwards compatibility. The built-in `expandEvent` helper in `src/server/expand.ts` already includes `'invoice'` in its `charge.refunded` expansion.
+
 ## Supported events
 
 | Event | Variants covered |

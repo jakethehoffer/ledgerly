@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-17",
+      "currency": "USD",
+      "memo": "Stripe refund re_test_refund_tax_001 for charge ch_test_refund_tax_001",
+      "sourceEventId": "evt_test_refund_tax_001",
+      "sourceEventType": "charge.refunded",
+      "sourceObjectId": "re_test_refund_tax_001",
+      "lines": [
+        { "accountCode": "2000", "side": "debit", "amount": 500, "memo": "Sales tax portion refunded" },
+        { "accountCode": "4900", "side": "debit", "amount": 5000, "memo": "Refund issued" },
+        { "accountCode": "1010", "side": "credit", "amount": 5500, "memo": "Refund deducted from Stripe balance" }
+      ]
+    }
+  ],
+  "schedule": null
+}

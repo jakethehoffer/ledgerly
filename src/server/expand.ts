@@ -14,11 +14,20 @@ import type Stripe from 'stripe';
  */
 export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<Stripe.Event> {
   switch (event.type) {
-    case 'charge.succeeded':
-    case 'charge.refunded': {
+    case 'charge.succeeded': {
       const charge = event.data.object;
       const expanded = await stripe.charges.retrieve(charge.id, {
         expand: ['balance_transaction', 'refunds.data.balance_transaction'],
+      });
+      return cloneEventWithObject(event, expanded);
+    }
+
+    case 'charge.refunded': {
+      // `invoice` is expanded so the engine can drain 2000 Sales Tax Payable
+      // proportionally for refunds of Stripe Tax-bearing charges.
+      const charge = event.data.object;
+      const expanded = await stripe.charges.retrieve(charge.id, {
+        expand: ['balance_transaction', 'refunds.data.balance_transaction', 'invoice'],
       });
       return cloneEventWithObject(event, expanded);
     }

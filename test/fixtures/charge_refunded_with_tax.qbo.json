@@ -1,0 +1,34 @@
+{
+  "TxnDate": "2025-01-17",
+  "DocNumber": "t_test_refund_tax_001",
+  "PrivateNote": "Stripe refund re_test_refund_tax_001 for charge ch_test_refund_tax_001",
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 5.00,
+      "Description": "Sales tax portion refunded",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-2000", "name": "QBO 2000" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 50.00,
+      "Description": "Refund issued",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-4900", "name": "QBO 4900" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 55.00,
+      "Description": "Refund deducted from Stripe balance",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-1010", "name": "QBO 1010" }
+      }
+    }
+  ]
+}

@@ -50,7 +50,7 @@ describe('expandEvent', () => {
     expect(out.type).toBe(event.type);
   });
 
-  it('expands charge.refunded with the same expand list', async () => {
+  it('expands charge.refunded with balance_transaction, refunds, and invoice', async () => {
     const expanded = { id: 'ch_2' };
     const mock = makeMockStripe({ charge: expanded });
     const event = makeEvent('charge.refunded', { id: 'ch_2' });
@@ -58,7 +58,7 @@ describe('expandEvent', () => {
     await expandEvent(mock as unknown as Stripe, event);
 
     expect(mock.charges.retrieve).toHaveBeenCalledWith('ch_2', {
-      expand: ['balance_transaction', 'refunds.data.balance_transaction'],
+      expand: ['balance_transaction', 'refunds.data.balance_transaction', 'invoice'],
     });
   });
 

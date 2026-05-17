@@ -22,6 +22,7 @@ const FIXTURES = [
   'charge_refunded_multi_first',
   'charge_refunded_multi_second',
   'charge_refunded_partial',
+  'charge_refunded_with_tax',
   'dispute_closed_lost',
   'dispute_funds_reinstated_won',
   'dispute_funds_withdrawn_standard',

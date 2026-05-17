@@ -1,0 +1,105 @@
+{
+  "id": "evt_test_refund_tax_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1737115200,
+  "type": "charge.refunded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "ch_test_refund_tax_001",
+      "object": "charge",
+      "amount": 11000,
+      "amount_captured": 11000,
+      "amount_refunded": 5500,
+      "balance_transaction": "txn_test_refund_tax_001",
+      "captured": true,
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_refund_tax_001",
+      "invoice": {
+        "id": "in_test_refund_tax_001",
+        "object": "invoice",
+        "amount_due": 11000,
+        "amount_paid": 11000,
+        "amount_remaining": 0,
+        "billing_reason": "subscription_cycle",
+        "created": 1736942400,
+        "currency": "usd",
+        "customer": "cus_test_refund_tax_001",
+        "lines": {
+          "object": "list",
+          "data": [
+            {
+              "id": "il_test_refund_tax_001",
+              "object": "line_item",
+              "amount": 10000,
+              "currency": "usd",
+              "period": { "start": 1736942400, "end": 1739620800 },
+              "proration": false,
+              "subscription": "sub_test_refund_tax_001",
+              "type": "subscription"
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/invoices/in_test_refund_tax_001/lines"
+        },
+        "paid": true,
+        "status": "paid",
+        "subscription": "sub_test_refund_tax_001",
+        "tax": 1000,
+        "total": 11000,
+        "total_excluding_tax": 10000,
+        "total_tax_amounts": [
+          {
+            "amount": 1000,
+            "inclusive": false,
+            "tax_rate": "txr_test_refund_tax_001",
+            "taxability_reason": "standard_rated",
+            "taxable_amount": 10000
+          }
+        ]
+      },
+      "metadata": {},
+      "paid": true,
+      "refunded": false,
+      "status": "succeeded",
+      "refunds": {
+        "object": "list",
+        "data": [
+          {
+            "id": "re_test_refund_tax_001",
+            "object": "refund",
+            "amount": 5500,
+            "balance_transaction": {
+              "id": "txn_test_refund_tax_bt_001",
+              "object": "balance_transaction",
+              "amount": -5500,
+              "available_on": 1737331200,
+              "created": 1737115200,
+              "currency": "usd",
+              "exchange_rate": null,
+              "fee": 0,
+              "fee_details": [],
+              "net": -5500,
+              "reporting_category": "refund",
+              "status": "available",
+              "type": "refund"
+            },
+            "charge": "ch_test_refund_tax_001",
+            "created": 1737115200,
+            "currency": "usd",
+            "reason": "requested_by_customer",
+            "status": "succeeded"
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/charges/ch_test_refund_tax_001/refunds"
+      }
+    }
+  }
+}
