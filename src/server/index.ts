@@ -5,6 +5,8 @@ import { UnhandledEventError } from '../errors.js';
 import { expandEvent } from './expand.js';
 import { consoleLogger } from './logger.js';
 import type { Logger } from './logger.js';
+import { inMemoryMetrics } from './metrics.js';
+import type { Metrics } from './metrics.js';
 import { inMemoryStorage } from './storage/inMemory.js';
 import type { Deduplicator, Storage } from './storage/types.js';
 
@@ -26,6 +28,8 @@ export interface ServerConfig {
   dedup?: Deduplicator;
   /** Optional logger. Defaults to {@link consoleLogger}. */
   log?: Logger;
+  /** Optional metrics backend. Defaults to {@link inMemoryMetrics}. */
+  metrics?: Metrics;
 }
 
 export interface ServerInstance {
@@ -33,6 +37,8 @@ export interface ServerInstance {
   storage: Storage;
   /** Deprecated alias for `storage.dedup`. Kept for callers that still read it. */
   dedup: Deduplicator;
+  /** The metrics instance the receiver writes to. Exposed for advanced callers and tests. */
+  metrics: Metrics;
 }
 
 /**
@@ -70,6 +76,7 @@ function resolveStorage(config: ServerConfig): Storage {
 export function createServer(config: ServerConfig): ServerInstance {
   const storage = resolveStorage(config);
   const log: Logger = config.log ?? consoleLogger();
+  const metrics: Metrics = config.metrics ?? inMemoryMetrics();
   const app = express();
 
   app.get('/health', (_req: Request, res: Response) => {
@@ -82,9 +89,22 @@ export function createServer(config: ServerConfig): ServerInstance {
     });
   });
 
+  app.get('/metrics', (_req: Request, res: Response) => {
+    // Refresh on-demand gauges from storage on every scrape so they reflect
+    // the current state rather than the last time a counter happened to fire.
+    metrics.setGauge('dedup_size', storage.dedup.size());
+    metrics.setGauge('journal_entries', storage.entries.countImmediate());
+    metrics.setGauge('scheduled_pending', storage.entries.countPendingScheduled());
+    metrics.setGauge('scheduled_failed', storage.entries.countFailedScheduled());
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+    res.status(200).send(metrics.render());
+  });
+
   async function handleWebhook(req: Request, res: Response): Promise<void> {
+    metrics.inc('webhook_received');
     const sig = req.headers['stripe-signature'];
     if (typeof sig !== 'string') {
+      metrics.inc('webhook_signature_error');
       res.status(400).json({ error: 'Missing Stripe-Signature header' });
       return;
     }
@@ -97,6 +117,7 @@ export function createServer(config: ServerConfig): ServerInstance {
         config.webhookSecret,
       );
     } catch (err) {
+      metrics.inc('webhook_signature_error');
       log.error('Signature verification failed', { err });
       res.status(400).json({ error: 'Signature verification failed' });
       return;
@@ -107,6 +128,7 @@ export function createServer(config: ServerConfig): ServerInstance {
     // bundled with persistence, so a crash mid-flight doesn't poison the
     // dedup state.
     if (storage.dedup.has(event.id)) {
+      metrics.inc('webhook_duplicate');
       log.info('Duplicate event ignored', { eventId: event.id });
       res.status(200).json({ duplicate: true });
       return;
@@ -116,6 +138,7 @@ export function createServer(config: ServerConfig): ServerInstance {
     try {
       expanded = await expandEvent(config.stripe, event);
     } catch (err) {
+      metrics.inc('webhook_expansion_error');
       log.error('Expansion failed', { eventId: event.id, err });
       res.status(500).json({ error: 'Expansion failed' });
       return;
@@ -127,10 +150,12 @@ export function createServer(config: ServerConfig): ServerInstance {
         // Atomic per backend: persist all entries + record dedup, or roll back.
         storage.persistMapResult(event.id, result);
       } catch (err) {
+        metrics.inc('webhook_error', { type: event.type });
         log.error('Persistence failed', { eventId: event.id, err });
         res.status(500).json({ error: 'Persistence failed' });
         return;
       }
+      metrics.inc('webhook_processed', { type: event.type });
       log.info('Processed event', {
         eventId: event.id,
         eventType: event.type,
@@ -155,6 +180,7 @@ export function createServer(config: ServerConfig): ServerInstance {
             err: recordErr,
           });
         }
+        metrics.inc('webhook_unhandled', { type: event.type });
         log.info('Unhandled event type; acknowledging', {
           eventId: event.id,
           eventType: event.type,
@@ -162,6 +188,7 @@ export function createServer(config: ServerConfig): ServerInstance {
         res.status(200).json({ ok: true, unhandled: true });
         return;
       }
+      metrics.inc('webhook_error', { type: event.type });
       log.error('mapEvent threw', { eventId: event.id, err });
       res.status(500).json({ error: 'Processing failed' });
     }
@@ -175,5 +202,5 @@ export function createServer(config: ServerConfig): ServerInstance {
     },
   );
 
-  return { app, storage, dedup: storage.dedup };
+  return { app, storage, dedup: storage.dedup, metrics };
 }

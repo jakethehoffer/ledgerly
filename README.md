@@ -236,6 +236,7 @@ Endpoints:
 
 - `POST /webhook` — Stripe event endpoint. Verifies the signature, dedupes by `event.id`, expands nested fields via the Stripe API, then calls `mapEvent`. Returns `200` on success, `200 { duplicate: true }` for redeliveries, `200 { unhandled: true }` for events outside the supported list, `400` for missing/invalid signatures, and `500` for expansion or processing errors.
 - `GET /health` — Liveness probe; returns `{ ok: true, dedupSize }`.
+- `GET /metrics` — Prometheus text exposition format (see [Metrics](#metrics) below).
 
 To embed the receiver in a larger Express app, import `createServer` directly:
 
@@ -454,6 +455,66 @@ const { app } = createServer({ stripe, webhookSecret, storage, log });
 ```
 
 For tests, ledgerly also exports `silentLogger()` — a no-op `Logger` that discards everything.
+
+### Metrics
+
+The receiver exposes a `GET /metrics` endpoint in Prometheus text exposition format (v0.0.4). The default backend is an in-memory implementation with zero runtime dependencies — point a Prometheus scraper at the receiver and you get counters and gauges for free.
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: ledgerly
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['localhost:3000']
+```
+
+Exposed metrics:
+
+**Counters** (monotonically increasing; `_total` suffix per Prometheus convention):
+
+- `ledgerly_webhook_received_total` — every inbound POST `/webhook`
+- `ledgerly_webhook_duplicate_total` — events suppressed by the deduplicator
+- `ledgerly_webhook_signature_error_total` — missing or invalid `Stripe-Signature` header
+- `ledgerly_webhook_expansion_error_total` — Stripe API expansion failed
+- `ledgerly_webhook_processed_total{type="<event.type>"}` — successful map + persist, partitioned by event type
+- `ledgerly_webhook_unhandled_total{type="<event.type>"}` — event type outside the supported list
+- `ledgerly_webhook_error_total{type="<event.type>"}` — `mapEvent` or persistence threw
+- `ledgerly_scheduler_ticks_total` — scheduler tick invocations
+- `ledgerly_scheduler_attempts_total` — dispatcher invocations across all ticks
+- `ledgerly_scheduler_posted_total` — successful dispatches
+- `ledgerly_scheduler_failed_total` — failed dispatches (sums retries and dead-letters)
+- `ledgerly_scheduler_deadlettered_total` — entries transitioned to `'failed'` on this tick
+
+**Gauges** (snapshot values; refreshed from storage on every scrape):
+
+- `ledgerly_dedup_size` — current number of recorded event IDs
+- `ledgerly_journal_entries` — count of persisted immediate journal entries
+- `ledgerly_scheduled_pending` — pending future-dated entries
+- `ledgerly_scheduled_failed` — dead-lettered scheduled entries
+
+Override the namespace prefix (`ledgerly_`) by setting `LEDGERLY_METRICS_NAMESPACE`. Example: `LEDGERLY_METRICS_NAMESPACE=myapp` exposes `myapp_webhook_received_total`, etc.
+
+**Production caveats:**
+
+- **In-memory state is per-process.** Multi-process or horizontally scaled deployments will see each instance reporting its own counters. Either scrape each instance individually (Prometheus' `static_configs` supports this trivially) or implement the `Metrics` interface against a shared backend (statsd, push gateway).
+- **No authentication on `/metrics`.** Anyone who can reach the endpoint can read the metrics. Use network-level access control (only your scraper can reach the port) or a reverse proxy with basic auth.
+- **Bring your own backend.** To use prom-client, OpenTelemetry, or any other library, implement the `Metrics` interface against it and pass to `createServer({ ..., metrics })`. The receiver only calls `inc(...)` / `setGauge(...)` / `render()`, so swapping the implementation is a few lines:
+
+  ```typescript
+  import client from 'prom-client';
+  import type { Metrics } from 'ledgerly/dist/server/metrics.js';
+
+  const registry = new client.Registry();
+  const counters = new Map<string, client.Counter<string>>();
+  const gauges = new Map<string, client.Gauge<string>>();
+
+  const metrics: Metrics = {
+    inc(name, labels, value = 1) { /* lookup or create counter, .inc(labels, value) */ },
+    setGauge(name, value, labels) { /* lookup or create gauge, .set(labels, value) */ },
+    render() { return registry.metrics(); },
+  };
+  ```
 
 ## Scripts
 

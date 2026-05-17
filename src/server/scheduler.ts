@@ -1,5 +1,7 @@
 import { consoleLogger } from './logger.js';
 import type { Logger } from './logger.js';
+import { inMemoryMetrics } from './metrics.js';
+import type { Metrics } from './metrics.js';
 import type { SavedScheduledEntry, Storage } from './storage/types.js';
 
 /**
@@ -27,6 +29,8 @@ export interface SchedulerConfig {
   readonly onError?: (entry: SavedScheduledEntry, error: unknown) => void;
   /** Optional logger. Defaults to {@link consoleLogger}. */
   readonly log?: Logger;
+  /** Optional metrics backend. Defaults to {@link inMemoryMetrics}. */
+  readonly metrics?: Metrics;
   /** Function returning today's date as ISO YYYY-MM-DD. Defaults to UTC today. Override for tests. */
   readonly today?: () => string;
   /**
@@ -119,6 +123,7 @@ function truncate(s: string, maxLen: number): string {
 export function createScheduler(config: SchedulerConfig): Scheduler {
   const interval = config.intervalMs ?? 60_000;
   const log: Logger = config.log ?? consoleLogger();
+  const metrics: Metrics = config.metrics ?? inMemoryMetrics();
   const onError =
     config.onError ??
     ((entry, err): void => {
@@ -187,6 +192,11 @@ export function createScheduler(config: SchedulerConfig): Scheduler {
     } finally {
       isTicking = false;
     }
+    metrics.inc('scheduler_ticks');
+    metrics.inc('scheduler_attempts', {}, attempted);
+    metrics.inc('scheduler_posted', {}, posted);
+    metrics.inc('scheduler_failed', {}, failed);
+    metrics.inc('scheduler_deadlettered', {}, deadLettered);
     return { attempted, posted, failed, deadLettered };
   }
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createServer } from '../../src/server/index.js';
 import { silentLogger } from '../../src/server/logger.js';
+import { inMemoryMetrics } from '../../src/server/metrics.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -182,6 +183,103 @@ describe('createServer', () => {
       expect(found[0]?.entry.sourceEventId).toBe(parsed.id);
     });
 
+    it('increments webhook_received + webhook_processed counters on success', async () => {
+      const metrics = inMemoryMetrics();
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+        metrics,
+      });
+      const { raw } = loadFixture('payout_paid_standard');
+      const sig = signPayload(raw);
+      const res = await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig)
+        .send(raw);
+      expect(res.status).toBe(200);
+      const out = metrics.render();
+      expect(out).toContain('ledgerly_webhook_received_total 1');
+      expect(out).toContain('ledgerly_webhook_processed_total{type="payout.paid"} 1');
+    });
+
+    it('increments webhook_duplicate counter on a duplicate POST', async () => {
+      const metrics = inMemoryMetrics();
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+        metrics,
+      });
+      const { raw } = loadFixture('payout_paid_standard');
+      const sig1 = signPayload(raw);
+      await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig1)
+        .send(raw);
+      const sig2 = signPayload(raw);
+      const dup = await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig2)
+        .send(raw);
+      expect(dup.status).toBe(200);
+      const out = metrics.render();
+      expect(out).toContain('ledgerly_webhook_received_total 2');
+      expect(out).toContain('ledgerly_webhook_duplicate_total 1');
+    });
+
+    it('increments webhook_signature_error on a bad signature', async () => {
+      const metrics = inMemoryMetrics();
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+        metrics,
+      });
+      const { raw } = loadFixture('payout_paid_standard');
+      await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', 't=1700000000,v1=deadbeef')
+        .send(raw);
+      expect(metrics.render()).toContain('ledgerly_webhook_signature_error_total 1');
+    });
+
+    it('increments webhook_unhandled for unhandled event types', async () => {
+      const metrics = inMemoryMetrics();
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+        metrics,
+      });
+      const unknownEvent = {
+        id: 'evt_test_unknown_metrics_001',
+        object: 'event',
+        api_version: '2024-12-18.acacia',
+        created: 1_700_000_000,
+        type: 'payment_intent.succeeded',
+        livemode: false,
+        pending_webhooks: 1,
+        request: { id: null, idempotency_key: null },
+        data: { object: { id: 'pi_test' } },
+      };
+      const raw = JSON.stringify(unknownEvent);
+      const sig = signPayload(raw);
+      const res = await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig)
+        .send(raw);
+      expect(res.status).toBe(200);
+      expect(metrics.render()).toContain(
+        'ledgerly_webhook_unhandled_total{type="payment_intent.succeeded"} 1',
+      );
+    });
+
     it('returns 500 when expansion throws', async () => {
       // Inject a stripe stub that uses the real Webhooks instance for signing
       // but a charges.retrieve that throws. This avoids real network I/O while
@@ -206,6 +304,115 @@ describe('createServer', () => {
         .send(raw);
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'Expansion failed' });
+    });
+
+    it('increments webhook_expansion_error counter when expansion throws', async () => {
+      const stubStripe = {
+        webhooks: stripe.webhooks,
+        charges: {
+          retrieve: () => Promise.reject(new Error('boom')),
+        },
+      } as unknown as Stripe;
+      const metrics = inMemoryMetrics();
+      const { app } = createServer({
+        stripe: stubStripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+        metrics,
+      });
+      const { raw } = loadFixture('charge_succeeded_standard');
+      const sig = signPayload(raw);
+      await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig)
+        .send(raw);
+      expect(metrics.render()).toContain('ledgerly_webhook_expansion_error_total 1');
+    });
+  });
+
+  describe('GET /metrics', () => {
+    it('returns 200 with text/plain content type', async () => {
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+      });
+      const res = await request(app).get('/metrics');
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/^text\/plain/);
+    });
+
+    it('includes at least one # TYPE line after any metric is recorded', async () => {
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+      });
+      // Hit /metrics once: refreshes the gauges so we have something to render.
+      const res = await request(app).get('/metrics');
+      expect(res.text).toContain('# TYPE');
+    });
+
+    it('reflects webhook counters after a successful POST', async () => {
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+      });
+      const { raw } = loadFixture('payout_paid_standard');
+      const sig = signPayload(raw);
+      await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig)
+        .send(raw);
+      const res = await request(app).get('/metrics');
+      expect(res.text).toContain('ledgerly_webhook_received_total 1');
+      expect(res.text).toContain(
+        'ledgerly_webhook_processed_total{type="payout.paid"} 1',
+      );
+    });
+
+    it('reflects webhook_duplicate counter after a duplicate POST', async () => {
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+      });
+      const { raw } = loadFixture('payout_paid_standard');
+      const sig1 = signPayload(raw);
+      await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig1)
+        .send(raw);
+      const sig2 = signPayload(raw);
+      await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig2)
+        .send(raw);
+      const res = await request(app).get('/metrics');
+      expect(res.text).toContain('ledgerly_webhook_duplicate_total 1');
+    });
+
+    it('refreshes storage-backed gauges on every scrape', async () => {
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+      });
+      const { raw } = loadFixture('payout_paid_standard');
+      const sig = signPayload(raw);
+      await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig)
+        .send(raw);
+      const res = await request(app).get('/metrics');
+      expect(res.text).toContain('ledgerly_dedup_size 1');
+      expect(res.text).toContain('ledgerly_journal_entries ');
     });
   });
 });

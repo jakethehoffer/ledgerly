@@ -4,6 +4,7 @@ import type { JournalEntry } from '../../src/journal.js';
 import { createScheduler, defaultBackoffMs } from '../../src/server/scheduler.js';
 import type { Dispatcher } from '../../src/server/scheduler.js';
 import { consoleDispatcher } from '../../src/server/dispatchers/console.js';
+import { inMemoryMetrics } from '../../src/server/metrics.js';
 import { inMemoryStorage } from '../../src/server/storage/inMemory.js';
 import type { Storage } from '../../src/server/storage/types.js';
 import type { SavedScheduledEntry } from '../../src/server/storage/types.js';
@@ -636,6 +637,83 @@ describe('createScheduler', () => {
       const r = await scheduler.tick();
       expect(r).toEqual({ attempted: 1, posted: 0, failed: 1, deadLettered: 1 });
       expect(storage.entries.countFailedScheduled()).toBe(1);
+    });
+  });
+
+  describe('metrics instrumentation', () => {
+    it('records ticks, attempts, and posted counters after a successful tick', async () => {
+      const storage = inMemoryStorage();
+      seedScheduled(storage, '2026-05-10', 'sub_m1', 'evt_m1');
+
+      const metrics = inMemoryMetrics();
+      const scheduler = createScheduler({
+        storage,
+        dispatcher: () => undefined,
+        today: () => '2026-05-16',
+        metrics,
+      });
+
+      await scheduler.tick();
+
+      const out = metrics.render();
+      expect(out).toContain('ledgerly_scheduler_ticks_total 1');
+      expect(out).toContain('ledgerly_scheduler_attempts_total 1');
+      expect(out).toContain('ledgerly_scheduler_posted_total 1');
+      expect(out).toContain('ledgerly_scheduler_failed_total 0');
+      expect(out).toContain('ledgerly_scheduler_deadlettered_total 0');
+    });
+
+    it('records failed and deadlettered counters when dispatching fails to maxAttempts', async () => {
+      const storage = inMemoryStorage();
+      seedScheduled(storage, '2026-05-10', 'sub_m2', 'evt_m2');
+
+      const metrics = inMemoryMetrics();
+      const scheduler = createScheduler({
+        storage,
+        dispatcher: () => {
+          throw new Error('boom');
+        },
+        today: () => '2026-05-16',
+        now: () => 1_000,
+        maxAttempts: 1,
+        backoffMs: () => 0,
+        metrics,
+        onError: () => undefined,
+      });
+
+      await scheduler.tick();
+
+      const out = metrics.render();
+      expect(out).toContain('ledgerly_scheduler_ticks_total 1');
+      expect(out).toContain('ledgerly_scheduler_attempts_total 1');
+      expect(out).toContain('ledgerly_scheduler_posted_total 0');
+      expect(out).toContain('ledgerly_scheduler_failed_total 1');
+      expect(out).toContain('ledgerly_scheduler_deadlettered_total 1');
+    });
+
+    it('records failed=1 and deadlettered=0 when failure stays within retry budget', async () => {
+      const storage = inMemoryStorage();
+      seedScheduled(storage, '2026-05-10', 'sub_m3', 'evt_m3');
+
+      const metrics = inMemoryMetrics();
+      const scheduler = createScheduler({
+        storage,
+        dispatcher: () => {
+          throw new Error('boom');
+        },
+        today: () => '2026-05-16',
+        now: () => 1_000,
+        maxAttempts: 5,
+        backoffMs: () => 0,
+        metrics,
+        onError: () => undefined,
+      });
+
+      await scheduler.tick();
+
+      const out = metrics.render();
+      expect(out).toContain('ledgerly_scheduler_failed_total 1');
+      expect(out).toContain('ledgerly_scheduler_deadlettered_total 0');
     });
   });
 });

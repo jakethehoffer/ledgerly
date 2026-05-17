@@ -9,6 +9,8 @@ import type { XeroDispatcherConfig } from './dispatchers/xero.js';
 import { createServer } from './index.js';
 import { consoleLogger } from './logger.js';
 import type { ConsoleLoggerOptions, Logger } from './logger.js';
+import { inMemoryMetrics } from './metrics.js';
+import type { InMemoryMetricsOptions, Metrics } from './metrics.js';
 import { createScheduler } from './scheduler.js';
 import type { Dispatcher, Scheduler } from './scheduler.js';
 import { inMemoryStorage } from './storage/inMemory.js';
@@ -42,6 +44,17 @@ function buildLogger(): Logger {
 
 const log = buildLogger();
 
+function buildMetrics(): Metrics {
+  const raw = process.env['LEDGERLY_METRICS_NAMESPACE'];
+  if (raw === undefined || raw === '') {
+    return inMemoryMetrics();
+  }
+  const opts: InMemoryMetricsOptions = { namespace: raw };
+  return inMemoryMetrics(opts);
+}
+
+const metrics = buildMetrics();
+
 const stripeSecretKey = process.env['STRIPE_SECRET_KEY'];
 const webhookSecret = process.env['STRIPE_WEBHOOK_SECRET'];
 
@@ -67,7 +80,7 @@ if (dbPath !== undefined && dbPath !== '') {
   );
 }
 
-const { app } = createServer({ stripe, webhookSecret, storage, log });
+const { app } = createServer({ stripe, webhookSecret, storage, log, metrics });
 
 // Optional background scheduler. Disabled by default; enable by setting
 // LEDGERLY_SCHEDULER_ENABLED=true. Polls `scheduled_entries` for rows due on or
@@ -210,6 +223,7 @@ if (scheduleEnabled) {
     dispatcher: buildDispatcher(),
     intervalMs: scheduleInterval,
     log,
+    metrics,
     ...(maxAttempts !== undefined ? { maxAttempts } : {}),
   });
   scheduler.start();
@@ -226,6 +240,7 @@ app.listen(port, () => {
   });
   log.info('POST /webhook  -> Stripe webhook endpoint');
   log.info('GET  /health   -> health + dedup size');
+  log.info('GET  /metrics  -> Prometheus metrics');
 });
 
 // Graceful shutdown: stop the scheduler so the polling loop unhooks cleanly.
