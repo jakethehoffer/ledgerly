@@ -320,6 +320,25 @@ sqlite3 /var/lib/ledgerly/ledgerly.db \
   'SELECT id, date, memo FROM journal_entries ORDER BY id DESC LIMIT 20'
 ```
 
+### Scheduler
+
+ledgerly's engine emits future-dated recognition entries for annual subscriptions (12 monthly Dr 2100 / Cr 4000 entries spread over the year). The receiver persists them to the `scheduled_entries` table as `pending`. The scheduler is a background loop that polls for due entries and dispatches them via a pluggable handler.
+
+Enable it by setting `LEDGERLY_SCHEDULER_ENABLED=true` alongside `LEDGERLY_DB_PATH`:
+
+```bash
+LEDGERLY_DB_PATH=./ledger.db \
+LEDGERLY_SCHEDULER_ENABLED=true \
+LEDGERLY_SCHEDULER_INTERVAL_MS=60000 \
+pnpm start
+```
+
+The default dispatcher logs each due entry to console. Production deployments will replace it with a QBO/Xero API pusher — see `src/server/dispatchers/` for the contract.
+
+**Contract:** dispatchers must be idempotent. The scheduler may invoke a dispatcher more than once for the same entry if a prior attempt failed after dispatch but before the database recorded the success.
+
+**Multi-process safety:** the scheduler assumes single-writer access to `scheduled_entries`. Running multiple scheduler instances against the same SQLite database may double-post entries. For multi-process deployments, use a separate locking mechanism or a queue-based dispatcher.
+
 #### Production caveats
 
 The persistence layer is intentionally minimal — it solves "don't lose events on restart" and "give me a queryable audit log of every journal entry" without dragging in a separate database server. Things it does *not* do:
