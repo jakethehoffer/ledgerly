@@ -727,6 +727,23 @@ mount point above. Add QBO/Xero env vars from `.env.example` to enable the
 corresponding dispatchers — without them, the scheduler falls back to a
 console dispatcher that logs entries instead of posting.
 
+### Verifying the image (build provenance)
+
+Every published image carries a [SLSA-style build provenance attestation](https://slsa.dev/spec/v1.0/provenance)
+signed via Sigstore by the release workflow's OIDC identity. The attestation
+binds the image's digest to the exact workflow run, commit SHA, and Dockerfile
+that produced it — no long-lived signing key, nothing to rotate.
+
+Verify before pulling into production:
+
+```bash
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.4 \
+  --repo jakethehoffer/ledgerly
+```
+
+A passing verification confirms the image was built by this repo's release
+workflow on a tagged commit, not by an attacker who compromised the registry.
+
 ### Cross-platform builds
 
 The published GHCR images cover both `linux/amd64` and `linux/arm64` natively

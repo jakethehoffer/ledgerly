@@ -17,6 +17,13 @@ on:
 permissions:
   contents: read
   packages: write
+  # Required for actions/attest-build-provenance to sign and publish a
+  # SLSA-style build attestation alongside the image. `id-token: write`
+  # lets the action mint an OIDC token Sigstore trusts; `attestations:
+  # write` lets it store the resulting attestation on the GitHub side
+  # so `gh attestation verify` can look it up.
+  id-token: write
+  attestations: write
 
 # Don't let two releases race over the :latest tag.
 concurrency:
@@ -79,6 +86,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push (multi-arch)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -96,3 +104,20 @@ jobs:
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.title=ledgerly
             org.opencontainers.image.description=Stripe-to-double-entry mapping engine for indie SaaS
+
+      # SLSA build provenance attestation. Binds the image digest to the
+      # workflow run that produced it (commit SHA, workflow file, inputs);
+      # Sigstore signs the binding via the workflow's OIDC identity, no
+      # long-lived signing key required. Consumers can verify with
+      # `gh attestation verify oci://ghcr.io/<owner>/ledgerly:<tag>
+      #   --repo ${{ github.repository }}`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          # Reuse the already-lowercased image path from the `tags` step —
+          # OCI references must be lowercase but `github.repository_owner`
+          # preserves the original case, which would break for mixed-case
+          # usernames.
+          subject-name: ${{ steps.tags.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
