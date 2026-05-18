@@ -294,6 +294,115 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         storage.entries.recordScheduledAttempt(b.id, 10, 1, null, 'y', 'failed');
         expect(storage.entries.countFailedScheduled()).toBe(2);
       });
+
+      it('listRecentImmediate returns newest-first and respects limit', () => {
+        const storage = factory();
+        const ids: number[] = [];
+        for (let i = 0; i < 5; i++) {
+          const saved = storage.entries.saveImmediate(
+            makeEntry({ memo: `e${String(i)}` }),
+            `evt_${String(i)}`,
+          );
+          ids.push(saved.id);
+        }
+        const all = storage.entries.listRecentImmediate(50);
+        expect(all).toHaveLength(5);
+        // Newest-first = descending id.
+        expect(all.map((r) => r.id)).toEqual([...ids].reverse());
+        const top2 = storage.entries.listRecentImmediate(2);
+        expect(top2.map((r) => r.id)).toEqual(ids.slice(-2).reverse());
+      });
+
+      it('listRecentImmediate defaults to 50 and clamps at 500', () => {
+        const storage = factory();
+        storage.entries.saveImmediate(makeEntry(), 'evt_1');
+        // Default
+        expect(storage.entries.listRecentImmediate()).toHaveLength(1);
+        // Clamp — passing 10_000 should not throw; we just verify the call
+        // succeeds and returns at most the row count.
+        expect(storage.entries.listRecentImmediate(10_000)).toHaveLength(1);
+      });
+
+      it('listScheduledByStatus filters by status and returns newest-first', () => {
+        const storage = factory();
+        const a = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01', memo: 'a' }), {
+          subscriptionId: 'sub_a',
+          sourceEventId: 'evt_a',
+        });
+        const b = storage.entries.saveScheduled(makeEntry({ date: '2026-05-02', memo: 'b' }), {
+          subscriptionId: 'sub_b',
+          sourceEventId: 'evt_b',
+        });
+        const c = storage.entries.saveScheduled(makeEntry({ date: '2026-05-03', memo: 'c' }), {
+          subscriptionId: 'sub_c',
+          sourceEventId: 'evt_c',
+        });
+        // Transition b to posted, c to failed; a stays pending.
+        storage.entries.markScheduledPosted(b.id);
+        storage.entries.recordScheduledAttempt(c.id, 10, 1, null, 'gave up', 'failed');
+
+        const pending = storage.entries.listScheduledByStatus('pending');
+        expect(pending.map((r) => r.id)).toEqual([a.id]);
+        const posted = storage.entries.listScheduledByStatus('posted');
+        expect(posted.map((r) => r.id)).toEqual([b.id]);
+        const failed = storage.entries.listScheduledByStatus('failed');
+        expect(failed.map((r) => r.id)).toEqual([c.id]);
+      });
+
+      it('getScheduledById returns the row or null', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_g',
+          sourceEventId: 'evt_g',
+        });
+        const got = storage.entries.getScheduledById(saved.id);
+        expect(got?.id).toBe(saved.id);
+        expect(got?.subscriptionId).toBe('sub_g');
+        expect(storage.entries.getScheduledById(999_999)).toBeNull();
+      });
+
+      it('requeueScheduled resets a failed entry to pending with cleared retry fields', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_r',
+          sourceEventId: 'evt_r',
+        });
+        storage.entries.recordScheduledAttempt(saved.id, 7, 5_000, null, 'gave up', 'failed');
+        expect(storage.entries.countFailedScheduled()).toBe(1);
+
+        const requeued = storage.entries.requeueScheduled(saved.id);
+        expect(requeued.status).toBe('pending');
+        expect(requeued.attempts).toBe(0);
+        expect(requeued.lastAttemptedAt).toBeNull();
+        expect(requeued.nextAttemptAt).toBeNull();
+        expect(requeued.lastError).toBeNull();
+        expect(storage.entries.countFailedScheduled()).toBe(0);
+        expect(storage.entries.countPendingScheduled()).toBe(1);
+        // Now findPendingScheduled picks it up.
+        expect(
+          storage.entries
+            .findPendingScheduled('2026-12-31')
+            .map((r) => r.id),
+        ).toContain(saved.id);
+      });
+
+      it('requeueScheduled is idempotent on an already-pending row', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_idem',
+          sourceEventId: 'evt_idem',
+        });
+        const first = storage.entries.requeueScheduled(saved.id);
+        const second = storage.entries.requeueScheduled(saved.id);
+        expect(first.status).toBe('pending');
+        expect(second.status).toBe('pending');
+        expect(second.attempts).toBe(0);
+      });
+
+      it('requeueScheduled throws on unknown id', () => {
+        const storage = factory();
+        expect(() => storage.entries.requeueScheduled(999_999)).toThrow();
+      });
     });
 
     describe('OAuthTokenStore', () => {

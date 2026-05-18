@@ -604,6 +604,40 @@ Override the namespace prefix (`ledgerly_`) by setting `LEDGERLY_METRICS_NAMESPA
   };
   ```
 
+### Admin endpoints
+
+When `LEDGERLY_ADMIN_TOKEN` is set (min 32 characters), the receiver mounts
+four operator-facing endpoints, all gated behind a constant-time bearer
+comparison. When the env var is unset, the routes are not mounted at all —
+unauthenticated requests get a generic 404 and the admin surface is invisible
+to scanners.
+
+- `GET /admin/entries?limit=N` — list immediate journal entries, newest-first.
+  `limit` defaults to 50, capped at 500.
+- `GET /admin/scheduled?status=pending|posted|cancelled|failed&limit=N` — list
+  scheduled entries (recognition rows + immediate-dispatch rows). `status`
+  defaults to `pending`.
+- `GET /admin/scheduled/:id` — fetch one scheduled entry with full retry
+  metadata (attempts, lastError, nextAttemptAt). 404 when not found.
+- `POST /admin/scheduled/:id/retry` — re-queue a dead-lettered entry. Resets
+  `status='pending'`, `attempts=0`, `lastAttemptedAt=null`, `nextAttemptAt=null`,
+  `lastError=null`. The next scheduler tick picks it up. Idempotent on
+  already-pending rows. 404 when the id does not exist.
+
+  ```bash
+  # See the most recent failed dispatches
+  curl -H "Authorization: Bearer $LEDGERLY_ADMIN_TOKEN" \
+       http://localhost:3000/admin/scheduled?status=failed
+
+  # Re-queue scheduled entry id=42 after fixing the underlying issue
+  # (e.g., revoked OAuth grant, missing account map entry)
+  curl -X POST -H "Authorization: Bearer $LEDGERLY_ADMIN_TOKEN" \
+       http://localhost:3000/admin/scheduled/42/retry
+  ```
+
+  Replaces the prior "edit SQLite by hand" recovery path documented under the
+  scheduler's dead-letter section.
+
 ## Scripts
 
 ```bash

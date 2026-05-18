@@ -135,6 +135,55 @@ export interface JournalEntryStore {
 
   /** Count of dead-lettered scheduled entries in `'failed'` state (for /health). */
   countFailedScheduled(): number;
+
+  /**
+   * List immediate journal entries newest-first (descending id), capped at
+   * `limit` rows. Implementations cap `limit` at 500 to prevent unbounded
+   * response sizes; values larger than 500 are silently clamped. `limit`
+   * defaults to 50.
+   *
+   * Used by the operational admin endpoint `GET /admin/entries` so an
+   * operator can inspect what the receiver has recently posted without
+   * dropping into the SQLite CLI.
+   */
+  listRecentImmediate(limit?: number): SavedImmediateEntry[];
+
+  /**
+   * List scheduled entries with the given `status`, newest-first (descending
+   * id), capped at `limit` rows. `limit` defaults to 50 and is clamped to a
+   * maximum of 500.
+   *
+   * Used by the operational admin endpoint `GET /admin/scheduled` so an
+   * operator can browse pending / failed / posted entries without dropping
+   * into the SQLite CLI.
+   */
+  listScheduledByStatus(
+    status: SavedScheduledEntry['status'],
+    limit?: number,
+  ): SavedScheduledEntry[];
+
+  /**
+   * Read a single scheduled entry by primary key. Returns `null` when no
+   * row matches — admin endpoints translate that into a 404. Used by the
+   * operational admin endpoint `GET /admin/scheduled/:id`.
+   */
+  getScheduledById(id: number): SavedScheduledEntry | null;
+
+  /**
+   * Re-queue a scheduled entry: resets `status='pending'`, `attempts=0`,
+   * `lastAttemptedAt=null`, `nextAttemptAt=null`, `lastError=null`. The next
+   * scheduler tick will pick it up immediately.
+   *
+   * Idempotent — calling on an already-pending row leaves it eligible-now
+   * with the same field reset semantics. Throws if the row does not exist.
+   * Returns the freshly-read row reflecting the new field values.
+   *
+   * Used by the operational admin endpoint `POST /admin/scheduled/:id/retry`
+   * so an operator can recover dead-lettered entries after fixing the
+   * underlying issue (a missing account map entry, a revoked OAuth grant)
+   * without dropping into raw SQL.
+   */
+  requeueScheduled(id: number): SavedScheduledEntry;
 }
 
 /**

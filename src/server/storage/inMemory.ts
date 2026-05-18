@@ -152,6 +152,49 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
     countFailedScheduled(): number {
       return scheduled.reduce((acc, row) => acc + (row.status === 'failed' ? 1 : 0), 0);
     },
+
+    listRecentImmediate(limit: number = 50): SavedImmediateEntry[] {
+      const cap = Math.min(Math.max(limit, 0), 500);
+      // Sort descending by id — append-only ids are monotonically increasing so
+      // this is equivalent to "newest first".
+      return [...immediate].sort((a, b) => b.id - a.id).slice(0, cap);
+    },
+
+    listScheduledByStatus(
+      status: SavedScheduledEntry['status'],
+      limit: number = 50,
+    ): SavedScheduledEntry[] {
+      const cap = Math.min(Math.max(limit, 0), 500);
+      return [...scheduled]
+        .filter((row) => row.status === status)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, cap);
+    },
+
+    getScheduledById(id: number): SavedScheduledEntry | null {
+      return scheduled.find((row) => row.id === id) ?? null;
+    },
+
+    requeueScheduled(id: number): SavedScheduledEntry {
+      const idx = scheduled.findIndex((row) => row.id === id);
+      if (idx === -1) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      const existing = scheduled[idx];
+      if (!existing) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      const updated: SavedScheduledEntry = {
+        ...existing,
+        status: 'pending',
+        attempts: 0,
+        lastAttemptedAt: null,
+        nextAttemptAt: null,
+        lastError: null,
+      };
+      scheduled[idx] = updated;
+      return updated;
+    },
   };
 }
 

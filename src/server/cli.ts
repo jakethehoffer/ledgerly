@@ -125,6 +125,18 @@ const qboOAuthClient = buildOAuthClient('QBO');
 const xeroOAuthClient = buildOAuthClient('XERO');
 const oauthStateSecret = process.env['LEDGERLY_OAUTH_STATE_SECRET'];
 
+const adminTokenRaw = process.env['LEDGERLY_ADMIN_TOKEN'];
+let adminToken: string | undefined;
+if (adminTokenRaw !== undefined && adminTokenRaw !== '') {
+  if (adminTokenRaw.length < 32) {
+    log.error(
+      'LEDGERLY_ADMIN_TOKEN is too short; must be at least 32 characters. Generate one with `openssl rand -base64 48`.',
+    );
+    process.exit(1);
+  }
+  adminToken = adminTokenRaw;
+}
+
 let oauthConfig: OAuthServerConfig | undefined;
 if (qboOAuthClient !== null || xeroOAuthClient !== null) {
   if (oauthStateSecret === undefined || oauthStateSecret === '') {
@@ -159,6 +171,7 @@ const { app } = createServer({
   log,
   metrics,
   ...(oauthConfig !== undefined ? { oauth: oauthConfig } : {}),
+  ...(adminToken !== undefined ? { adminToken } : {}),
 });
 
 // Optional background scheduler. Disabled by default; enable by setting
@@ -370,6 +383,9 @@ app.listen(port, () => {
   log.info('POST /webhook  -> Stripe webhook endpoint');
   log.info('GET  /health   -> health + dedup size');
   log.info('GET  /metrics  -> Prometheus metrics');
+  if (adminToken !== undefined) {
+    log.info('GET  /admin/*  -> operational admin endpoints (bearer-gated)');
+  }
 });
 
 // Graceful shutdown: stop the scheduler so the polling loop unhooks cleanly.

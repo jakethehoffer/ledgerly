@@ -162,6 +162,56 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
     `SELECT COUNT(*) AS count FROM scheduled_entries WHERE status = 'failed'`,
   );
 
+  // "Newest-first" uses id DESC. `scheduled_entries` has no `created_at`
+  // column in the v0/v1 schema; id is AUTOINCREMENT so descending id is
+  // equivalent to descending insertion order (good enough for the admin UI).
+  const listRecentImmediateStmt = db.prepare<[number], JournalEntryRow>(
+    `SELECT id, event_id, posted_at, payload
+       FROM journal_entries
+      ORDER BY id DESC
+      LIMIT ?`,
+  );
+
+  const listScheduledByStatusStmt = db.prepare<[string, number], ScheduledEntryRow>(
+    `SELECT id, event_id, subscription_id, status, payload,
+            attempts, last_attempted_at, next_attempt_at, last_error
+       FROM scheduled_entries
+      WHERE status = ?
+      ORDER BY id DESC
+      LIMIT ?`,
+  );
+
+  const selectScheduledByIdStmt = db.prepare<[number], ScheduledEntryRow>(
+    `SELECT id, event_id, subscription_id, status, payload,
+            attempts, last_attempted_at, next_attempt_at, last_error
+       FROM scheduled_entries
+      WHERE id = ?`,
+  );
+
+  const requeueStmt = db.prepare<[number]>(
+    `UPDATE scheduled_entries
+        SET status = 'pending',
+            attempts = 0,
+            last_attempted_at = NULL,
+            next_attempt_at = NULL,
+            last_error = NULL
+      WHERE id = ?`,
+  );
+
+  function scheduledRowToSaved(row: ScheduledEntryRow): SavedScheduledEntry {
+    return {
+      id: row.id,
+      eventId: row.event_id,
+      subscriptionId: row.subscription_id,
+      entry: JSON.parse(row.payload) as JournalEntry,
+      status: row.status,
+      attempts: row.attempts,
+      lastAttemptedAt: row.last_attempted_at,
+      nextAttemptAt: row.next_attempt_at,
+      lastError: row.last_error,
+    };
+  }
+
   function saveImmediateInternal(
     entry: JournalEntry,
     eventId: string,
@@ -229,17 +279,7 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
 
     findPendingScheduled(asOfDate: string, now: number = Date.now()): SavedScheduledEntry[] {
       const rows = selectPendingScheduled.all(asOfDate, now);
-      return rows.map((row) => ({
-        id: row.id,
-        eventId: row.event_id,
-        subscriptionId: row.subscription_id,
-        entry: JSON.parse(row.payload) as JournalEntry,
-        status: row.status,
-        attempts: row.attempts,
-        lastAttemptedAt: row.last_attempted_at,
-        nextAttemptAt: row.next_attempt_at,
-        lastError: row.last_error,
-      }));
+      return rows.map(scheduledRowToSaved);
     },
 
     markScheduledPosted(id: number): void {
@@ -280,6 +320,49 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
 
     countFailedScheduled(): number {
       return countFailedStmt.get()?.count ?? 0;
+    },
+
+    listRecentImmediate(limit: number = 50): SavedImmediateEntry[] {
+      // Clamp to [0, 500] so a hostile or buggy caller can't ask the DB for
+      // megabytes of payloads in one shot.
+      const cap = Math.min(Math.max(limit, 0), 500);
+      const rows = listRecentImmediateStmt.all(cap);
+      return rows.map((row) => ({
+        id: row.id,
+        eventId: row.event_id,
+        entry: JSON.parse(row.payload) as JournalEntry,
+        postedAt: row.posted_at,
+      }));
+    },
+
+    listScheduledByStatus(
+      status: SavedScheduledEntry['status'],
+      limit: number = 50,
+    ): SavedScheduledEntry[] {
+      const cap = Math.min(Math.max(limit, 0), 500);
+      const rows = listScheduledByStatusStmt.all(status, cap);
+      return rows.map(scheduledRowToSaved);
+    },
+
+    getScheduledById(id: number): SavedScheduledEntry | null {
+      const row = selectScheduledByIdStmt.get(id);
+      if (row === undefined) return null;
+      return scheduledRowToSaved(row);
+    },
+
+    requeueScheduled(id: number): SavedScheduledEntry {
+      const info = requeueStmt.run(id);
+      if (info.changes === 0) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      // Re-read so the returned row reflects exactly what is now on disk.
+      const row = selectScheduledByIdStmt.get(id);
+      if (row === undefined) {
+        // Vanishingly unlikely race (someone deleted the row between UPDATE
+        // and SELECT in the same connection) — surface it explicitly.
+        throw new Error(`No scheduled entry with id=${String(id)} after requeue`);
+      }
+      return scheduledRowToSaved(row);
     },
   };
 }

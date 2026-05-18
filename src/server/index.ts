@@ -2,6 +2,7 @@ import express, { type Express, type Request, type Response } from 'express';
 import type Stripe from 'stripe';
 import { mapEvent } from '../engine.js';
 import { UnhandledEventError } from '../errors.js';
+import { adminAuthMiddleware } from './admin.js';
 import { expandEvent } from './expand.js';
 import { consoleLogger } from './logger.js';
 import type { Logger } from './logger.js';
@@ -70,6 +71,17 @@ export interface ServerConfig {
    * and persists token sets via `storage.oauth`.
    */
   oauth?: OAuthServerConfig;
+  /**
+   * Optional admin bearer token. When set, the receiver mounts the
+   * operational `/admin/*` endpoints (list entries, retry dead-lettered
+   * dispatches) gated by this token. When unset, those routes are not
+   * mounted at all and requests fall through to Express's 404 handler —
+   * making the admin surface invisible to unauthenticated callers.
+   *
+   * The CLI enforces a minimum length of 32 characters at startup; the
+   * library itself does not, so test fixtures can pass shorter tokens.
+   */
+  adminToken?: string;
 }
 
 export interface ServerInstance {
@@ -425,6 +437,108 @@ export function createServer(config: ServerConfig): ServerInstance {
         }
       })();
     });
+  }
+
+  // ---- Admin endpoints --------------------------------------------------
+  //
+  // Operator-facing read endpoints + a manual retry hook for dead-lettered
+  // scheduled entries. Mounted only when `config.adminToken` is set. When
+  // unset, the routes don't exist — Express falls through to 404 — so an
+  // unauthenticated scanner can't even tell the admin surface is there.
+  //
+  //   GET  /admin/entries?limit=N
+  //   GET  /admin/scheduled?status=X&limit=N
+  //   GET  /admin/scheduled/:id
+  //   POST /admin/scheduled/:id/retry
+  //
+  // The auth middleware uses constant-time bearer comparison.
+  const adminToken = config.adminToken;
+  if (adminToken !== undefined && adminToken !== '') {
+    log.info('Admin endpoints enabled');
+    const requireAdmin = adminAuthMiddleware(adminToken);
+    const VALID_STATUSES: ReadonlyArray<'pending' | 'posted' | 'cancelled' | 'failed'> = [
+      'pending',
+      'posted',
+      'cancelled',
+      'failed',
+    ];
+
+    const parseLimit = (req: Request): number | { error: string } => {
+      const raw = req.query['limit'];
+      if (raw === undefined) return 50;
+      if (typeof raw !== 'string') return { error: 'limit must be a string' };
+      const n = Number.parseInt(raw, 10);
+      if (!Number.isFinite(n) || n < 0 || String(n) !== raw) {
+        return { error: 'limit must be a non-negative integer' };
+      }
+      return n;
+    };
+
+    app.get('/admin/entries', requireAdmin, (req: Request, res: Response): void => {
+      const limit = parseLimit(req);
+      if (typeof limit !== 'number') {
+        res.status(400).json(limit);
+        return;
+      }
+      const entries = storage.entries.listRecentImmediate(limit);
+      res.json({ entries });
+    });
+
+    app.get('/admin/scheduled', requireAdmin, (req: Request, res: Response): void => {
+      const statusRaw = req.query['status'];
+      const status: 'pending' | 'posted' | 'cancelled' | 'failed' =
+        statusRaw === undefined ? 'pending' : (statusRaw as 'pending');
+      if (!VALID_STATUSES.includes(status)) {
+        res.status(400).json({
+          error: `invalid status; expected one of: ${VALID_STATUSES.join(', ')}`,
+        });
+        return;
+      }
+      const limit = parseLimit(req);
+      if (typeof limit !== 'number') {
+        res.status(400).json(limit);
+        return;
+      }
+      const entries = storage.entries.listScheduledByStatus(status, limit);
+      res.json({ entries });
+    });
+
+    app.get('/admin/scheduled/:id', requireAdmin, (req: Request, res: Response): void => {
+      const idRaw = req.params['id'] ?? '';
+      const id = Number.parseInt(idRaw, 10);
+      if (!Number.isFinite(id) || id < 0 || String(id) !== idRaw) {
+        res.status(400).json({ error: 'id must be a non-negative integer' });
+        return;
+      }
+      const entry = storage.entries.getScheduledById(id);
+      if (entry === null) {
+        res.status(404).json({ error: 'not found' });
+        return;
+      }
+      res.json({ entry });
+    });
+
+    app.post(
+      '/admin/scheduled/:id/retry',
+      requireAdmin,
+      (req: Request, res: Response): void => {
+        const idRaw = req.params['id'] ?? '';
+        const id = Number.parseInt(idRaw, 10);
+        if (!Number.isFinite(id) || id < 0 || String(id) !== idRaw) {
+          res.status(400).json({ error: 'id must be a non-negative integer' });
+          return;
+        }
+        try {
+          const entry = storage.entries.requeueScheduled(id);
+          log.info('Admin requeued scheduled entry', { id });
+          res.json({ entry });
+        } catch {
+          res.status(404).json({ error: 'not found' });
+        }
+      },
+    );
+  } else {
+    log.info('Admin endpoints disabled (no adminToken configured)');
   }
 
   return { app, storage, dedup: storage.dedup, metrics };
