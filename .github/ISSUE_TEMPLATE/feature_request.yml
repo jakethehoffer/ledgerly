@@ -1,0 +1,72 @@
+name: Feature request
+description: New event type, exporter target, accounting refinement, observability hook, etc.
+title: '[feature] '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are welcome. Note that ledgerly's scope is "Stripe → balanced
+        double-entry journal entries → QBO/Xero" — proposals outside that core remit
+        (e.g. supporting non-Stripe payment processors) are likely to be declined or
+        deferred indefinitely. Out-of-scope ≠ bad idea; it just means it doesn't fit.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Start with the user-facing pain, not the proposed implementation. "I run a SaaS that
+        bills in installments and Stripe sends N webhook events per cycle; ledgerly currently
+        produces N journal entries which makes month-end reconciliation noisy."
+      placeholder: As an operator of …, I want to … so that ….
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        What should ledgerly do differently? If you have a sketch of the engine output, paste it.
+        For new event types, link the relevant Stripe API docs.
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        What other approaches did you weigh? "I could do this in my own post-processing on top
+        of ledgerly's output, but it'd duplicate the dedup/scheduler/dispatcher logic."
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area affected
+      options:
+        - Engine (new event handler or refined accounting logic)
+        - Exporter (QBO or Xero output shape)
+        - Webhook receiver
+        - Storage / persistence
+        - Scheduler / retry semantics
+        - Dispatcher (QBO/Xero API call shape)
+        - OAuth
+        - Admin endpoints / operator UX
+        - Observability (logs / metrics / health)
+        - Deployment / packaging
+        - Documentation
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: I checked
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I read the README's "Supported events" and "Chart of accounts" sections.
+          required: true

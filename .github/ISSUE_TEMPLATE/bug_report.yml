@@ -1,0 +1,97 @@
+name: Bug report
+description: Engine produced wrong output, server returned an unexpected error, exporter golden mismatch, etc.
+title: '[bug] '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file this. Ledgerly's surface is small but the failure modes are real
+        — wrong accounting entries are the worst kind of bug to ship.
+
+        **Security vulnerability?** Please follow [SECURITY.md](../blob/master/SECURITY.md) instead — public
+        issues let exploit details leak before a fix is available.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: One paragraph: what did you do, what did ledgerly do, what did you expect instead?
+      placeholder: |
+        I sent a `charge.refunded` webhook for a Connect platform charge. The engine threw
+        `MissingExpansionError` even though the receiver was supposed to auto-expand the
+        `balance_transaction`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: |
+        The smallest input that triggers the bug. For engine bugs, paste the Stripe event JSON
+        (sanitize customer IDs, emails, etc.). For server bugs, the curl/request that triggered it.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+      description: |
+        For engine bugs: what `MapResult` did you expect? For server bugs: what status code / body?
+        If you have an accounting question ("is this entry right?"), include the chart-of-accounts
+        assumption you're working from (default in README's "Chart of accounts" section).
+      render: json
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output / stack trace
+      description: Paste the actual response body, the exception message, or the produced entry.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: ledgerly version (tag or commit SHA — see `package.json` or `docker image inspect`)
+      placeholder: e.g. v0.1.2 or 134e6ac
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where in the pipeline did the bug surface?
+      multiple: true
+      options:
+        - Engine (mapEvent / handlers)
+        - Exporter (toQbo / toXero)
+        - Webhook receiver (signature, dedup, expansion)
+        - Storage (SQLite or in-memory)
+        - Scheduler (dispatch, backoff, dead-letter)
+        - Dispatcher (QBO/Xero API call)
+        - OAuth (start, callback, token refresh)
+        - Admin endpoints
+        - Observability (logs, metrics, /health, /readyz)
+        - Other / unclear
+
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime
+      description: How is ledgerly running? Local pnpm, Docker container, Kubernetes pod, ...?
+      placeholder: docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.2
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: I checked
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I'm reporting on a tagged release (not an arbitrary commit between releases).
+        - label: I removed customer-identifying info from the event JSON above.
