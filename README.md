@@ -1,5 +1,10 @@
 # ledgerly
 
+[![CI](https://github.com/jakethehoffer/ledgerly/actions/workflows/ci.yml/badge.svg)](https://github.com/jakethehoffer/ledgerly/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jakethehoffer/ledgerly?display_name=tag&sort=semver)](https://github.com/jakethehoffer/ledgerly/releases/latest)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![Container](https://img.shields.io/badge/ghcr.io-jakethehoffer%2Fledgerly-blue?logo=docker&logoColor=white)](https://github.com/jakethehoffer/ledgerly/pkgs/container/ledgerly)
+
 A pure TypeScript engine that converts Stripe webhook events into balanced double-entry journal entries, ready to export as **QuickBooks Online `JournalEntry`** JSON or **Xero `ManualJournal`** JSON.
 
 Built for indie SaaS founders who want clean books without paying an accountant $500–$2,000/mo to reconcile Stripe data manually.
@@ -8,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-437 tests · 13 event types · 25 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+504 tests · 13 event types · 30 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 

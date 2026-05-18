@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.1] — 2026-05-18
+
+Patch release covering distribution and discoverability polish. No runtime
+or engine behavior changes; the only source-of-truth surface that moved is
+CI and docs.
+
+### Added
+
+- Multi-arch (linux/amd64 + linux/arm64) Docker images published to
+  GitHub Container Registry on every `v*` tag push via
+  [`.github/workflows/release.yml`](.github/workflows/release.yml).
+  Operators can now `docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.1`
+  (or `:0.1.1`, or `:latest`) instead of building from source. Images
+  carry OCI labels (`source`, `version`, `licenses=Apache-2.0`, `title`,
+  `description`) so the GitHub Packages page renders correctly.
+- README header badges: CI status, latest release, license, GHCR image.
+- Updated README test-count stat from the stale 437/25 to the current
+  504/30 (tests/fixtures).
+
+### Changed
+
+- README's Docker section now leads with `docker pull` from GHCR as the
+  recommended production path; local `docker build` repositioned as a
+  fallback. The cross-platform note updated to reflect that the
+  published images already cover both architectures natively.
+
 ## [0.1.0] — 2026-05-18
 
 Initial public release. Ledgerly is a Stripe-webhook-to-double-entry mapping
@@ -144,4 +170,5 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.0
