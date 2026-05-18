@@ -190,9 +190,6 @@ Unrecognized currency codes fall back to two-decimal, matching Stripe's default
 normalization.
 
 Caveats:
-- FX disputes (dispute.currency ≠ BT currency) are still rejected by
-  `disputeFundsWithdrawn` with a clear error — the split-fee detection logic
-  needs more work for the cross-currency case.
 - Proper FX gain/loss accounting via account 7000 remains spec-deferred.
 - The operator's QBO/Xero company file must have multi-currency enabled
   (and the relevant accounts configured for the foreign currency) before

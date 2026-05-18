@@ -1,0 +1,46 @@
+{
+  "TxnDate": "2025-01-17",
+  "PrivateNote": "Stripe dispute dp_test_fx_001 funds withdrawn (charge ch_test_fx_001)",
+  "CurrencyRef": {
+    "value": "CAD"
+  },
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 68.75,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-1200",
+          "name": "QBO 1200"
+        }
+      },
+      "Description": "Funds held pending dispute outcome"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 20,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-6100",
+          "name": "QBO 6100"
+        }
+      },
+      "Description": "Non-refundable dispute fee"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 88.75,
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": {
+          "value": "qbo-1010",
+          "name": "QBO 1010"
+        }
+      },
+      "Description": "Funds withdrawn from Stripe balance"
+    }
+  ],
+  "DocNumber": "pute_withdrawn_fx_001"
+}

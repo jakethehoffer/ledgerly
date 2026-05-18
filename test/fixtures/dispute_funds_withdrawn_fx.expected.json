@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-17",
+      "currency": "CAD",
+      "memo": "Stripe dispute dp_test_fx_001 funds withdrawn (charge ch_test_fx_001)",
+      "sourceEventId": "evt_test_dispute_withdrawn_fx_001",
+      "sourceEventType": "charge.dispute.funds_withdrawn",
+      "sourceObjectId": "dp_test_fx_001",
+      "lines": [
+        { "accountCode": "1200", "side": "debit", "amount": 6875, "memo": "Funds held pending dispute outcome" },
+        { "accountCode": "6100", "side": "debit", "amount": 2000, "memo": "Non-refundable dispute fee" },
+        { "accountCode": "1010", "side": "credit", "amount": 8875, "memo": "Funds withdrawn from Stripe balance" }
+      ]
+    }
+  ],
+  "schedule": null
+}

@@ -1,0 +1,22 @@
+{
+  "Narration": "Stripe dispute dp_test_fx_001 funds withdrawn (charge ch_test_fx_001)",
+  "Date": "2025-01-17",
+  "Status": "DRAFT",
+  "JournalLines": [
+    {
+      "LineAmount": 68.75,
+      "AccountCode": "1200",
+      "Description": "Funds held pending dispute outcome"
+    },
+    {
+      "LineAmount": 20,
+      "AccountCode": "6100",
+      "Description": "Non-refundable dispute fee"
+    },
+    {
+      "LineAmount": -88.75,
+      "AccountCode": "1010",
+      "Description": "Funds withdrawn from Stripe balance"
+    }
+  ]
+}
