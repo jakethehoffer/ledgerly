@@ -1,0 +1,38 @@
+# Dev-only / build-output artifacts that shouldn't bloat the build context.
+node_modules
+dist
+coverage
+.vitest-cache
+
+# Local secrets & state — never let these leak into an image.
+.env
+.env.local
+*.db
+*.db-wal
+*.db-shm
+
+# Git, CI, tooling configs not needed for the production build.
+.git
+.gitignore
+.gitattributes
+.github
+
+# Tests and fixtures — tsconfig.build.json excludes them anyway, and the
+# Dockerfile uses explicit COPYs of src/ + tsconfigs so the .dockerignore
+# is belt-and-suspenders.
+test
+
+# Agent / IDE artifacts.
+.claude
+.ai-sync
+.vscode
+.idea
+
+# Logs and editor swap files.
+*.log
+*.swp
+*.tmp
+
+# Top-level docs — not needed in the runtime image; pull them from the repo.
+*.md
+LICENSE

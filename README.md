@@ -672,6 +672,72 @@ to scanners.
   Replaces the prior "edit SQLite by hand" recovery path documented under the
   scheduler's dead-letter section.
 
+## Deployment
+
+### Docker
+
+The repo ships a multi-stage `Dockerfile`. The build stage installs all
+dependencies, compiles TypeScript, and prunes devDependencies. The runtime
+stage carries only `node:20-slim` + the pruned `node_modules` + compiled
+`dist/`. The image runs as a non-root user (UID 10001), exposes port 3000,
+and declares a `HEALTHCHECK` against `/health`.
+
+```bash
+# Build the image (cross-arch builders: see "Cross-platform" below).
+docker build -t ledgerly:latest .
+
+# Create a named volume so SQLite state survives container restarts.
+docker volume create ledgerly-data
+
+docker run -d --name ledgerly \
+  -p 3000:3000 \
+  -v ledgerly-data:/data \
+  -e STRIPE_SECRET_KEY=sk_test_... \
+  -e STRIPE_WEBHOOK_SECRET=whsec_... \
+  -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
+  -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
+  -e LEDGERLY_SCHEDULER_ENABLED=true \
+  ledgerly:latest
+```
+
+The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
+mount point above. Add QBO/Xero env vars from `.env.example` to enable the
+corresponding dispatchers — without them, the scheduler falls back to a
+console dispatcher that logs entries instead of posting.
+
+### Cross-platform builds
+
+`better-sqlite3` is a native module. The image ships a binding compiled for
+the build host's architecture. If you build on macOS arm64 but deploy to
+linux/amd64, force the target platform:
+
+```bash
+docker buildx build --platform linux/amd64 -t ledgerly:latest .
+```
+
+### Behind a reverse proxy
+
+The Stripe webhook handler verifies signatures against the raw request body.
+Any reverse proxy in front of ledgerly (nginx, Caddy, Cloudflare, Traefik,
+...) must pass `POST /webhook` through unmodified — no buffering, no body
+rewrites, no JSON normalization. Other routes are well-behaved JSON and need
+no special handling.
+
+### Required environment
+
+| Variable | Required for |
+|---|---|
+| `STRIPE_SECRET_KEY` | Webhook expansion (always) |
+| `STRIPE_WEBHOOK_SECRET` | Signature verification (always) |
+| `LEDGERLY_DB_PATH` | SQLite persistence (defaults to `/data/ledger.db` in the image) |
+| `LEDGERLY_OAUTH_STATE_SECRET` | Required if using QBO/Xero OAuth |
+| `LEDGERLY_ADMIN_TOKEN` | Required if using `/admin/*` endpoints (≥32 chars) |
+| `LEDGERLY_SCHEDULER_ENABLED` | Set to `true` to actually post entries to QBO/Xero |
+
+The CLI exits at startup if `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` is
+missing, or if any partial-config conditions are detected (e.g. some QBO
+OAuth vars set but not all). See `.env.example` for the complete inventory.
+
 ## Scripts
 
 ```bash
