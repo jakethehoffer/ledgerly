@@ -11,6 +11,14 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Opt JavaScript-based actions into Node.js 24 ahead of GitHub's June 2026
+# forced upgrade. Silences the "Node.js 20 actions are deprecated" warnings
+# that otherwise surface on every run. Affects actions like
+# docker/setup-buildx-action, docker/build-push-action, etc.; if any of them
+# break under Node 24, we want to know now rather than at the forced cutover.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   verify:
     name: typecheck + lint + test + build

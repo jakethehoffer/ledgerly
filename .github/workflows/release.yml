@@ -23,6 +23,11 @@ concurrency:
   group: release-${{ github.workflow }}
   cancel-in-progress: false
 
+# Opt JavaScript-based actions into Node.js 24 ahead of GitHub's June 2026
+# forced upgrade. See ci.yml for the rationale.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   publish-image:
     name: publish docker image to ghcr.io

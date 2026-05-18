@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.2] — 2026-05-18
+
+Patch release. The only operator-visible change is the QBO `DocNumber`
+disambiguation; everything else is CI plumbing and test coverage.
+
+### Fixed
+
+- **`toQboSchedule` now assigns a unique `DocNumber` to each recognition
+  entry.** Previously all 12 monthly entries in an annual schedule shared
+  the same truncated `sourceEventId`-derived `DocNumber`, which broke
+  reconciliation for QBO operators using `DocNumber` as a lookup key. The
+  fix reserves the last 4 chars of QBO's 21-char budget for a `-mNN`
+  suffix (`-m01` through `-m12`), yielding 12 distinct values within the
+  limit. `toQbo`'s per-entry behavior is unchanged.
+
+### Added
+
+- Schedule goldens for `invoice_payment_succeeded_annual` covering both
+  the QBO and Xero exporter outputs. The tests now do a full
+  `toEqual(expected)` diff against the goldens instead of relying on
+  per-entry shape checks alone — regressions in line memos, account
+  refs, per-month amounts, or `CurrencyRef` will surface immediately.
+
+### Changed
+
+- CI workflows (`ci.yml`, `release.yml`) opt JavaScript-based actions into
+  Node.js 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`, ahead of
+  GitHub's June 2 2026 forced upgrade. Silences the "Node.js 20 actions
+  are deprecated" warning on every run; if any action breaks under
+  Node 24, the failure surfaces now rather than at the forced cutover.
+
 ## [0.1.1] — 2026-05-18
 
 Patch release covering distribution and discoverability polish. No runtime
@@ -170,5 +201,6 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.2]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.2
 [0.1.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.0

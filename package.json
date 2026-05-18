@@ -1,6 +1,6 @@
 {
   "name": "ledgerly",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Stripe-to-double-entry mapping engine for indie SaaS",
   "type": "module",
   "main": "./dist/index.js",
