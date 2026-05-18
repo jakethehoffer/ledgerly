@@ -677,17 +677,32 @@ to scanners.
 
 ### Docker
 
-The repo ships a multi-stage `Dockerfile`. The build stage installs all
-dependencies, compiles TypeScript, and prunes devDependencies. The runtime
-stage carries only `node:20-slim` + the pruned `node_modules` + compiled
-`dist/`. The image runs as a non-root user (UID 10001), exposes port 3000,
-and declares a `HEALTHCHECK` against `/health`.
+Pre-built multi-arch images (linux/amd64 + linux/arm64) are published to
+[GitHub Container Registry](https://github.com/jakethehoffer/ledgerly/pkgs/container/ledgerly)
+on every tagged release:
 
 ```bash
-# Build the image (cross-arch builders: see "Cross-platform" below).
-docker build -t ledgerly:latest .
+# Pull a specific release (recommended for production):
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.0
 
-# Create a named volume so SQLite state survives container restarts.
+# Or track latest stable:
+docker pull ghcr.io/jakethehoffer/ledgerly:latest
+```
+
+The image is built from a multi-stage `Dockerfile`: the build stage installs
+all dependencies, compiles TypeScript, and prunes devDependencies; the
+runtime stage carries only `node:20-slim` + the pruned `node_modules` +
+compiled `dist/`. It runs as a non-root user (UID 10001), exposes port
+3000, and declares a `HEALTHCHECK` against `/health`. You can also build
+locally from source:
+
+```bash
+docker build -t ledgerly:local .
+```
+
+Run it with persistent SQLite state:
+
+```bash
 docker volume create ledgerly-data
 
 docker run -d --name ledgerly \
@@ -698,7 +713,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ledgerly:latest
+  ghcr.io/jakethehoffer/ledgerly:v0.1.0
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -708,13 +723,17 @@ console dispatcher that logs entries instead of posting.
 
 ### Cross-platform builds
 
-`better-sqlite3` is a native module. The image ships a binding compiled for
-the build host's architecture. If you build on macOS arm64 but deploy to
-linux/amd64, force the target platform:
+The published GHCR images cover both `linux/amd64` and `linux/arm64` natively
+(M-series Macs deploying to ARM cloud instances, and vice versa, both pull
+the right binary). If you're building locally with `docker build` on macOS
+arm64 but deploying to linux/amd64, force the target platform:
 
 ```bash
-docker buildx build --platform linux/amd64 -t ledgerly:latest .
+docker buildx build --platform linux/amd64 -t ledgerly:local .
 ```
+
+`better-sqlite3` is a native module; the published images ship prebuilt
+bindings for both supported architectures.
 
 ### Health and readiness probes
 
