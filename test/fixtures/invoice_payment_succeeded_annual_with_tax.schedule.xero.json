@@ -1,0 +1,206 @@
+[
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 1/12 recognition",
+    "Date": "2025-02-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 2/12 recognition",
+    "Date": "2025-03-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 3/12 recognition",
+    "Date": "2025-04-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 4/12 recognition",
+    "Date": "2025-05-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 5/12 recognition",
+    "Date": "2025-06-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 6/12 recognition",
+    "Date": "2025-07-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 7/12 recognition",
+    "Date": "2025-08-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 8/12 recognition",
+    "Date": "2025-09-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 9/12 recognition",
+    "Date": "2025-10-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 10/12 recognition",
+    "Date": "2025-11-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 11/12 recognition",
+    "Date": "2025-12-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.33,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.33,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  },
+  {
+    "Narration": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001) — month 12/12 recognition",
+    "Date": "2026-01-15",
+    "Status": "DRAFT",
+    "JournalLines": [
+      {
+        "LineAmount": 83.37,
+        "AccountCode": "2100",
+        "Description": "Recognize from deferred"
+      },
+      {
+        "LineAmount": -83.37,
+        "AccountCode": "4000",
+        "Description": "Subscription revenue"
+      }
+    ]
+  }
+]

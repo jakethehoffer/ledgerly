@@ -93,4 +93,41 @@ describe('toQboSchedule', () => {
       expect(d!.length).toBeLessThanOrEqual(21);
     }
   });
+
+  it('invoice_payment_succeeded_annual_with_tax: matches the golden schedule output', () => {
+    // Tax-aware annual: gross 110000 = preTax 100000 (revenue) + 10000 (tax).
+    // The schedule recognizes the preTax portion across 12 months: floor(100000/12)
+    // = 8333 per month for the first 11 months, with month 12 absorbing the
+    // 100000 - 8333*12 = 4-cent remainder so the schedule sums to 100000 exactly.
+    // The golden captures this rounding pattern.
+    const event = loadJson(
+      'invoice_payment_succeeded_annual_with_tax.event.json',
+    ) as Stripe.Event;
+    const expected = loadJson(
+      'invoice_payment_succeeded_annual_with_tax.schedule.qbo.json',
+    );
+    const result = mapEvent(event);
+    expect(result.schedule).not.toBeNull();
+    const qboEntries = toQboSchedule(result.schedule!, TEST_QBO_ACCOUNT_MAP);
+    expect(qboEntries).toEqual(expected);
+  });
+
+  it('invoice_payment_succeeded_annual_with_tax: schedule sums to preTax exactly', () => {
+    // The remainder-absorption pattern means every per-month amount differs
+    // slightly. Sum them and assert the total matches the pre-tax portion
+    // (1000 dollars major-unit) — this is what makes the schedule a valid
+    // drawdown of the 2100 Deferred Revenue posting.
+    const event = loadJson(
+      'invoice_payment_succeeded_annual_with_tax.event.json',
+    ) as Stripe.Event;
+    const result = mapEvent(event);
+    const qboEntries = toQboSchedule(result.schedule!, TEST_QBO_ACCOUNT_MAP);
+    expect(qboEntries).toHaveLength(12);
+    const debitTotal = qboEntries.reduce((acc, qbo) => {
+      const debit = qbo.Line.find((l) => l.JournalEntryLineDetail.PostingType === 'Debit');
+      return acc + (debit?.Amount ?? 0);
+    }, 0);
+    // Round through integer cents to avoid IEEE-754 sum drift.
+    expect(Math.round(debitTotal * 100)).toBe(100000);
+  });
 });

@@ -88,4 +88,33 @@ describe('toXeroSchedule', () => {
       expect(Math.round(sum * 100)).toBe(0);
     }
   });
+
+  it('invoice_payment_succeeded_annual_with_tax: matches the golden schedule output', () => {
+    // Tax-aware annual: the schedule recognizes the preTax portion ($1000)
+    // across 12 months. Months 1-11 get 83.33; month 12 absorbs the 4-cent
+    // rounding remainder (83.37) so the schedule sums to preTax exactly.
+    const event = loadJson(
+      'invoice_payment_succeeded_annual_with_tax.event.json',
+    ) as Stripe.Event;
+    const expected = loadJson(
+      'invoice_payment_succeeded_annual_with_tax.schedule.xero.json',
+    );
+    const result = mapEvent(event);
+    expect(result.schedule).not.toBeNull();
+    const xeroEntries = toXeroSchedule(result.schedule!, TEST_XERO_ACCOUNT_MAP);
+    expect(xeroEntries).toEqual(expected);
+  });
+
+  it('invoice_payment_succeeded_annual_with_tax: 12 entries each sum to zero', () => {
+    const event = loadJson(
+      'invoice_payment_succeeded_annual_with_tax.event.json',
+    ) as Stripe.Event;
+    const result = mapEvent(event);
+    const xeroEntries = toXeroSchedule(result.schedule!, TEST_XERO_ACCOUNT_MAP);
+    expect(xeroEntries).toHaveLength(12);
+    for (const xero of xeroEntries) {
+      const sum = xero.JournalLines.reduce((acc, l) => acc + l.LineAmount, 0);
+      expect(Math.round(sum * 100)).toBe(0);
+    }
+  });
 });
