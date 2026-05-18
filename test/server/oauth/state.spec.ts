@@ -1,8 +1,25 @@
+import crypto from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { createStateSigner } from '../../../src/server/oauth/state.js';
 import { OAuthError } from '../../../src/server/oauth/types.js';
 
 const SECRET = 'a'.repeat(32);
+
+/**
+ * Mint a state token whose signature is VALID under `secret` but whose body
+ * decodes to whatever raw content the caller wants. Used by the
+ * payload-validation tests below to bypass the HMAC check and exercise the
+ * downstream JSON / type / key validators — the attack model is "operator's
+ * state secret leaked, attacker can sign tokens, what happens if they ship a
+ * malformed payload?"
+ */
+function signWithValidHmac(bodyContent: string, secret: string): string {
+  const base64url = (buf: Buffer): string =>
+    buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const body = base64url(Buffer.from(bodyContent, 'utf8'));
+  const sig = base64url(crypto.createHmac('sha256', secret).update(body).digest());
+  return `${body}.${sig}`;
+}
 
 describe('createStateSigner', () => {
   it('rejects secrets shorter than 32 chars', () => {
@@ -81,5 +98,79 @@ describe('createStateSigner', () => {
     const signer = createStateSigner(SECRET);
     const token = signer.sign({ provider: 'xero' });
     expect(signer.verify(token).provider).toBe('xero');
+  });
+
+  // Payload-validation paths: these tests assume the attacker has somehow
+  // obtained the state secret (operator backup leak, env-var exposure, etc.)
+  // and can mint signatures. With a valid HMAC the token survives the
+  // signature check; we want to make sure malformed PAYLOADS still get
+  // rejected loudly rather than silently produce a usable session.
+  describe('payload validation (valid signature, bad payload)', () => {
+    it('rejects a body that is not valid JSON', () => {
+      const signer = createStateSigner(SECRET);
+      const token = signWithValidHmac('not-json-here', SECRET);
+      expect(() => signer.verify(token)).toThrow(OAuthError);
+      expect(() => signer.verify(token)).toThrow(/[Mm]alformed state body/);
+    });
+
+    it('rejects a payload that decodes to null', () => {
+      // `typeof null === 'object'` short-circuits the first check; the
+      // `parsed === null` clause must catch this.
+      const signer = createStateSigner(SECRET);
+      const token = signWithValidHmac('null', SECRET);
+      expect(() => signer.verify(token)).toThrow(/[Mm]alformed state payload/);
+    });
+
+    it('rejects a payload that decodes to a primitive (boolean)', () => {
+      const signer = createStateSigner(SECRET);
+      const token = signWithValidHmac('true', SECRET);
+      expect(() => signer.verify(token)).toThrow(/[Mm]alformed state payload/);
+    });
+
+    it('rejects a payload missing the required keys', () => {
+      const signer = createStateSigner(SECRET);
+      const token = signWithValidHmac(JSON.stringify({ provider: 'qbo' }), SECRET);
+      expect(() => signer.verify(token)).toThrow(/[Mm]alformed state payload/);
+    });
+
+    it('rejects an unrecognized provider value', () => {
+      // Defends against cross-flow confusion: even with a valid signature,
+      // a state minted for "evil" can't impersonate qbo or xero.
+      const signer = createStateSigner(SECRET);
+      const payload = { provider: 'evil', nonce: 'abc', expiresAt: 9_999_999_999 };
+      const token = signWithValidHmac(JSON.stringify(payload), SECRET);
+      expect(() => signer.verify(token)).toThrow(/[Mm]alformed state payload/);
+    });
+
+    it('rejects a non-string nonce', () => {
+      const signer = createStateSigner(SECRET);
+      const payload = { provider: 'qbo', nonce: 123, expiresAt: 9_999_999_999 };
+      const token = signWithValidHmac(JSON.stringify(payload), SECRET);
+      expect(() => signer.verify(token)).toThrow(/[Mm]alformed state payload/);
+    });
+
+    it('rejects a non-numeric expiresAt (the TTL bypass attempt)', () => {
+      // The most attack-relevant of the bunch: if expiresAt isn't a number,
+      // the `expiresAt <= nowSeconds()` comparison below would coerce
+      // unpredictably. Reject at the type check instead.
+      const signer = createStateSigner(SECRET);
+      const payload = { provider: 'qbo', nonce: 'abc', expiresAt: 'tomorrow' };
+      const token = signWithValidHmac(JSON.stringify(payload), SECRET);
+      expect(() => signer.verify(token)).toThrow(/[Mm]alformed state payload/);
+    });
+
+    it('rejects a signature of wrong length before reaching timingSafeEqual', () => {
+      // `crypto.timingSafeEqual` throws synchronously on length mismatch,
+      // which would leak as an unhandled exception rather than a clean
+      // OAuthError. The explicit length guard exists to short-circuit
+      // before that point. Hit it directly with a sig that decodes to
+      // fewer than 32 bytes (HMAC-SHA256 always emits 32).
+      const signer = createStateSigner(SECRET);
+      const base64url = (buf: Buffer): string =>
+        buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const shortSig = base64url(crypto.randomBytes(16)); // 16 bytes vs expected 32
+      expect(() => signer.verify(`anybody.${shortSig}`)).toThrow(OAuthError);
+      expect(() => signer.verify(`anybody.${shortSig}`)).toThrow(/signature mismatch/);
+    });
   });
 });
