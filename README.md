@@ -558,6 +558,8 @@ interface Logger {
 
 The default logger writes to `console.*` with an `info`-level threshold. Override the threshold by setting `LEDGERLY_LOG_LEVEL` to `debug`, `info`, `warn`, or `error` (invalid values warn once and fall back to `info`). The CLI constructs one logger at startup and threads it through `createServer`, `createScheduler`, and the dispatcher factories.
 
+For containerized / cloud deployments, set `LEDGERLY_LOG_FORMAT=json` to switch the CLI to the built-in `jsonLogger`: one JSON object per line, written to stdout (debug/info) or stderr (warn/error), with the schema `{ts, level, msg, ...meta}`. Object-valued meta is merged into the root record (pino convention), Error instances are converted to `{name, message, stack}` so their fields survive `JSON.stringify`, and the standard fields (`ts`, `level`, `msg`) always win against meta keys with the same name. This format ingests directly into Datadog, CloudWatch, Loki, Splunk, and Vector without any parser configuration.
+
 To plug in pino:
 
 ```typescript

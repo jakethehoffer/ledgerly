@@ -15,8 +15,8 @@ import { xeroDispatcher } from './dispatchers/xero.js';
 import type { XeroDispatcherConfig } from './dispatchers/xero.js';
 import { createServer } from './index.js';
 import type { OAuthServerConfig } from './index.js';
-import { consoleLogger } from './logger.js';
-import type { ConsoleLoggerOptions, Logger } from './logger.js';
+import { consoleLogger, jsonLogger } from './logger.js';
+import type { ConsoleLoggerOptions, JsonLoggerOptions, Logger } from './logger.js';
 import { inMemoryMetrics } from './metrics.js';
 import type { InMemoryMetricsOptions, Metrics } from './metrics.js';
 import type { OAuthClientConfig } from './oauth/types.js';
@@ -34,21 +34,43 @@ function isLogLevel(value: string): value is LogLevel {
 }
 
 function buildLogger(): Logger {
-  const raw = process.env['LEDGERLY_LOG_LEVEL'];
-  if (raw === undefined || raw === '') {
-    return consoleLogger();
+  // Format dispatcher: 'json' produces one JSON object per line (for log
+  // aggregators); anything else (including unset) uses the pretty-print
+  // console logger. Unknown values fall back to console with a warning
+  // emitted on the resulting logger so the operator notices.
+  const formatRaw = process.env['LEDGERLY_LOG_FORMAT'];
+  const wantJson = formatRaw === 'json';
+  const wantConsole = formatRaw === undefined || formatRaw === '' || formatRaw === 'console';
+  const unknownFormat = !wantJson && !wantConsole;
+
+  const levelRaw = process.env['LEDGERLY_LOG_LEVEL'];
+  const level = levelRaw !== undefined && levelRaw !== '' && isLogLevel(levelRaw)
+    ? levelRaw
+    : undefined;
+  const unknownLevel = levelRaw !== undefined && levelRaw !== '' && level === undefined;
+
+  let logger: Logger;
+  if (wantJson) {
+    const opts: JsonLoggerOptions = level !== undefined ? { level } : {};
+    logger = jsonLogger(opts);
+  } else {
+    const opts: ConsoleLoggerOptions = level !== undefined ? { level } : {};
+    logger = consoleLogger(opts);
   }
-  if (isLogLevel(raw)) {
-    const opts: ConsoleLoggerOptions = { level: raw };
-    return consoleLogger(opts);
+
+  if (unknownLevel) {
+    logger.warn('Invalid LEDGERLY_LOG_LEVEL; falling back to info', {
+      value: levelRaw,
+      valid: VALID_LOG_LEVELS,
+    });
   }
-  // Bootstrap: build a default logger to emit the warning, then return it.
-  const fallback = consoleLogger();
-  fallback.warn('Invalid LEDGERLY_LOG_LEVEL; falling back to info', {
-    value: raw,
-    valid: VALID_LOG_LEVELS,
-  });
-  return fallback;
+  if (unknownFormat) {
+    logger.warn('Invalid LEDGERLY_LOG_FORMAT; falling back to console', {
+      value: formatRaw,
+      valid: ['console', 'json'],
+    });
+  }
+  return logger;
 }
 
 const log = buildLogger();

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { consoleLogger, silentLogger } from '../../src/server/logger.js';
+import { Writable } from 'node:stream';
+import { consoleLogger, jsonLogger, silentLogger } from '../../src/server/logger.js';
 
 describe('consoleLogger', () => {
   let debugSpy: ReturnType<typeof vi.spyOn>;
@@ -152,5 +153,121 @@ describe('silentLogger', () => {
       log.warn('w');
       log.error('e');
     }).not.toThrow();
+  });
+});
+
+/**
+ * Capture writes to an in-memory stream so the tests can read back what the
+ * logger emitted without touching the real process.stdout/stderr.
+ */
+function captureStream(): { stream: Writable; lines: () => string[] } {
+  const chunks: string[] = [];
+  const stream = new Writable({
+    write(chunk: Buffer | string, _enc, cb): void {
+      chunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      cb();
+    },
+  });
+  return {
+    stream,
+    lines: () =>
+      chunks
+        .join('')
+        .split('\n')
+        .filter((l) => l.length > 0),
+  };
+}
+
+describe('jsonLogger', () => {
+  let out: ReturnType<typeof captureStream>;
+  let err: ReturnType<typeof captureStream>;
+
+  beforeEach(() => {
+    out = captureStream();
+    err = captureStream();
+  });
+
+  it('emits one JSON object per line to stdout for info', () => {
+    const log = jsonLogger({ out: out.stream, err: err.stream });
+    log.info('hello', { eventId: 'evt_1' });
+    const lines = out.lines();
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0] ?? '') as Record<string, unknown>;
+    expect(parsed['msg']).toBe('hello');
+    expect(parsed['level']).toBe('info');
+    expect(parsed['eventId']).toBe('evt_1');
+    expect(typeof parsed['ts']).toBe('string');
+    expect((parsed['ts'] as string).match(/^\d{4}-\d{2}-\d{2}T/)).toBeTruthy();
+  });
+
+  it('routes debug/info to out, warn/error to err', () => {
+    const log = jsonLogger({ level: 'debug', out: out.stream, err: err.stream });
+    log.debug('d');
+    log.info('i');
+    log.warn('w');
+    log.error('e');
+    expect(
+      out.lines().map((l) => (JSON.parse(l) as { level: string }).level),
+    ).toEqual(['debug', 'info']);
+    expect(
+      err.lines().map((l) => (JSON.parse(l) as { level: string }).level),
+    ).toEqual(['warn', 'error']);
+  });
+
+  it('respects the level threshold', () => {
+    const log = jsonLogger({ level: 'warn', out: out.stream, err: err.stream });
+    log.debug('d');
+    log.info('i');
+    log.warn('w');
+    log.error('e');
+    expect(out.lines()).toEqual([]);
+    expect(
+      err.lines().map((l) => (JSON.parse(l) as { level: string }).level),
+    ).toEqual(['warn', 'error']);
+  });
+
+  it('serializes Error instances inside meta (name, message, stack)', () => {
+    const log = jsonLogger({ out: out.stream, err: err.stream });
+    const boom = new Error('boom');
+    log.error('failed', { eventId: 'evt_1', err: boom });
+    const parsed = JSON.parse(err.lines()[0] ?? '') as Record<string, unknown>;
+    const errField = parsed['err'] as Record<string, unknown>;
+    expect(errField['name']).toBe('Error');
+    expect(errField['message']).toBe('boom');
+    expect(typeof errField['stack']).toBe('string');
+  });
+
+  it('serializes a top-level Error meta under an `err` key', () => {
+    const log = jsonLogger({ out: out.stream, err: err.stream });
+    const boom = new TypeError('bad cast');
+    log.error('failed', boom);
+    const parsed = JSON.parse(err.lines()[0] ?? '') as Record<string, unknown>;
+    const errField = parsed['err'] as Record<string, unknown>;
+    expect(errField['name']).toBe('TypeError');
+    expect(errField['message']).toBe('bad cast');
+  });
+
+  it('preserves non-object meta under a `meta` key', () => {
+    const log = jsonLogger({ out: out.stream, err: err.stream });
+    log.info('count', 42);
+    const parsed = JSON.parse(out.lines()[0] ?? '') as Record<string, unknown>;
+    expect(parsed['meta']).toBe(42);
+  });
+
+  it('protects standard fields from meta-key shadowing', () => {
+    const log = jsonLogger({ out: out.stream, err: err.stream });
+    // Caller carelessly names a meta key 'level' — the standard level wins.
+    log.warn('uh oh', { level: 'looks-like-debug', ts: 'fake-timestamp' });
+    const parsed = JSON.parse(err.lines()[0] ?? '') as Record<string, unknown>;
+    expect(parsed['level']).toBe('warn');
+    expect((parsed['ts'] as string).match(/^\d{4}-\d{2}-\d{2}T/)).toBeTruthy();
+  });
+
+  it('emits valid JSON even with no meta', () => {
+    const log = jsonLogger({ out: out.stream, err: err.stream });
+    log.info('plain');
+    const parsed = JSON.parse(out.lines()[0] ?? '') as Record<string, unknown>;
+    expect(parsed['msg']).toBe('plain');
+    expect(parsed['level']).toBe('info');
   });
 });
