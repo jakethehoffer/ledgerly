@@ -7,3 +7,8 @@ coverage/
 .env.local
 .vitest-cache/
 .claude/
+
+# Runtime SQLite artifacts (LEDGERLY_DB_PATH defaults to ./ledger.db).
+ledger.db
+ledger.db-wal
+ledger.db-shm
