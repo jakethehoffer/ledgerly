@@ -6,6 +6,66 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.6] — 2026-05-18
+
+### Fixed
+
+- **FX disputes are now supported.** `charge.dispute.funds_withdrawn`
+  events whose `balance_transactions` are in a different currency than
+  `dispute.currency` (the standard case for Connect platforms or any
+  Stripe account where the customer-facing currency differs from the
+  account's settlement currency) used to throw
+  `"FX disputes not yet supported"`; they now produce balanced journal
+  entries in the settlement currency.
+
+  The previous fee-detection heuristic compared `|bt.amount|` against
+  `dispute.amount`, which only works when both sides share a currency.
+  The new heuristic identifies the clawback BT as the one with the
+  largest `|bt.amount|` within the dispute-category set, and every
+  other dispute-category BT contributes both its `|amount|` and its
+  inline `fee` to the fee total. This works across the three documented
+  Stripe BT shapes (single combined BT, split clawback + fee BTs, FX
+  variants of either) without comparing amounts across currencies.
+
+  The entry's `currency` field now derives from the BT settlement
+  currency (not `dispute.currency`), so an FX dispute posts in the
+  account's settlement currency — matching what the FX-safe
+  `chargeSucceeded` handler already does for the original receivable.
+  This keeps the `1200 Disputes Receivable` account single-currency in
+  the operator's books.
+
+  **Same-currency dispute behavior is unchanged**: the existing
+  `dispute_funds_withdrawn_standard` fixture passes byte-identical. The
+  new heuristic produces the same `(clawback, feeTotal, totalWithdrawn)`
+  tuple as the old one when `bt.currency == dispute.currency`, for both
+  single-BT and split-BT shapes.
+
+### Added
+
+- New fixture `dispute_funds_withdrawn_fx` covering a Canadian-settling
+  account disputing a $50 USD charge with a split-fee CAD BT shape
+  (C$68.75 clawback BT + C$20 fee BT = C$88.75 total withdrawn).
+  Engine + QBO + Xero goldens validate end-to-end.
+- Two defensive guards in `disputeFundsWithdrawn`: empty
+  dispute-category BT array, and mixed-currency BT array. Both throw
+  with clear messages rather than silently producing wrong entries.
+
+### Notes
+
+The FX implementation is best-effort against Stripe's
+[documented BT shapes](https://stripe.com/docs/disputes/responding) for
+dispute withdrawals; the synthetic fixture uses plausible amounts and
+an exchange-rate hint. Operators hitting a real FX dispute whose BT
+shape doesn't match (e.g. Stripe attaches a third BT for an unmodeled
+adjustment) should open an issue with the actual BT structure so the
+heuristic can be refined against real data.
+
+`charge.dispute.closed` paths under FX without a preceding
+`funds_withdrawn` still post in `dispute.currency` — that path doesn't
+expand BTs the way `funds_withdrawn` does, so it can't reach the
+settlement currency without an extra Stripe API call. Same caveat as
+before.
+
 ## [0.1.5] — 2026-05-18
 
 Patch release. Supply-chain hardening on the published Docker images;
@@ -302,6 +362,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.6]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.6
 [0.1.5]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.5
 [0.1.4]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.4
 [0.1.3]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.3
