@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.5] — 2026-05-18
+
+Patch release. Supply-chain hardening on the published Docker images;
+no source-code or operator-visible behavior changes.
+
+### Added
+
+- **SLSA build provenance attestations on every GHCR image** via
+  [`actions/attest-build-provenance@v2`](.github/workflows/release.yml).
+  Sigstore signs each image's digest with the workflow's OIDC identity,
+  binding the image to the exact commit + workflow run + Dockerfile that
+  produced it. Attestations are pushed both to the registry
+  (`push-to-registry: true`) and to the GitHub attestations API, so
+  consumers can verify before pulling:
+
+  ```bash
+  gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.5 \
+    --repo jakethehoffer/ledgerly
+  ```
+
+  A passing verification confirms the image was built by this repo's
+  release workflow on a tagged commit — defense against a registry
+  compromise substituting a backdoored image at the same tag. No
+  long-lived signing key is involved; the OIDC token Sigstore trusts
+  is minted per-workflow-run.
+- README: new "Verifying the image (build provenance)" subsection
+  under Docker deployment with the verify command and a one-paragraph
+  rationale (what the attestation proves vs what it doesn't).
+
+### Notes
+
+The v0.1.4 image was retroactively re-published with an attestation via
+`workflow_dispatch` after the workflow change landed; `gh attestation
+verify` against v0.1.4 also passes.
+
 ## [0.1.4] — 2026-05-18
 
 Patch release. Test quality improvements driven by the v0.1.3 coverage
@@ -267,6 +302,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.5]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.5
 [0.1.4]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.4
 [0.1.3]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.3
 [0.1.2]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.2

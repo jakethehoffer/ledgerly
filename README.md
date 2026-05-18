@@ -737,7 +737,7 @@ that produced it — no long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.4 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.5 \
   --repo jakethehoffer/ledgerly
 ```
 
