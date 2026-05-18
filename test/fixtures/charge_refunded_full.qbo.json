@@ -1,7 +1,8 @@
 {
   "TxnDate": "2025-01-18",
   "DocNumber": "_test_full_refund_001",
-  "PrivateNote": "Stripe refund re_test_full_001 for charge ch_test_full_001",
+  "PrivateNote": "Stripe refund re_test_full_001 for charge ch_test_full_001",  "CurrencyRef": { "value": "USD" },
+
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

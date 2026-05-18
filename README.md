@@ -190,10 +190,9 @@ Caveats:
 - Proper FX gain/loss accounting via account 7000 remains spec-deferred.
 - The operator's QBO/Xero company file must have multi-currency enabled
   (and the relevant accounts configured for the foreign currency) before
-  posting non-home-currency entries will succeed downstream. QBO additionally
-  expects a `CurrencyRef` field on each JournalEntry for non-home-currency
-  posts — adding this to the exporter is a follow-up; right now QBO will
-  treat the entry as home-currency.
+  posting non-home-currency entries will succeed downstream. The QBO
+  exporter sets `JournalEntry.CurrencyRef = { value: entry.currency }` on
+  every entry; Xero infers the currency from each line's account.
 
 ## Chart of accounts
 

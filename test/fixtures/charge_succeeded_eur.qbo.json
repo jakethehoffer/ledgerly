@@ -2,6 +2,7 @@
   "TxnDate": "2025-01-15",
   "DocNumber": "rge_succeeded_eur_001",
   "PrivateNote": "Stripe charge ch_test_eur_001 (customer cus_test_eur_001)",
+  "CurrencyRef": { "value": "EUR" },
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

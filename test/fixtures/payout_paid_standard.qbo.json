@@ -1,7 +1,8 @@
 {
   "TxnDate": "2025-01-24",
   "DocNumber": "evt_test_payout_001",
-  "PrivateNote": "Stripe payout po_test_001 to ba_test_001",
+  "PrivateNote": "Stripe payout po_test_001 to ba_test_001",  "CurrencyRef": { "value": "USD" },
+
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

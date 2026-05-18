@@ -2,6 +2,7 @@
   "TxnDate": "2025-01-15",
   "DocNumber": "nvoice_annual_tax_001",
   "PrivateNote": "Stripe invoice in_test_annual_tax_001 (customer cus_test_annual_tax_001)",
+  "CurrencyRef": { "value": "USD" },
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

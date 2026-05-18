@@ -2,6 +2,7 @@
   "TxnDate": "2025-01-25",
   "DocNumber": "est_payout_failed_001",
   "PrivateNote": "Stripe payout po_test_001 failed (returned from ba_test_001)",
+  "CurrencyRef": { "value": "USD" },
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

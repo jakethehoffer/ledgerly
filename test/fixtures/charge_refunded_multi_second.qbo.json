@@ -1,7 +1,8 @@
 {
   "TxnDate": "2025-01-18",
   "DocNumber": "evt_test_multi_002",
-  "PrivateNote": "Stripe refund re_test_multi_002 for charge ch_test_multi_001",
+  "PrivateNote": "Stripe refund re_test_multi_002 for charge ch_test_multi_001",  "CurrencyRef": { "value": "USD" },
+
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

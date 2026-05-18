@@ -2,6 +2,7 @@
   "TxnDate": "2025-01-17",
   "DocNumber": "dispute_withdrawn_001",
   "PrivateNote": "Stripe dispute dp_test_001 funds withdrawn (charge ch_test_001)",
+  "CurrencyRef": { "value": "USD" },
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

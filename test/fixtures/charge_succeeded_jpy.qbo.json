@@ -2,6 +2,7 @@
   "TxnDate": "2025-01-15",
   "DocNumber": "rge_succeeded_jpy_001",
   "PrivateNote": "Stripe charge ch_test_jpy_001 (customer cus_test_jpy_001)",
+  "CurrencyRef": { "value": "JPY" },
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

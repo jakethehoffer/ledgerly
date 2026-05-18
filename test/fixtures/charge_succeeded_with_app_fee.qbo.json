@@ -2,6 +2,7 @@
   "TxnDate": "2025-01-15",
   "DocNumber": "est_charge_appfee_001",
   "PrivateNote": "Stripe charge ch_test_appfee_001 (customer cus_test_appfee_001)",
+  "CurrencyRef": { "value": "USD" },
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

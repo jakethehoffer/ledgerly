@@ -2,6 +2,7 @@
   "TxnDate": "2025-02-01",
   "DocNumber": "st_dispute_closed_001",
   "PrivateNote": "Stripe dispute dp_test_001 closed lost (charge ch_test_001)",
+  "CurrencyRef": { "value": "USD" },
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

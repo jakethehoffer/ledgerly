@@ -1,7 +1,8 @@
 {
   "TxnDate": "2025-01-15",
   "DocNumber": "test_charge_trial_001",
-  "PrivateNote": "Stripe charge ch_test_trial_001 (customer cus_test_trial_001)",
+  "PrivateNote": "Stripe charge ch_test_trial_001 (customer cus_test_trial_001)",  "CurrencyRef": { "value": "USD" },
+
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",

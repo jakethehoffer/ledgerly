@@ -6,6 +6,14 @@ export interface QboJournalEntry {
   TxnDate: string;
   DocNumber?: string;
   PrivateNote: string;
+  /**
+   * QBO posts the entry in the company file's home currency when this field
+   * is omitted. With multi-currency enabled and a foreign-currency entry,
+   * omitting CurrencyRef silently posts the wrong currency, so we always
+   * include it — the field is a no-op for single-currency company files
+   * (where it just matches home).
+   */
+  CurrencyRef: { value: string };
   Line: ReadonlyArray<QboLine>;
 }
 
@@ -56,6 +64,7 @@ export function toQbo(entry: JournalEntry, accountMap: QboAccountMap): QboJourna
   const out: QboJournalEntry = {
     TxnDate: entry.date,
     PrivateNote: entry.memo,
+    CurrencyRef: { value: entry.currency },
     Line: entry.lines.map((l) => lineToQbo(l, accountMap, entry.currency)),
   };
   out.DocNumber = truncateDocNumber(entry.sourceEventId);

@@ -2,6 +2,7 @@
   "TxnDate": "2025-02-15",
   "DocNumber": "ce_proration_down_001",
   "PrivateNote": "Stripe invoice in_test_proration_down_001 (customer cus_test_proration_down_001)",
+  "CurrencyRef": { "value": "USD" },
   "Line": [
     {
       "DetailType": "JournalEntryLineDetail",
