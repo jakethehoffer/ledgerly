@@ -535,10 +535,21 @@ export function sqliteStorage(db: Database.Database): Storage {
     recordEvent.run(eventId, now);
   });
 
+  // Prepared once for the lifetime of this Storage instance; readiness
+  // probes call this on every request and the prepare cost should not
+  // be in the hot path.
+  const pingStmt = db.prepare('SELECT 1 AS ok');
+
   return {
     dedup,
     entries,
     oauth,
+    ping(): void {
+      // .get() throws if the underlying SQLite connection is broken
+      // (file deleted under us, db locked beyond timeout, corrupt page,
+      // etc.); the /readyz handler catches and surfaces the message.
+      pingStmt.get();
+    },
     persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): void {
       persistTxn(eventId, result, now);
     },

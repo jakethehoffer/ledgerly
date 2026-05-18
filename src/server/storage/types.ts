@@ -223,6 +223,21 @@ export interface Storage {
   readonly oauth: OAuthTokenStore;
 
   /**
+   * Cheap reachability check. Implementations issue the smallest possible
+   * query that confirms the storage is responsive (e.g. SQLite `SELECT 1`);
+   * throw if unreachable, return `void` on success. Used by `GET /readyz`
+   * as a readiness probe distinct from `/health` (which always returns 200
+   * with storage counts, suitable for liveness + observability scrapes).
+   *
+   * In-memory backends are always ready as long as the JS heap is alive,
+   * so their implementation is a no-op. Persistent backends must not cache
+   * the result — every call should actually touch the underlying store so
+   * the readiness probe surfaces real connectivity failures (corrupt file,
+   * unmounted volume, etc.) instead of stale "ready" answers.
+   */
+  ping(): void;
+
+  /**
    * Persist every entry in `result` and record `eventId` as processed.
    * Atomic per-backend: either all writes land and the event is recorded, or
    * none do.

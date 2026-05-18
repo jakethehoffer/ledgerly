@@ -256,6 +256,10 @@ export function inMemoryStorage(ttlMs?: number): Storage {
     dedup,
     entries,
     oauth,
+    ping(): void {
+      // In-memory storage is reachable for as long as the process is alive.
+      // No I/O happens; if this function is reachable at all, the storage is.
+    },
     persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): void {
       for (const entry of result.entries) {
         entries.saveImmediate(entry, eventId);

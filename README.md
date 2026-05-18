@@ -717,6 +717,25 @@ linux/amd64, force the target platform:
 docker buildx build --platform linux/amd64 -t ledgerly:latest .
 ```
 
+### Health and readiness probes
+
+Two endpoints distinguish "process alive" from "ready to serve":
+
+- `GET /health` — always 200; body includes dedup size + entry counts. Suitable for Docker's `HEALTHCHECK` (which the image already declares) and as a Kubernetes `livenessProbe`. Storage counts are observability sugar, not a readiness gate — slow counts won't restart your pod.
+- `GET /readyz` — 200 if the storage backend responds to a cheap reachability ping (SQLite: `SELECT 1`; in-memory: no-op), 503 otherwise with the error message under `checks.storage`. Use as a Kubernetes `readinessProbe` so a corrupt or unmounted SQLite file pulls the pod out of the load balancer without triggering a liveness restart.
+
+```yaml
+# Kubernetes pod-spec excerpt
+livenessProbe:
+  httpGet: { path: /health, port: 3000 }
+  initialDelaySeconds: 10
+  periodSeconds: 30
+readinessProbe:
+  httpGet: { path: /readyz, port: 3000 }
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
 ### Behind a reverse proxy
 
 The Stripe webhook handler verifies signatures against the raw request body.

@@ -110,6 +110,9 @@ function resolveStorage(config: ServerConfig): Storage {
       dedup: customDedup,
       entries: base.entries,
       oauth: base.oauth,
+      ping(): void {
+        base.ping();
+      },
       persistMapResult(eventId, result, now = Date.now()): void {
         for (const entry of result.entries) {
           base.entries.saveImmediate(entry, eventId);
@@ -167,6 +170,22 @@ export function createServer(config: ServerConfig): ServerInstance {
       pendingScheduled: storage.entries.countPendingScheduled(),
       failedScheduled: storage.entries.countFailedScheduled(),
     });
+  });
+
+  // Readiness probe distinct from /health: returns 503 (not 200) when the
+  // storage backend is unreachable. K8s rolling deploys point `readinessProbe`
+  // here so a transient DB hiccup pulls the pod out of the load balancer
+  // without triggering a `livenessProbe` restart. The body lists per-check
+  // status so a human can diagnose at a glance.
+  app.get('/readyz', (_req: Request, res: Response) => {
+    try {
+      storage.ping();
+      res.status(200).json({ ready: true, checks: { storage: 'ok' } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn('Readiness check failed', { err: msg });
+      res.status(503).json({ ready: false, checks: { storage: msg } });
+    }
   });
 
   app.get('/metrics', (_req: Request, res: Response) => {

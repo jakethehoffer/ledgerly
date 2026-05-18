@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path';
 import { createServer } from '../../src/server/index.js';
 import { silentLogger } from '../../src/server/logger.js';
 import { inMemoryMetrics } from '../../src/server/metrics.js';
+import { inMemoryStorage } from '../../src/server/storage/inMemory.js';
+import type { Storage } from '../../src/server/storage/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -51,6 +53,40 @@ describe('createServer', () => {
         journalEntries: 0,
         pendingScheduled: 0,
         failedScheduled: 0,
+      });
+    });
+  });
+
+  describe('GET /readyz', () => {
+    it('returns 200 with ready=true when storage.ping succeeds', async () => {
+      const { app } = createServer({ stripe, webhookSecret: WEBHOOK_SECRET });
+      const res = await request(app).get('/readyz');
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ready: true, checks: { storage: 'ok' } });
+    });
+
+    it('returns 503 with ready=false and the error message when ping throws', async () => {
+      // Stub a Storage whose ping fails — everything else delegates to a real
+      // in-memory backend so the other routes still work and the test setup
+      // is minimal.
+      const real = inMemoryStorage();
+      const broken: Storage = {
+        ...real,
+        ping(): void {
+          throw new Error('disk unreachable');
+        },
+      };
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        storage: broken,
+        log: silentLogger(),
+      });
+      const res = await request(app).get('/readyz');
+      expect(res.status).toBe(503);
+      expect(res.body).toEqual({
+        ready: false,
+        checks: { storage: 'disk unreachable' },
       });
     });
   });

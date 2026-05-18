@@ -564,5 +564,25 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(storage.entries.countPendingScheduled()).toBe(0);
       });
     });
+
+    describe('ping', () => {
+      it('does not throw on a fresh storage', () => {
+        const storage = factory();
+        expect(() => {
+          storage.ping();
+        }).not.toThrow();
+      });
+
+      it('still does not throw after writes', () => {
+        const storage = factory();
+        storage.persistMapResult('evt_p', {
+          entries: [makeEntry()],
+          schedule: null,
+        });
+        expect(() => {
+          storage.ping();
+        }).not.toThrow();
+      });
+    });
   });
 }
