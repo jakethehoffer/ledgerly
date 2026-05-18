@@ -29,7 +29,19 @@ export function handleChargeSucceeded(event: Stripe.Event): MapResult {
   const appFee = charge.application_fee_amount ?? 0;
   const isPlatformCharge = appFee > 0;
 
-  const gross = isPlatformCharge ? cents(appFee) : cents(charge.amount);
+  // Use bt.amount as the gross basis so the entry stays balanced when the
+  // Stripe account's settlement currency differs from the customer-facing
+  // charge currency (e.g., Canadian-based account charging in USD: Stripe
+  // converts USD→CAD before depositing to the account balance; bt.amount,
+  // bt.fee, bt.net are all in the BT's settlement currency, while
+  // charge.amount is in the charge's customer-facing currency). For
+  // same-currency charges (charge.currency === bt.currency), bt.amount
+  // equals charge.amount — existing USD fixtures see no behavior change.
+  // For Connect platform charges, bt.amount equals application_fee_amount
+  // when same-currency, so the existing with-app-fee fixture also still
+  // balances. Proper FX rate handling (account 7000 FX Gain/Loss) remains
+  // spec-deferred.
+  const gross = isPlatformCharge ? cents(appFee) : cents(bt.amount);
   const fee = cents(bt.fee);
   const net = cents(bt.net);
 
@@ -45,7 +57,7 @@ export function handleChargeSucceeded(event: Stripe.Event): MapResult {
 
   const entry: JournalEntry = {
     date: epochToUtcDate(event.created),
-    currency: 'USD',
+    currency: bt.currency.toUpperCase(),
     memo: chargeMemo(charge),
     sourceEventId: event.id,
     sourceEventType: event.type,
