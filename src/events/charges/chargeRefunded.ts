@@ -57,18 +57,32 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
       event.id,
     );
 
-    // Sanity invariant: the BT for a refund should net to the inverse of the refund amount.
-    // If they differ, Stripe is doing something we don't yet model (e.g., partial fee clawback).
-    if (bt.net !== -refund.amount) {
+    // Use bt.amount as the refund basis so the entry stays balanced when the
+    // Stripe account's settlement currency differs from the customer-facing
+    // charge currency (e.g., Canadian-based account refunding a USD charge:
+    // Stripe converts USD→CAD; bt.amount/bt.fee/bt.net are all in the BT's
+    // settlement currency, while refund.amount is in the refund's
+    // customer-facing currency). For same-currency refunds, |bt.amount|
+    // equals refund.amount — existing USD fixtures see no behavior change.
+    // The taxRatio above is dimensionless (USD/USD), so applying it to the
+    // BT-currency total produces a tax portion in BT currency. Proper FX
+    // rate handling (account 7000 FX Gain/Loss) remains spec-deferred.
+
+    // Sanity invariant: a refund BT should have no fee (net == amount). If
+    // they differ, Stripe is doing something we don't yet model (e.g.,
+    // partial fee clawback). Comparing within the BT currency stays valid
+    // under FX, where comparing bt.net to -refund.amount would not.
+    if (bt.net !== bt.amount) {
       throw new Error(
         `Refund ${refund.id} balance_transaction net (${String(bt.net)}) does not equal ` +
-          `-amount (${String(-refund.amount)}); fee clawback or unmodeled case`,
+          `amount (${String(bt.amount)}); fee clawback or unmodeled case`,
       );
     }
 
-    const total = cents(refund.amount);
-    const taxPortion = cents(Math.round(refund.amount * taxRatio));
-    const revenuePortion = cents(refund.amount - taxPortion);
+    const grossAbs = Math.abs(bt.amount);
+    const total = cents(grossAbs);
+    const taxPortion = cents(Math.round(grossAbs * taxRatio));
+    const revenuePortion = cents(grossAbs - taxPortion);
 
     const draft: JournalLine[] = [];
     if (revenuePortion > 0) {
@@ -97,7 +111,7 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
 
     return {
       date: epochToUtcDate(refund.created),
-      currency: 'USD',
+      currency: bt.currency.toUpperCase(),
       memo: refundMemo(charge, refund.id),
       sourceEventId: event.id,
       sourceEventType: event.type,

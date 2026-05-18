@@ -17,6 +17,15 @@ export function handleDisputeClosed(event: Stripe.Event): MapResult {
       `Non-USD disputes not yet supported (dispute ${dispute.id} currency=${dispute.currency})`,
     );
   }
+  // FX limitation: this handler only sees dispute.amount (in dispute.currency).
+  // If the originating chargeSucceeded entry posted in the account's
+  // settlement currency (BT currency) and that differs from dispute.currency,
+  // the 'lost' entry below will record 6100/1200 in dispute.currency while
+  // the original 1200 receivable sits in BT currency — producing account-level
+  // currency mixing. funds_withdrawn now rejects FX disputes, so this handler
+  // is shielded in practice via the typical close-after-withdraw lifecycle;
+  // direct close paths under FX remain spec-deferred (charge.dispute.closed
+  // events do not expand BTs the way funds_withdrawn does).
 
   switch (dispute.status) {
     case 'won':

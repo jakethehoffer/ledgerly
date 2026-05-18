@@ -33,6 +33,23 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
     ),
   );
 
+  // FX dispute handling is deferred. The fee-detection logic below compares
+  // |bt.amount| against disputedAmount, which only holds when the dispute
+  // and the BTs share a currency. Under FX (e.g., Canadian-based account
+  // disputing a USD charge), dispute.amount is in dispute.currency while
+  // bt.amount/bt.fee are in settlement currency, so the comparison would
+  // misidentify the split-fee BT and produce an unbalanced entry. Fail
+  // loudly here rather than emit silently wrong journal lines.
+  const allBtsAreSameCurrency = balanceTransactions.every(
+    (bt) => bt.currency === dispute.currency,
+  );
+  if (!allBtsAreSameCurrency) {
+    throw new Error(
+      `FX disputes not yet supported (dispute ${dispute.id}: dispute.currency=${dispute.currency}, ` +
+        `bt currencies=[${balanceTransactions.map((bt) => bt.currency).join(', ')}])`,
+    );
+  }
+
   // Stripe represents the non-refundable dispute fee in two shapes:
   //   (1) A single adjustment BT carrying the fee inline in bt.fee
   //       (amount = -dispute.amount, fee = dispute_fee, net = -(amount + fee)).
