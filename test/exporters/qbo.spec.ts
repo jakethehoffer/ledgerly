@@ -53,23 +53,44 @@ describe('toQbo (cash entry)', () => {
 });
 
 describe('toQboSchedule', () => {
-  it('invoice_payment_succeeded_annual: produces 12 future-dated QBO entries', () => {
+  it('invoice_payment_succeeded_annual: matches the golden schedule output', () => {
     const event = loadJson('invoice_payment_succeeded_annual.event.json') as Stripe.Event;
+    const expected = loadJson('invoice_payment_succeeded_annual.schedule.qbo.json');
     const result = mapEvent(event);
     expect(result.schedule).not.toBeNull();
     const qboEntries = toQboSchedule(result.schedule!, TEST_QBO_ACCOUNT_MAP);
+    expect(qboEntries).toEqual(expected);
+  });
+
+  it('invoice_payment_succeeded_annual: 12 entries each balance debit==credit', () => {
+    // Cheap per-entry invariant in addition to the golden diff above: catches
+    // the case where a future change accidentally produces a structurally
+    // valid but unbalanced entry that the golden also reflects.
+    const event = loadJson('invoice_payment_succeeded_annual.event.json') as Stripe.Event;
+    const result = mapEvent(event);
+    const qboEntries = toQboSchedule(result.schedule!, TEST_QBO_ACCOUNT_MAP);
     expect(qboEntries).toHaveLength(12);
-    expect(qboEntries[0]!.TxnDate).toBe('2025-02-15');
-    expect(qboEntries[11]!.TxnDate).toBe('2026-01-15');
-    // Each entry must have one Debit + one Credit summing to zero net.
     for (const qbo of qboEntries) {
-      expect(qbo.Line).toHaveLength(2);
       const debit = qbo.Line.find((l) => l.JournalEntryLineDetail.PostingType === 'Debit');
       const credit = qbo.Line.find((l) => l.JournalEntryLineDetail.PostingType === 'Credit');
       expect(debit).toBeDefined();
       expect(credit).toBeDefined();
-      expect(debit!.Amount).toBe(100);
-      expect(credit!.Amount).toBe(100);
+      expect(debit!.Amount).toBe(credit!.Amount);
+    }
+  });
+
+  it('invoice_payment_succeeded_annual: each entry has a unique DocNumber', () => {
+    // Schedule entries share the same sourceEventId, so default DocNumber
+    // truncation would collide. Verify the disambiguation pattern produces
+    // 12 distinct values within QBO's 21-char limit.
+    const event = loadJson('invoice_payment_succeeded_annual.event.json') as Stripe.Event;
+    const result = mapEvent(event);
+    const qboEntries = toQboSchedule(result.schedule!, TEST_QBO_ACCOUNT_MAP);
+    const docNumbers = qboEntries.map((e) => e.DocNumber);
+    expect(new Set(docNumbers).size).toBe(12);
+    for (const d of docNumbers) {
+      expect(d).toBeDefined();
+      expect(d!.length).toBeLessThanOrEqual(21);
     }
   });
 });

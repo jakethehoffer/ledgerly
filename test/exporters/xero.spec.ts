@@ -66,20 +66,24 @@ describe('toXero (cash entry)', () => {
 });
 
 describe('toXeroSchedule', () => {
-  it('invoice_payment_succeeded_annual: produces 12 future-dated Xero entries', () => {
+  it('invoice_payment_succeeded_annual: matches the golden schedule output', () => {
     const event = loadJson('invoice_payment_succeeded_annual.event.json') as Stripe.Event;
+    const expected = loadJson('invoice_payment_succeeded_annual.schedule.xero.json');
     const result = mapEvent(event);
     expect(result.schedule).not.toBeNull();
     const xeroEntries = toXeroSchedule(result.schedule!, TEST_XERO_ACCOUNT_MAP);
+    expect(xeroEntries).toEqual(expected);
+  });
+
+  it('invoice_payment_succeeded_annual: 12 entries each sum to zero', () => {
+    // Cheap per-entry invariant in addition to the golden diff above: catches
+    // a future change that produces a structurally valid but unbalanced entry
+    // that the golden also reflects.
+    const event = loadJson('invoice_payment_succeeded_annual.event.json') as Stripe.Event;
+    const result = mapEvent(event);
+    const xeroEntries = toXeroSchedule(result.schedule!, TEST_XERO_ACCOUNT_MAP);
     expect(xeroEntries).toHaveLength(12);
-    const first = xeroEntries[0];
-    const last = xeroEntries[11];
-    expect(first).toBeDefined();
-    expect(last).toBeDefined();
-    expect(first!.Date).toBe('2025-02-15');
-    expect(last!.Date).toBe('2026-01-15');
     for (const xero of xeroEntries) {
-      expect(xero.JournalLines).toHaveLength(2);
       const sum = xero.JournalLines.reduce((acc, l) => acc + l.LineAmount, 0);
       expect(Math.round(sum * 100)).toBe(0);
     }

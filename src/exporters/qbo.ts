@@ -75,5 +75,20 @@ export function toQboSchedule(
   schedule: RecognitionSchedule,
   accountMap: QboAccountMap,
 ): QboJournalEntry[] {
-  return schedule.entries.map((e) => toQbo(e, accountMap));
+  return schedule.entries.map((e, idx) => {
+    const out = toQbo(e, accountMap);
+    // Disambiguate DocNumber across the schedule's monthly entries. Every
+    // recognition entry shares the same sourceEventId (the original invoice
+    // event), so the default `truncate(sourceEventId)` would assign the
+    // identical DocNumber to all 12 monthly entries — bad for reconciliation
+    // and confusing in QBO's transaction list. Append a `-mNN` suffix so
+    // each entry has a unique reference. Reserve the suffix length out of
+    // the 21-char DocNumber budget to keep the value within QBO's limit.
+    const monthLabel = `-m${String(idx + 1).padStart(2, '0')}`;
+    const baseBudget = QBO_DOCNUMBER_MAX - monthLabel.length;
+    const base = e.sourceEventId;
+    const baseTruncated = base.length <= baseBudget ? base : base.slice(-baseBudget);
+    out.DocNumber = baseTruncated + monthLabel;
+    return out;
+  });
 }
