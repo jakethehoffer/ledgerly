@@ -25,7 +25,8 @@ change fits the spirit of the existing codebase."
 git clone https://github.com/jakethehoffer/ledgerly.git
 cd ledgerly
 pnpm install
-pnpm test       # ~500 tests, ~2s on a recent laptop
+pnpm test           # ~500 tests, ~2s on a recent laptop
+pnpm test:coverage  # same tests + per-file v8 coverage report
 pnpm typecheck
 pnpm lint
 pnpm build
