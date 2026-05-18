@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.4] — 2026-05-18
+
+Patch release. Test quality improvements driven by the v0.1.3 coverage
+report — no source-code or operator-visible behavior changes.
+
+### Added
+
+- Schedule goldens for `invoice_payment_succeeded_annual_with_tax`
+  ([`*.schedule.qbo.json`](test/fixtures/invoice_payment_succeeded_annual_with_tax.schedule.qbo.json)
+  and `.schedule.xero.json`). Covers the tax-aware annual recognition
+  path's distinctive rounding pattern: months 1-11 at $83.33, month 12
+  absorbing the 4-cent remainder ($83.37) so the schedule sums to preTax
+  ($1000) exactly. Tests now include a separate "schedule debit total
+  equals preTax exactly" assertion that catches remainder-absorption
+  bugs independently of the golden.
+- Direct unit tests for `src/util/memo.ts` and `src/util/lines.ts`
+  ([`test/util/memo.spec.ts`](test/util/memo.spec.ts),
+  [`test/util/lines.spec.ts`](test/util/lines.spec.ts)). Both files
+  reach 100% statement / branch / function / line coverage; the
+  polymorphic-input branches (customer / destination / dispute.charge
+  as null vs string id vs expanded object) and `sortLines`'s
+  amount-descending tiebreaker now have direct coverage rather than
+  relying on incidental hits from engine fixtures.
+- Payload-validation tests for `src/server/oauth/state.ts`
+  ([`test/server/oauth/state.spec.ts`](test/server/oauth/state.spec.ts)).
+  Closes the post-HMAC validator coverage hole: an attacker with a
+  leaked state secret can sign tokens with any body, so the JSON-parse
+  / key-presence / type-check validators are the last line of CSRF
+  defense. New tests craft tokens with valid signatures and malformed
+  payloads (non-JSON body, null/primitive payload, missing keys,
+  unrecognized provider, wrong-type nonce/expiresAt, short signature
+  triggering the length guard before `timingSafeEqual`).
+
+### Changed
+
+- Overall coverage 92.69% / 85.87% → 93.17% / 87.53%
+  (statements / branches). State.ts moved from 88.37% / 85.71% to
+  97.67% / 97.36%; memo.ts from 88.23% / 66.66% to 100% / 100%;
+  lines.ts from 85.71% / 90% to 100% / 100%.
+- Test count 504 → 540 (+36).
+
 ## [0.1.3] — 2026-05-18
 
 Patch release. Pure tooling and repo polish — no source-code or operator-
@@ -226,6 +267,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.4]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.4
 [0.1.3]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.3
 [0.1.2]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.2
 [0.1.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.1

@@ -14,7 +14,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-504 tests · 13 event types · 30 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+540 tests · 13 event types · 30 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
