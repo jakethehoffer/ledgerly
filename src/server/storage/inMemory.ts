@@ -198,6 +198,12 @@ export function inMemoryOAuthTokenStore(): OAuthTokenStore {
  * + oauth + atomic `persistMapResult`). Under JS single-threaded semantics the
  * sequential writes inside `persistMapResult` are atomic w.r.t. other webhook
  * requests, so no extra locking is required.
+ *
+ * Note: every immediate entry is persisted to BOTH the journal entry audit log
+ * (via `saveImmediate`) AND the dispatch queue (via `saveScheduled` with a
+ * synthetic `immediate:<sourceEventId>` subscription ID). The scheduler picks
+ * the latter up on its next tick and pushes the entry to QBO/Xero. The
+ * journal-entries row remains the canonical audit record.
  */
 export function inMemoryStorage(ttlMs?: number): Storage {
   const dedup = inMemoryDeduplicator(ttlMs);
@@ -210,6 +216,12 @@ export function inMemoryStorage(ttlMs?: number): Storage {
     persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): void {
       for (const entry of result.entries) {
         entries.saveImmediate(entry, eventId);
+        // Also enqueue for dispatch. Synthetic subscriptionId distinguishes
+        // immediate dispatch rows from real recognition-schedule rows.
+        entries.saveScheduled(entry, {
+          subscriptionId: `immediate:${entry.sourceEventId}`,
+          sourceEventId: entry.sourceEventId,
+        });
       }
       if (result.schedule) {
         for (const entry of result.schedule.entries) {

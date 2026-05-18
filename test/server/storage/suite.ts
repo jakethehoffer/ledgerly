@@ -382,7 +382,7 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
     describe('persistMapResult', () => {
       it('persists immediate entries, schedule entries, and records dedup atomically', () => {
         const storage = factory();
-        const immediate = makeEntry({ memo: 'immediate' });
+        const immediate = makeEntry({ memo: 'immediate', sourceEventId: 'evt_annual' });
         const sched1 = makeEntry({ date: '2026-06-01', memo: 'month1' });
         const sched2 = makeEntry({ date: '2026-07-01', memo: 'month2' });
 
@@ -399,15 +399,32 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
 
         expect(storage.dedup.has('evt_annual')).toBe(true);
         expect(storage.entries.countImmediate()).toBe(1);
-        expect(storage.entries.countPendingScheduled()).toBe(2);
+        // Immediate entries are ALSO enqueued for dispatch, so pendingScheduled
+        // counts the 1 immediate + 2 recognition = 3 rows.
+        expect(storage.entries.countPendingScheduled()).toBe(3);
 
         const found = storage.entries.findByEventId('evt_annual');
         expect(found).toHaveLength(1);
         expect(found[0]?.entry.memo).toBe('immediate');
 
         const due = storage.entries.findPendingScheduled('2026-12-31');
-        expect(due).toHaveLength(2);
-        expect(due.map((row) => row.entry.memo).sort()).toEqual(['month1', 'month2']);
+        expect(due).toHaveLength(3);
+        expect(due.map((row) => row.entry.memo).sort()).toEqual([
+          'immediate',
+          'month1',
+          'month2',
+        ]);
+
+        // The immediate-dispatch row uses a synthetic subscriptionId that
+        // distinguishes it from the recognition-schedule rows.
+        const immediateDispatch = due.find((row) => row.entry.memo === 'immediate');
+        expect(immediateDispatch?.subscriptionId).toBe('immediate:evt_annual');
+        expect(immediateDispatch?.eventId).toBe('evt_annual');
+        // Recognition rows still carry the real subscription id.
+        const recognitionRows = due.filter((row) => row.entry.memo !== 'immediate');
+        for (const row of recognitionRows) {
+          expect(row.subscriptionId).toBe('sub_annual');
+        }
       });
 
       it('handles a MapResult with no schedule', () => {
@@ -419,7 +436,14 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         storage.persistMapResult('evt_simple', result);
         expect(storage.dedup.has('evt_simple')).toBe(true);
         expect(storage.entries.countImmediate()).toBe(1);
-        expect(storage.entries.countPendingScheduled()).toBe(0);
+        // The lone immediate entry is also enqueued for dispatch.
+        expect(storage.entries.countPendingScheduled()).toBe(1);
+        const due = storage.entries.findPendingScheduled('2026-12-31');
+        expect(due).toHaveLength(1);
+        expect(due[0]?.subscriptionId).toBe('immediate:evt_test_1');
+        expect(due[0]?.eventId).toBe('evt_test_1');
+        expect(due[0]?.nextAttemptAt).toBeNull();
+        expect(due[0]?.attempts).toBe(0);
       });
 
       it('handles an empty MapResult (informational events)', () => {

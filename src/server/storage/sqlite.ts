@@ -382,6 +382,13 @@ export function sqliteOAuthTokenStore(db: Database.Database): OAuthTokenStore {
  * any write throws (disk full, constraint violation), the whole bundle rolls
  * back and the event is *not* recorded as processed, so Stripe's next
  * redelivery will retry cleanly.
+ *
+ * Note: every immediate entry is persisted to BOTH `journal_entries` (the
+ * canonical audit log) AND `scheduled_entries` (the dispatch queue) inside the
+ * same transaction. The dispatch-queue row uses a synthetic
+ * `immediate:<sourceEventId>` subscription ID so it is distinguishable from
+ * real recognition-schedule rows. The scheduler picks it up on its next tick
+ * and pushes the entry to QBO/Xero.
  */
 export function sqliteStorage(db: Database.Database): Storage {
   const dedup = sqliteDeduplicator(db);
@@ -418,6 +425,16 @@ export function sqliteStorage(db: Database.Database): Storage {
         entry.memo,
         entry.sourceEventType,
         entry.sourceObjectId ?? null,
+        JSON.stringify(entry),
+      );
+      // Also enqueue for dispatch. Synthetic subscriptionId distinguishes
+      // immediate dispatch rows from real recognition-schedule rows.
+      // next_attempt_at defaults to NULL via the schema, so the entry is
+      // eligible on the next scheduler tick.
+      insertScheduled.run(
+        entry.sourceEventId,
+        `immediate:${entry.sourceEventId}`,
+        entry.date,
         JSON.stringify(entry),
       );
     }

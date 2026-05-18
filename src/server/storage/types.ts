@@ -177,6 +177,17 @@ export interface Storage {
    * Persist every entry in `result` and record `eventId` as processed.
    * Atomic per-backend: either all writes land and the event is recorded, or
    * none do.
+   *
+   * For each immediate entry in `result.entries`, the implementation writes
+   * to BOTH the journal entry audit log AND the scheduled-entries dispatch
+   * queue (with a synthetic `immediate:<sourceEventId>` subscription ID and
+   * `scheduled_date = entry.date`). The next scheduler tick picks it up and
+   * pushes it to QBO/Xero. The journal entry row remains the canonical audit
+   * record; the scheduled entry row is the dispatch handle that transitions
+   * `pending` → `posted` (or `failed`) the same way recognition entries do.
+   *
+   * Recognition-schedule entries in `result.schedule.entries` are enqueued
+   * the usual way (future-dated, real subscription ID).
    */
   persistMapResult(eventId: string, result: MapResult, now?: number): void;
 }
