@@ -1,3 +1,4 @@
+import { minorToMajor } from '../currency.js';
 import type { JournalEntry, JournalLine, RecognitionSchedule } from '../journal.js';
 import type { XeroAccountMap } from './types.js';
 
@@ -14,12 +15,11 @@ export interface XeroJournalLine {
   Description?: string;
 }
 
-function centsToMajor(amount: number): number {
-  // Round-trip through string to avoid 0.1 + 0.2 issues; integer cents → 2-decimal float.
-  return Number((amount / 100).toFixed(2));
-}
-
-function lineToXero(line: JournalLine, accountMap: XeroAccountMap): XeroJournalLine {
+function lineToXero(
+  line: JournalLine,
+  accountMap: XeroAccountMap,
+  currency: string,
+): XeroJournalLine {
   // Cast through Partial to preserve the runtime defensive check: even though
   // XeroAccountMap's type says every AccountCode is present, callers can pass a
   // frozen object literal that omits keys (or has them as undefined).
@@ -27,7 +27,8 @@ function lineToXero(line: JournalLine, accountMap: XeroAccountMap): XeroJournalL
   if (!ref) {
     throw new Error(`Xero accountMap missing entry for account ${line.accountCode}`);
   }
-  const signed = line.side === 'debit' ? centsToMajor(line.amount) : -centsToMajor(line.amount);
+  const major = minorToMajor(line.amount, currency);
+  const signed = line.side === 'debit' ? major : -major;
   const out: XeroJournalLine = {
     LineAmount: signed,
     AccountCode: ref.accountCode,
@@ -45,7 +46,7 @@ export function toXero(
     Narration: entry.memo,
     Date: entry.date,
     Status: status,
-    JournalLines: entry.lines.map((l) => lineToXero(l, accountMap)),
+    JournalLines: entry.lines.map((l) => lineToXero(l, accountMap, entry.currency)),
   };
 }
 

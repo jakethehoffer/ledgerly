@@ -1,0 +1,51 @@
+{
+  "id": "evt_test_charge_succeeded_jpy_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "charge.succeeded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "ch_test_jpy_001",
+      "object": "charge",
+      "amount": 12000,
+      "amount_captured": 12000,
+      "amount_refunded": 0,
+      "application_fee_amount": null,
+      "balance_transaction": {
+        "id": "txn_test_jpy_001",
+        "object": "balance_transaction",
+        "amount": 12000,
+        "available_on": 1737158400,
+        "created": 1736942400,
+        "currency": "jpy",
+        "exchange_rate": null,
+        "fee": 432,
+        "fee_details": [
+          {
+            "amount": 432,
+            "application": null,
+            "currency": "jpy",
+            "description": "Stripe processing fees",
+            "type": "stripe_fee"
+          }
+        ],
+        "net": 11568,
+        "reporting_category": "charge",
+        "status": "available",
+        "type": "charge"
+      },
+      "captured": true,
+      "created": 1736942400,
+      "currency": "jpy",
+      "customer": "cus_test_jpy_001",
+      "metadata": {},
+      "paid": true,
+      "refunded": false,
+      "status": "succeeded"
+    }
+  }
+}

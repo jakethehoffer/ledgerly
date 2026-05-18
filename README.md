@@ -169,22 +169,31 @@ the Stripe object and stamps `entry.currency` accordingly. For FX scenarios
 (customer-facing currency ≠ account settlement currency, e.g. a Canadian-default
 account charging in USD), handlers that have access to the underlying
 `balance_transaction` derive amounts and currency from `bt.amount` / `bt.currency`
-so the entry posts in the settlement currency and stays balanced. See
-`charge_succeeded_eur` for a same-currency non-USD example.
+so the entry posts in the settlement currency and stays balanced.
+
+The QBO and Xero exporters scale amounts according to the currency's minor-unit
+precision via [`currencyMinorUnits`](./src/currency.ts):
+
+- **Two-decimal** currencies (USD, EUR, GBP, CAD, AUD, ...) → divide by 100.
+  See `charge_succeeded_eur`.
+- **Zero-decimal** currencies (JPY, KRW, VND, ...) → no scaling; major unit
+  IS the smallest unit. See `charge_succeeded_jpy`.
+- **Three-decimal** currencies (BHD, KWD, JOD, ...) → divide by 1000.
+
+Unrecognized currency codes fall back to two-decimal, matching Stripe's default
+normalization.
 
 Caveats:
-- The QBO and Xero exporters currently format amounts assuming 2-decimal
-  currencies. Zero-decimal currencies (JPY, KRW) and three-decimal currencies
-  (BHD, KWD) would post with the wrong major-unit scaling — exporter follow-up
-  required. The engine itself is currency-agnostic (just sums integer
-  smallest-currency-units).
 - FX disputes (dispute.currency ≠ BT currency) are still rejected by
   `disputeFundsWithdrawn` with a clear error — the split-fee detection logic
   needs more work for the cross-currency case.
 - Proper FX gain/loss accounting via account 7000 remains spec-deferred.
 - The operator's QBO/Xero company file must have multi-currency enabled
   (and the relevant accounts configured for the foreign currency) before
-  posting non-home-currency entries will succeed downstream.
+  posting non-home-currency entries will succeed downstream. QBO additionally
+  expects a `CurrencyRef` field on each JournalEntry for non-home-currency
+  posts — adding this to the exporter is a follow-up; right now QBO will
+  treat the entry as home-currency.
 
 ## Chart of accounts
 

@@ -1,3 +1,4 @@
+import { minorToMajor } from '../currency.js';
 import type { JournalEntry, RecognitionSchedule, JournalLine } from '../journal.js';
 import type { QboAccountMap } from './types.js';
 
@@ -20,11 +21,6 @@ export interface QboLine {
 
 const QBO_DOCNUMBER_MAX = 21;
 
-function centsToMajor(amount: number): number {
-  // Round-trip through string to avoid 0.1 + 0.2 issues; integer cents → 2-decimal float.
-  return Number((amount / 100).toFixed(2));
-}
-
 function truncateDocNumber(eventId: string): string {
   // Take the LAST 21 chars (Stripe IDs and our test IDs put unique entropy at
   // the suffix; slicing the prefix produces collisions for shared event-type
@@ -32,7 +28,11 @@ function truncateDocNumber(eventId: string): string {
   return eventId.length <= QBO_DOCNUMBER_MAX ? eventId : eventId.slice(-QBO_DOCNUMBER_MAX);
 }
 
-function lineToQbo(line: JournalLine, accountMap: QboAccountMap): QboLine {
+function lineToQbo(
+  line: JournalLine,
+  accountMap: QboAccountMap,
+  currency: string,
+): QboLine {
   // Cast through Partial to preserve the runtime defensive check: even though
   // QboAccountMap's type says every AccountCode is present, callers can pass a
   // frozen object literal that omits keys (or has them as undefined).
@@ -42,7 +42,7 @@ function lineToQbo(line: JournalLine, accountMap: QboAccountMap): QboLine {
   }
   const qboLine: QboLine = {
     DetailType: 'JournalEntryLineDetail',
-    Amount: centsToMajor(line.amount),
+    Amount: minorToMajor(line.amount, currency),
     JournalEntryLineDetail: {
       PostingType: line.side === 'debit' ? 'Debit' : 'Credit',
       AccountRef: { value: ref.qboId, name: ref.name },
@@ -56,7 +56,7 @@ export function toQbo(entry: JournalEntry, accountMap: QboAccountMap): QboJourna
   const out: QboJournalEntry = {
     TxnDate: entry.date,
     PrivateNote: entry.memo,
-    Line: entry.lines.map((l) => lineToQbo(l, accountMap)),
+    Line: entry.lines.map((l) => lineToQbo(l, accountMap, entry.currency)),
   };
   out.DocNumber = truncateDocNumber(entry.sourceEventId);
   return out;
