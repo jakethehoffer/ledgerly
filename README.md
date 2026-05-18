@@ -190,7 +190,19 @@ Unrecognized currency codes fall back to two-decimal, matching Stripe's default
 normalization.
 
 Caveats:
-- Proper FX gain/loss accounting via account 7000 remains spec-deferred.
+- Realized FX gain/loss is recognized on **refunds** when the FX rate moved
+  between the original charge and the refund: the cash-out leg posts at the
+  refund-time rate (actual clawback), the revenue-offset leg posts at the
+  original-charge rate (matching the original revenue booking), and account
+  `7000 FX Gain/Loss` absorbs the difference. See the
+  `charge_refunded_fx` fixture. The handler falls back to rate-1.0 (no
+  7000 line) when `charge.balance_transaction` isn't expanded, so callers
+  bypassing the receiver's `expand.ts` see no behavior change for
+  same-currency refunds.
+- FX gain/loss on **other** event types (multi-period revenue recognition,
+  disputes settled at a different rate than the original charge, payouts
+  in a different currency than the settlement balance) is not yet
+  recognized. Those paths post cleanly in BT settlement currency.
 - The operator's QBO/Xero company file must have multi-currency enabled
   (and the relevant accounts configured for the foreign currency) before
   posting non-home-currency entries will succeed downstream. The QBO

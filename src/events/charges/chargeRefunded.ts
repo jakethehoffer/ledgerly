@@ -45,23 +45,29 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     }
   }
 
+  // The original charge's BT carries the FX rate Stripe used at charge time.
+  // When available (the production receiver's expand.ts always requests it),
+  // we compare each refund BT's effective rate against this baseline to
+  // recognize realized FX gain/loss on rate movement between charge and
+  // refund. When the BT isn't expanded (string ID — happens in legacy
+  // fixtures and any caller that skips expansion), we default to rate=1.0
+  // and produce no 7000 line; same-currency books are unaffected because
+  // their true rate is 1.0 anyway, and the FX gain/loss is simply not
+  // recognized for FX cases that bypass expansion. For same-currency
+  // charges with expansion, the rate is also 1.0 and fxDelta = 0, so the
+  // existing fixtures stay byte-identical.
+  const chargeBt = charge.balance_transaction;
+  const originalRate =
+    typeof chargeBt === 'object' && chargeBt !== null && charge.amount > 0
+      ? Math.abs(chargeBt.amount) / charge.amount
+      : 1;
+
   const entries: JournalEntry[] = targetRefunds.map((refund) => {
     const bt = requireExpanded<Stripe.BalanceTransaction>(
       refund.balance_transaction,
       `refund[${refund.id}].balance_transaction`,
       event.id,
     );
-
-    // Use bt.amount as the refund basis so the entry stays balanced when the
-    // Stripe account's settlement currency differs from the customer-facing
-    // charge currency (e.g., Canadian-based account refunding a USD charge:
-    // Stripe converts USD→CAD; bt.amount/bt.fee/bt.net are all in the BT's
-    // settlement currency, while refund.amount is in the refund's
-    // customer-facing currency). For same-currency refunds, |bt.amount|
-    // equals refund.amount — existing USD fixtures see no behavior change.
-    // The taxRatio above is dimensionless (USD/USD), so applying it to the
-    // BT-currency total produces a tax portion in BT currency. Proper FX
-    // rate handling (account 7000 FX Gain/Loss) remains spec-deferred.
 
     // Sanity invariant: a refund BT should have no fee (net == amount). If
     // they differ, Stripe is doing something we don't yet model (e.g.,
@@ -74,17 +80,31 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
       );
     }
 
-    const grossAbs = Math.abs(bt.amount);
-    const total = cents(grossAbs);
-    const taxPortion = cents(Math.round(grossAbs * taxRatio));
-    const revenuePortion = cents(grossAbs - taxPortion);
+    // FX-aware refund booking. The revenue offset (4900) and tax drain
+    // (2000) post at the ORIGINAL rate so they cleanly offset the
+    // original revenue/tax booking. The cash leg (1010) posts at the
+    // refund-time rate (what Stripe actually clawed back from the
+    // balance). The difference between expected and actual settlement
+    // is realized FX gain/loss → account 7000.
+    //
+    // Same-currency case: originalRate = refundRate = 1.0 (both ratios
+    // are |bt.amount| / refund.amount in matching units), so
+    // expectedSettlement = actualSettlement and fxDelta = 0 → no 7000
+    // line, byte-identical to the pre-FX-gain/loss behavior. The
+    // existing same-currency refund fixtures pass unchanged.
+    const actualSettlement = Math.abs(bt.amount);
+    const expectedSettlement = Math.round(refund.amount * originalRate);
+    const fxDelta = actualSettlement - expectedSettlement;
+
+    const taxPortion = Math.round(expectedSettlement * taxRatio);
+    const revenuePortion = expectedSettlement - taxPortion;
 
     const draft: JournalLine[] = [];
     if (revenuePortion > 0) {
       draft.push({
         accountCode: '4900',
         side: 'debit',
-        amount: revenuePortion,
+        amount: cents(revenuePortion),
         memo: 'Refund issued',
       });
     }
@@ -92,16 +112,34 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
       draft.push({
         accountCode: '2000',
         side: 'debit',
-        amount: taxPortion,
+        amount: cents(taxPortion),
         memo: 'Sales tax portion refunded',
       });
     }
     draft.push({
       accountCode: '1010',
       side: 'credit',
-      amount: total,
+      amount: cents(actualSettlement),
       memo: 'Refund deducted from Stripe balance',
     });
+
+    if (fxDelta !== 0) {
+      // Positive fxDelta means we paid back MORE settlement-currency than
+      // the original revenue booking (rate moved against us between charge
+      // and refund) — realized FX loss → 7000 debit. Negative means we
+      // paid back less — realized FX gain → 7000 credit. Either way, the
+      // magnitude is the absolute delta; the side balances the entry.
+      draft.push({
+        accountCode: '7000',
+        side: fxDelta > 0 ? 'debit' : 'credit',
+        amount: cents(Math.abs(fxDelta)),
+        memo:
+          fxDelta > 0
+            ? 'FX loss on refund (rate moved against us)'
+            : 'FX gain on refund (rate moved in our favor)',
+      });
+    }
+
     const lines: ReadonlyArray<JournalLine> = sortLines(draft);
 
     return {

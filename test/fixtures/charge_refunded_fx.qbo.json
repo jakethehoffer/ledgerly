@@ -1,0 +1,46 @@
+{
+  "TxnDate": "2025-01-17",
+  "PrivateNote": "Stripe refund re_test_fx_001 for charge ch_test_fx_001",
+  "CurrencyRef": {
+    "value": "CAD"
+  },
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 135,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-4900",
+          "name": "QBO 4900"
+        }
+      },
+      "Description": "Refund issued"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 5,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-7000",
+          "name": "QBO 7000"
+        }
+      },
+      "Description": "FX loss on refund (rate moved against us)"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 140,
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": {
+          "value": "qbo-1010",
+          "name": "QBO 1010"
+        }
+      },
+      "Description": "Refund deducted from Stripe balance"
+    }
+  ],
+  "DocNumber": "harge_refunded_fx_001"
+}

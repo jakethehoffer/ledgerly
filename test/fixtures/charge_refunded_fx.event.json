@@ -1,0 +1,84 @@
+{
+  "id": "evt_test_charge_refunded_fx_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1737115200,
+  "type": "charge.refunded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "ch_test_fx_001",
+      "object": "charge",
+      "amount": 10000,
+      "amount_captured": 10000,
+      "amount_refunded": 10000,
+      "balance_transaction": {
+        "id": "txn_test_fx_charge_001",
+        "object": "balance_transaction",
+        "amount": 13500,
+        "available_on": 1737158400,
+        "created": 1736942400,
+        "currency": "cad",
+        "description": "Charge ch_test_fx_001",
+        "exchange_rate": 1.35,
+        "fee": 408,
+        "fee_details": [
+          {
+            "amount": 408,
+            "application": null,
+            "currency": "cad",
+            "description": "Stripe processing fees",
+            "type": "stripe_fee"
+          }
+        ],
+        "net": 13092,
+        "reporting_category": "charge",
+        "status": "available",
+        "type": "charge"
+      },
+      "captured": true,
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_fx_001",
+      "metadata": {},
+      "paid": true,
+      "refunded": true,
+      "status": "succeeded",
+      "refunds": {
+        "object": "list",
+        "data": [
+          {
+            "id": "re_test_fx_001",
+            "object": "refund",
+            "amount": 10000,
+            "balance_transaction": {
+              "id": "txn_test_fx_refund_001",
+              "object": "balance_transaction",
+              "amount": -14000,
+              "available_on": 1737331200,
+              "created": 1737115200,
+              "currency": "cad",
+              "exchange_rate": 1.40,
+              "fee": 0,
+              "fee_details": [],
+              "net": -14000,
+              "reporting_category": "refund",
+              "status": "available",
+              "type": "refund"
+            },
+            "charge": "ch_test_fx_001",
+            "created": 1737115200,
+            "currency": "usd",
+            "reason": "requested_by_customer",
+            "status": "succeeded"
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/charges/ch_test_fx_001/refunds"
+      }
+    }
+  }
+}
