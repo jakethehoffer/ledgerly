@@ -10,11 +10,6 @@ export function handlePayoutPaid(event: Stripe.Event): MapResult {
     throw new Error(`handlePayoutPaid received wrong event type: ${event.type}`);
   }
   const payout = event.data.object;
-  if (payout.currency !== 'usd') {
-    throw new Error(
-      `Non-USD payouts not yet supported (payout ${payout.id} currency=${payout.currency})`,
-    );
-  }
   if (payout.amount === 0) {
     return { entries: [], schedule: null };
   }
@@ -27,7 +22,7 @@ export function handlePayoutPaid(event: Stripe.Event): MapResult {
 
   const entry: JournalEntry = {
     date: epochToUtcDate(payout.arrival_date),
-    currency: 'USD',
+    currency: payout.currency.toUpperCase(),
     memo: payoutMemo(payout),
     sourceEventId: event.id,
     sourceEventType: event.type,

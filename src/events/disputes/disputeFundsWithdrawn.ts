@@ -13,11 +13,6 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
     );
   }
   const dispute = event.data.object;
-  if (dispute.currency !== 'usd') {
-    throw new Error(
-      `Non-USD disputes not yet supported (dispute ${dispute.id} currency=${dispute.currency})`,
-    );
-  }
   if (dispute.amount === 0) {
     return { entries: [], schedule: null };
   }
@@ -96,7 +91,7 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
 
   const entry: JournalEntry = {
     date: epochToUtcDate(event.created),
-    currency: 'USD',
+    currency: dispute.currency.toUpperCase(),
     memo: disputeMemo(dispute, 'funds withdrawn'),
     sourceEventId: event.id,
     sourceEventType: event.type,

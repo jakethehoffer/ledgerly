@@ -11,11 +11,6 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     throw new Error(`handleChargeRefunded received wrong event type: ${event.type}`);
   }
   const charge = event.data.object;
-  if (charge.currency !== 'usd') {
-    throw new Error(
-      `Non-USD refunds not yet supported (charge ${charge.id} currency=${charge.currency})`,
-    );
-  }
 
   const refundsList = charge.refunds;
   if (!refundsList || refundsList.data.length === 0) {

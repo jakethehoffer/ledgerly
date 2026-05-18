@@ -13,11 +13,6 @@ export function handleDisputeFundsReinstated(event: Stripe.Event): MapResult {
     );
   }
   const dispute = event.data.object;
-  if (dispute.currency !== 'usd') {
-    throw new Error(
-      `Non-USD disputes not yet supported (dispute ${dispute.id} currency=${dispute.currency})`,
-    );
-  }
   if (dispute.amount === 0) {
     return { entries: [], schedule: null };
   }

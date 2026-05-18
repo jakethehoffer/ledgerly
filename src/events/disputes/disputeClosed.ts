@@ -12,11 +12,6 @@ export function handleDisputeClosed(event: Stripe.Event): MapResult {
     );
   }
   const dispute = event.data.object;
-  if (dispute.currency !== 'usd') {
-    throw new Error(
-      `Non-USD disputes not yet supported (dispute ${dispute.id} currency=${dispute.currency})`,
-    );
-  }
   // FX limitation: this handler only sees dispute.amount (in dispute.currency).
   // If the originating chargeSucceeded entry posted in the account's
   // settlement currency (BT currency) and that differs from dispute.currency,
@@ -55,7 +50,7 @@ export function handleDisputeClosed(event: Stripe.Event): MapResult {
       const lines: ReadonlyArray<JournalLine> = sortLines(rawLines);
       const entry: JournalEntry = {
         date: epochToUtcDate(event.created),
-        currency: 'USD',
+        currency: dispute.currency.toUpperCase(),
         memo: disputeMemo(dispute, 'closed lost'),
         sourceEventId: event.id,
         sourceEventType: event.type,

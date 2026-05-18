@@ -183,11 +183,6 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
     throw new Error(`handleInvoicePaymentSucceeded received wrong event type: ${event.type}`);
   }
   const invoice = event.data.object;
-  if (invoice.currency !== 'usd') {
-    throw new Error(
-      `Non-USD invoices not yet supported (invoice ${String(invoice.id)} currency=${invoice.currency})`,
-    );
-  }
   if (invoice.amount_paid === 0) {
     return { entries: [], schedule: null };
   }

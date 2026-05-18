@@ -159,7 +159,32 @@ If `charge.invoice` is not expanded (a string ID or null), refunds are booked as
 | `payout.paid` | standard (USD) |
 | `payout.failed` | standard |
 
-Events outside this list throw `UnhandledEventError`. Multi-currency / FX conversion (`charge.succeeded fx-conversion`, `payout.paid multi-currency`) is explicitly deferred — see the design spec.
+Events outside this list throw `UnhandledEventError`.
+
+### Currency support
+
+Ledgerly accepts charges, refunds, invoices, disputes, and payouts in any
+currency Stripe supports. The handler reads the source currency directly from
+the Stripe object and stamps `entry.currency` accordingly. For FX scenarios
+(customer-facing currency ≠ account settlement currency, e.g. a Canadian-default
+account charging in USD), handlers that have access to the underlying
+`balance_transaction` derive amounts and currency from `bt.amount` / `bt.currency`
+so the entry posts in the settlement currency and stays balanced. See
+`charge_succeeded_eur` for a same-currency non-USD example.
+
+Caveats:
+- The QBO and Xero exporters currently format amounts assuming 2-decimal
+  currencies. Zero-decimal currencies (JPY, KRW) and three-decimal currencies
+  (BHD, KWD) would post with the wrong major-unit scaling — exporter follow-up
+  required. The engine itself is currency-agnostic (just sums integer
+  smallest-currency-units).
+- FX disputes (dispute.currency ≠ BT currency) are still rejected by
+  `disputeFundsWithdrawn` with a clear error — the split-fee detection logic
+  needs more work for the cross-currency case.
+- Proper FX gain/loss accounting via account 7000 remains spec-deferred.
+- The operator's QBO/Xero company file must have multi-currency enabled
+  (and the relevant accounts configured for the foreign currency) before
+  posting non-home-currency entries will succeed downstream.
 
 ## Chart of accounts
 
