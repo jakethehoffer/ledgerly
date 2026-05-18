@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.3] — 2026-05-18
+
+Patch release. Pure tooling and repo polish — no source-code or operator-
+visible behavior changes since v0.1.2.
+
+### Added
+
+- **Code coverage reporting** via `@vitest/coverage-v8` (`pnpm test:coverage`).
+  CI runs the suite with v8 coverage instrumentation and uploads `lcov.info`
+  to Codecov via the `codecov/codecov-action@v5` action; for public repos
+  the action uses GitHub OIDC, so no token is required. Baseline measured
+  at 92.69% / 85.87% / 97.46% / 92.69% (statements / branches / functions /
+  lines). Soft thresholds set ~5 points below the baseline so meaningful
+  regressions get flagged without blocking PRs on noise.
+- **README Codecov badge** next to the existing CI / Release / License /
+  Container badges.
+- **GitHub issue and PR templates**
+  ([`.github/ISSUE_TEMPLATE/*`](.github/ISSUE_TEMPLATE),
+  [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)).
+  Bug-report and feature-request YAML forms with structured fields;
+  `config.yml` disables blank issues and routes security reports to
+  [`SECURITY.md`](./SECURITY.md). PR template prompts authors to confirm
+  the standard typecheck/lint/test/build checks plus the relevant docs +
+  CHANGELOG updates.
+
 ## [0.1.2] — 2026-05-18
 
 Patch release. The only operator-visible change is the QBO `DocNumber`
@@ -201,6 +226,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.3]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.3
 [0.1.2]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.2
 [0.1.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.0
