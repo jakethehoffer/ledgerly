@@ -6,17 +6,20 @@ interface MockStripe {
   charges: { retrieve: ReturnType<typeof vi.fn> };
   invoices: { retrieve: ReturnType<typeof vi.fn> };
   disputes: { retrieve: ReturnType<typeof vi.fn> };
+  payouts: { retrieve: ReturnType<typeof vi.fn> };
 }
 
 function makeMockStripe(overrides: {
   charge?: object;
   invoice?: object;
   dispute?: object;
+  payout?: object;
 }): MockStripe {
   return {
     charges: { retrieve: vi.fn().mockResolvedValue(overrides.charge ?? {}) },
     invoices: { retrieve: vi.fn().mockResolvedValue(overrides.invoice ?? {}) },
     disputes: { retrieve: vi.fn().mockResolvedValue(overrides.dispute ?? {}) },
+    payouts: { retrieve: vi.fn().mockResolvedValue(overrides.payout ?? {}) },
   };
 }
 
@@ -95,6 +98,20 @@ describe('expandEvent', () => {
   it.each([
     'payout.paid',
     'payout.failed',
+  ])('expands %s with destination (for cross-currency detection)', async (type) => {
+    const expanded = { id: 'po_1' };
+    const mock = makeMockStripe({ payout: expanded });
+    const event = makeEvent(type, { id: 'po_1' });
+
+    const out = await expandEvent(mock as unknown as Stripe, event);
+
+    expect(mock.payouts.retrieve).toHaveBeenCalledWith('po_1', {
+      expand: ['destination'],
+    });
+    expect(out.data.object).toBe(expanded);
+  });
+
+  it.each([
     'charge.failed',
     'charge.dispute.created',
     'invoice.payment_failed',
@@ -110,6 +127,7 @@ describe('expandEvent', () => {
     expect(mock.charges.retrieve).not.toHaveBeenCalled();
     expect(mock.invoices.retrieve).not.toHaveBeenCalled();
     expect(mock.disputes.retrieve).not.toHaveBeenCalled();
+    expect(mock.payouts.retrieve).not.toHaveBeenCalled();
   });
 
   it('returns unknown event types unchanged', async () => {

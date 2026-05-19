@@ -216,9 +216,16 @@ Caveats:
   settlementAmount: 13000, ... }`. Same-currency events omit `fxContext`
   entirely, so their JSON is unchanged.
 - **Cross-currency payouts** (Stripe converting between settlement
-  currencies before bank delivery) is not yet recognized. That path
-  posts cleanly in BT settlement currency and needs real fixture data
-  on Stripe's BT shape to implement correctly.
+  currency and the destination bank's currency, e.g. a CAD-settling
+  account paying out to a USD bank account) are **explicitly rejected
+  with a clear error**. The receiver's `expand.ts` expands
+  `payout.destination` so the engine can compare `destination.currency`
+  against `payout.currency`; on a mismatch the handler throws with a
+  message pointing operators at where to report the BT shape. The
+  alternative — silently producing a 1000/1010 transfer in the source
+  currency that doesn't account for Stripe's FX fee — was worse than
+  refusing. Implementation will follow once real-world fixture data on
+  the cross-currency payout BT shape is available.
 - The operator's QBO/Xero company file must have multi-currency enabled
   (and the relevant accounts configured for the foreign currency) before
   posting non-home-currency entries will succeed downstream. The QBO

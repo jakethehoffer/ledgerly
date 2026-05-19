@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Stripe from 'stripe';
 import request from 'supertest';
 import { readFileSync } from 'node:fs';
@@ -19,6 +19,25 @@ const WEBHOOK_SECRET = 'whsec_test_dummy_secret_value';
 // Stripe's webhook utilities live on the SDK prototype and don't need an
 // API key, but instantiating the SDK requires one. Use a throwaway value.
 const stripe = new Stripe('sk_test_dummy');
+
+// Stub `stripe.payouts.retrieve` to return the fixture's payout object
+// directly. The server tests use payout_paid_standard for the
+// "processes a known event" cases precisely because it kept the test
+// off the Stripe network — but v0.1.11 expand.ts now requests
+// `expand: ['destination']` on payout events so the engine can detect
+// cross-currency payouts. The stub preserves the no-network test
+// setup; it returns the original payout object (with destination still
+// a string ID), so the engine treats it as same-currency and produces
+// the same entries the older test suite expected.
+const payoutFixturePath = join(FIXTURE_DIR, 'payout_paid_standard.event.json');
+const payoutFixtureEvent = JSON.parse(
+  readFileSync(payoutFixturePath, 'utf8'),
+) as Stripe.Event;
+const payoutFixtureObject = payoutFixtureEvent.data.object as Stripe.Payout;
+type RetrieveFn = typeof stripe.payouts.retrieve;
+(
+  stripe.payouts as unknown as { retrieve: RetrieveFn }
+).retrieve = vi.fn().mockResolvedValue(payoutFixtureObject) as unknown as RetrieveFn;
 
 function loadFixture(name: string): { raw: string; parsed: Stripe.Event } {
   const path = join(FIXTURE_DIR, `${name}.event.json`);

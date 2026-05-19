@@ -4,12 +4,18 @@ import type { JournalEntry, JournalLine, MapResult } from '../../journal.js';
 import { epochToUtcDate } from '../../util/dates.js';
 import { sortLines } from '../../util/lines.js';
 import { payoutMemo } from '../../util/memo.js';
+import { rejectCrossCurrencyPayout } from './crossCurrency.js';
 
 export function handlePayoutFailed(event: Stripe.Event): MapResult {
   if (event.type !== 'payout.failed') {
     throw new Error(`handlePayoutFailed received wrong event type: ${event.type}`);
   }
   const payout = event.data.object;
+  // Detect cross-currency payout (Stripe converting between settlement
+  // and destination bank currency) and throw early. Even for a failed
+  // payout, the reverse leg involves the same FX-fee question — until
+  // the BT shape is known, refuse rather than silently mismodel.
+  rejectCrossCurrencyPayout(payout);
   if (payout.amount === 0) {
     return { entries: [], schedule: null };
   }

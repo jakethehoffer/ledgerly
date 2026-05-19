@@ -54,9 +54,21 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
       return cloneEventWithObject(event, expanded);
     }
 
-    // No expansion needed for these — handler reads only inline scalars.
     case 'payout.paid':
-    case 'payout.failed':
+    case 'payout.failed': {
+      // `destination` is expanded so the payout handlers can detect
+      // cross-currency payouts (destination bank currency ≠ settlement
+      // currency) and reject them loudly instead of silently producing
+      // a 1000/1010 transfer that doesn't account for the FX conversion
+      // Stripe applied at payout time.
+      const payout = event.data.object;
+      const expanded = await stripe.payouts.retrieve(payout.id, {
+        expand: ['destination'],
+      });
+      return cloneEventWithObject(event, expanded);
+    }
+
+    // No expansion needed for these — handler reads only inline scalars.
     case 'charge.failed':
     case 'charge.dispute.created':
     case 'invoice.payment_failed':
