@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.10] — 2026-05-19
+
+### Added
+
+- **`fxContext` is now populated consistently across all four
+  FX-affected handlers**, not just `invoicePaymentSucceeded`. The field
+  was introduced in v0.1.9 but only on invoice payments; this release
+  closes the consistency hole by populating it on `chargeSucceeded`,
+  `chargeRefunded`, and `disputeFundsWithdrawn` as well.
+
+  Per-handler semantics:
+  | Handler | `customerAmount` | `settlementAmount` |
+  | --- | --- | --- |
+  | `chargeSucceeded` | `charge.amount` | `bt.amount` |
+  | `chargeRefunded` | `refund.amount` (per refund) | `|refund_bt.amount|` |
+  | `disputeFundsWithdrawn` | `dispute.amount` | `actualClawback` |
+  | `invoicePaymentSucceeded` | `invoice.amount_paid` (+ pro-rated per schedule entry) | `bt.amount` (+ pro-rated) |
+
+  Note on dispute design: `fxContext.settlementAmount` is the
+  **actual clawback at dispute time**, not the `expectedClawback`
+  computed at the original-charge rate. `fxContext` describes the
+  conversion that actually happened on the event; the realized FX
+  gain/loss against the original is already captured by the 7000 line
+  (when present). Two pieces of information, two slots.
+
+- New `src/util/fxContext.ts` houses the shared `buildFxContext` +
+  `withFx` helpers. Previously inlined in `invoicePaymentSucceeded`;
+  now imported by all four FX-aware handlers.
+
+- New fixture `charge_succeeded_fx` exercises the chargeSucceeded FX
+  path end-to-end: USD-50 charge converted to CAD at rate 1.375 →
+  CAD 68.75 entry with `fxContext { USD 5000 / CAD 6875 }`. Plus QBO
+  and Xero exporter goldens.
+
+### Changed
+
+- Existing FX fixtures' `expected.json` regenerated to include the
+  new `fxContext` field: `charge_refunded_fx`,
+  `dispute_funds_withdrawn_fx`, `dispute_funds_withdrawn_fx_rate_drift`.
+  Exporter (`.qbo.json` / `.xero.json`) goldens unchanged — the
+  exporters ignore `fxContext`; it's engine-output metadata only.
+
+### Compatibility
+
+Same-currency events on all four handlers continue to omit `fxContext`
+from their JSON output (`buildFxContext` returns `undefined`, `withFx`
+returns the entry untouched). Every existing same-currency fixture
+passes byte-identical to v0.1.9.
+
 ## [0.1.9] — 2026-05-19
 
 ### Added
@@ -525,6 +574,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.10]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.10
 [0.1.9]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.9
 [0.1.8]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.8
 [0.1.7]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.7
