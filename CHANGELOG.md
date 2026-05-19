@@ -6,6 +6,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.9] — 2026-05-19
+
+### Added
+
+- **`JournalEntry.fxContext`** (optional). When the source event involved
+  an FX conversion (`charge.currency ≠ bt.currency`), entries now carry
+  a structured `FxContext` field exposing both sides of the conversion:
+
+  ```ts
+  interface FxContext {
+    readonly customerCurrency: string;     // uppercase ISO 4217
+    readonly customerAmount: Cents;
+    readonly settlementCurrency: string;
+    readonly settlementAmount: Cents;
+  }
+  ```
+
+  This is the engine's contribution to **multi-period FX recognition**.
+  Ledgerly can't auto-compute month-by-month FX gain/loss on annual
+  recognition schedules without external monthly rate lookups (Stripe
+  only tells us the rate at the original charge moment). But it can —
+  and now does — expose enough FX provenance on every recognition entry
+  that a downstream tool with a home-currency rate source can compute
+  the revaluation itself.
+
+- Populated by `invoicePaymentSucceeded` on FX invoices:
+  - **Cash entry**: full conversion (`customerAmount` = invoice
+    `amount_paid`, `settlementAmount` = `bt.amount`).
+  - **Each monthly recognition entry**: PRO-RATED amounts so per-month
+    customer/settlement totals across the 12-entry schedule sum to the
+    invoice's preTax exactly. Month 12 absorbs both customer-side AND
+    settlement-side rounding remainders.
+
+- New fixture `invoice_payment_succeeded_annual_fx` and its QBO + Xero
+  cash and `.schedule` goldens. Scenario: USD-1200 invoice settled to
+  CAD at rate 1.30, no tax. Cash entry: `1010 debit CAD 1513.20 /
+  6000 debit CAD 46.80 / 2100 credit CAD 1560.00`. Each of the 12
+  recognition entries: `2100 debit CAD 130 / 4000 credit CAD 130` plus
+  `fxContext { USD 10000 / CAD 13000 }`.
+
+### Changed
+
+- README's currency caveats updated. Multi-period FX recognition moved
+  from "spec-deferred" to "engine exposes the data; downstream computes
+  the revaluation." Cross-currency payouts (Stripe converting between
+  settlement currencies before bank delivery) remain deferred — they
+  need real fixture data on Stripe's BT shape that ledgerly doesn't
+  have.
+
+### Compatibility
+
+`fxContext` is **omitted entirely** from JournalEntry JSON when undefined
+(same-currency events). All existing same-currency fixtures —
+charge_succeeded_*, invoice_payment_succeeded_monthly / annual /
+annual_with_tax / prorated_upgrade / prorated_downgrade / with_app_fee /
+with_tax, the charge_refunded_* family, dispute_* — are byte-identical
+to v0.1.8.
+
 ## [0.1.8] — 2026-05-19
 
 ### Added
@@ -467,6 +525,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.9]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.9
 [0.1.8]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.8
 [0.1.7]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.7
 [0.1.6]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.6
