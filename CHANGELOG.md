@@ -6,6 +6,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.8] — 2026-05-19
+
+### Added
+
+- **Realized FX gain/loss is now recognized on dispute withdrawals**, not
+  just refunds. When the FX rate moved between the original charge and
+  the dispute, the `chargeDisputeFundsWithdrawn` handler routes the
+  rate-movement delta to account `7000 FX Gain/Loss` — same accounting
+  model as the refund path shipped in v0.1.7:
+
+  - `1200 Disputes Receivable` debits the **original-rate** settlement
+    amount (`dispute.amount × originalRate`), so it cleanly releases the
+    receivable the original `chargeSucceeded` booked.
+  - `1010 Stripe Clearing` credits the **dispute-time-rate** settlement
+    that Stripe actually clawed back (`|clawbackBt.amount| + feeTotal`).
+  - `6100 Payment Disputes` debits the dispute fee at the dispute rate.
+  - `7000 FX Gain/Loss` absorbs the difference — debit on rate move
+    against the operator (realized loss), credit on rate move in their
+    favor (realized gain).
+
+  See the new `dispute_funds_withdrawn_fx_rate_drift` fixture for a
+  worked example: USD-50 charge at CAD 1.30 (CAD 65 receivable),
+  disputed later at CAD 1.40 (CAD 70 clawed back) + C$20 dispute fee →
+  `1200 debit 65, 6100 debit 20, 7000 debit 5, 1010 credit 90`.
+
+- `expand.ts` now requests `charge.balance_transaction` on every
+  dispute event (added to the existing `balance_transactions`
+  expansion). The original charge's BT is what the handler needs to
+  compute the rate Stripe used at charge time. Same one-line pattern
+  that enabled the refund FX gain/loss work in v0.1.7.
+
+- New fixture `dispute_funds_withdrawn_fx_rate_drift` plus QBO and
+  Xero exporter goldens.
+
+### Changed
+
+- README's currency caveats updated. Refunds **and** dispute
+  withdrawals are now both 7000-aware. The remaining deferrals
+  (multi-period recognition rate drift, cross-currency payouts) are
+  documented with their genuine blockers — multi-period drift would
+  need a home-currency config or month-by-month rate lookups;
+  cross-currency payouts need real fixture data on Stripe's BT shape.
+
+### Compatibility
+
+Same-currency dispute fixtures and the existing
+`dispute_funds_withdrawn_fx` fixture (which has a string
+`dispute.charge`) are **byte-identical** to v0.1.7. The handler's
+graceful fallback — when `charge.balance_transaction` isn't expanded,
+treat `expectedClawback = actualClawback` and skip the 7000 line —
+preserves v0.1.6/v0.1.7 behavior for any caller bypassing `expand.ts`.
+Same-currency disputes through `expand.ts` also produce no 7000 line
+because their true rate is 1.0 and `fxDelta = 0` arithmetically.
+
 ## [0.1.7] — 2026-05-18
 
 ### Added
@@ -413,6 +467,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.8]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.8
 [0.1.7]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.7
 [0.1.6]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.6
 [0.1.5]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.5
