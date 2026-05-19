@@ -1,0 +1,380 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-15",
+      "currency": "CAD",
+      "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001)",
+      "sourceEventId": "evt_test_invoice_annual_fx_001",
+      "sourceEventType": "invoice.payment_succeeded",
+      "sourceObjectId": "in_test_annual_fx_001",
+      "lines": [
+        {
+          "accountCode": "1010",
+          "side": "debit",
+          "amount": 151320,
+          "memo": "Net to Stripe balance"
+        },
+        {
+          "accountCode": "6000",
+          "side": "debit",
+          "amount": 4680,
+          "memo": "Stripe processing fee"
+        },
+        {
+          "accountCode": "2100",
+          "side": "credit",
+          "amount": 156000,
+          "memo": "Annual subscription deferred"
+        }
+      ],
+      "fxContext": {
+        "customerCurrency": "USD",
+        "customerAmount": 120000,
+        "settlementCurrency": "CAD",
+        "settlementAmount": 156000
+      }
+    }
+  ],
+  "schedule": {
+    "subscriptionId": "sub_test_annual_fx_001",
+    "sourceEventId": "evt_test_invoice_annual_fx_001",
+    "entries": [
+      {
+        "date": "2025-02-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 1/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-03-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 2/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-04-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 3/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-05-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 4/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-06-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 5/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-07-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 6/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-08-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 7/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-09-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 8/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-10-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 9/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-11-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 10/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2025-12-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 11/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      },
+      {
+        "date": "2026-01-15",
+        "currency": "CAD",
+        "memo": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001) — month 12/12 recognition",
+        "sourceEventId": "evt_test_invoice_annual_fx_001",
+        "sourceEventType": "invoice.payment_succeeded",
+        "sourceObjectId": "in_test_annual_fx_001",
+        "lines": [
+          {
+            "accountCode": "2100",
+            "side": "debit",
+            "amount": 13000,
+            "memo": "Recognize from deferred"
+          },
+          {
+            "accountCode": "4000",
+            "side": "credit",
+            "amount": 13000,
+            "memo": "Subscription revenue"
+          }
+        ],
+        "fxContext": {
+          "customerCurrency": "USD",
+          "customerAmount": 10000,
+          "settlementCurrency": "CAD",
+          "settlementAmount": 13000
+        }
+      }
+    ]
+  }
+}

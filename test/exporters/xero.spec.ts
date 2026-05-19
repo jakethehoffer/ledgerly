@@ -35,6 +35,7 @@ const FIXTURES = [
   'invoice_payment_succeeded_monthly_with_tax',
   'invoice_payment_succeeded_annual',
   'invoice_payment_succeeded_annual_with_tax',
+  'invoice_payment_succeeded_annual_fx',
   'invoice_payment_succeeded_prorated_upgrade',
   'invoice_payment_succeeded_prorated_downgrade',
   'invoice_payment_succeeded_with_app_fee',
@@ -119,5 +120,23 @@ describe('toXeroSchedule', () => {
       const sum = xero.JournalLines.reduce((acc, l) => acc + l.LineAmount, 0);
       expect(Math.round(sum * 100)).toBe(0);
     }
+  });
+
+  it('invoice_payment_succeeded_annual_fx: matches the golden schedule output', () => {
+    // FX annual: USD-1200 invoice settled in CAD at rate 1.30. Engine output
+    // schedule entries are exercised by the engine spec via the new
+    // expected.json; here we additionally confirm the Xero exporter passes
+    // the per-month CAD amounts through without dropping the fxContext or
+    // mis-converting amounts.
+    const event = loadJson(
+      'invoice_payment_succeeded_annual_fx.event.json',
+    ) as Stripe.Event;
+    const expected = loadJson(
+      'invoice_payment_succeeded_annual_fx.schedule.xero.json',
+    );
+    const result = mapEvent(event);
+    expect(result.schedule).not.toBeNull();
+    const xeroEntries = toXeroSchedule(result.schedule!, TEST_XERO_ACCOUNT_MAP);
+    expect(xeroEntries).toEqual(expected);
   });
 });

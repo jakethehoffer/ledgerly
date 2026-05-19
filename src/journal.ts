@@ -8,6 +8,32 @@ export interface JournalLine {
   readonly memo?: string;
 }
 
+/**
+ * Optional FX provenance attached to a {@link JournalEntry} when Stripe
+ * converted between currencies on the source event (customer-facing ≠
+ * settlement). The engine doesn't itself do anything with this metadata —
+ * entries always balance in `JournalEntry.currency` (the settlement
+ * currency) — but downstream tools that need home-currency books or
+ * month-by-month FX revaluation can use it to compute their own
+ * conversions against an external rate source.
+ *
+ * For multi-period recognition schedule entries (annual subscriptions
+ * recognized monthly), `customerAmount` and `settlementAmount` are
+ * pro-rated to that month's portion. The last month absorbs any rounding
+ * remainder so the schedule's `customerAmount` sum equals the invoice's
+ * customer-facing amount exactly.
+ *
+ * Currencies are uppercase ISO 4217 codes — matching
+ * {@link JournalEntry.currency} so callers can compare or format both
+ * with the same casing rules.
+ */
+export interface FxContext {
+  readonly customerCurrency: string;
+  readonly customerAmount: Cents;
+  readonly settlementCurrency: string;
+  readonly settlementAmount: Cents;
+}
+
 export interface JournalEntry {
   readonly date: string;            // ISO YYYY-MM-DD
   readonly currency: string;        // 'USD'
@@ -16,6 +42,12 @@ export interface JournalEntry {
   readonly sourceEventType: string;
   readonly sourceObjectId?: string;
   readonly lines: ReadonlyArray<JournalLine>;
+  /**
+   * Present only when the source event involved an FX conversion. See
+   * {@link FxContext}. Same-currency events omit this field so
+   * downstream JSON serialization stays minimal.
+   */
+  readonly fxContext?: FxContext;
 }
 
 export interface RecognitionSchedule {

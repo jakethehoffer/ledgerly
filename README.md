@@ -201,14 +201,24 @@ Caveats:
   original `charge.balance_transaction` isn't expanded, so callers
   bypassing the receiver's `expand.ts` see no behavior change for
   same-currency events.
-- FX gain/loss on **multi-period revenue recognition** (annual
-  subscriptions recognized monthly while the rate drifts) and
-  **cross-currency payouts** is not yet recognized. Those paths post
-  cleanly in BT settlement currency. Multi-period recognition drift would
-  require either a home-currency config or month-by-month rate lookups;
-  cross-currency payouts need real fixture data on Stripe's BT shape for
-  payouts that convert between settlement currencies before bank
-  delivery.
+- **Multi-period FX recognition is not auto-computed**, but the engine
+  exposes enough information that downstream tools with a home-currency
+  rate source can do it themselves. When an FX invoice is recognized
+  monthly, every cash entry AND every monthly recognition entry carries
+  an optional `fxContext` field (`{ customerCurrency, customerAmount,
+  settlementCurrency, settlementAmount }`) with **pro-rated** amounts —
+  so an operator with a USD-home rate source for, say, a USD→CAD
+  account can revalue each month's `settlementAmount` against that
+  month's rate and post their own FX gain/loss against the
+  `customerAmount` baseline. See the `invoice_payment_succeeded_annual_fx`
+  fixture: a USD-1200 invoice settled in CAD at rate 1.30 produces 12
+  recognition entries, each with `fxContext: { customerAmount: 10000,
+  settlementAmount: 13000, ... }`. Same-currency events omit `fxContext`
+  entirely, so their JSON is unchanged.
+- **Cross-currency payouts** (Stripe converting between settlement
+  currencies before bank delivery) is not yet recognized. That path
+  posts cleanly in BT settlement currency and needs real fixture data
+  on Stripe's BT shape to implement correctly.
 - The operator's QBO/Xero company file must have multi-currency enabled
   (and the relevant accounts configured for the foreign currency) before
   posting non-home-currency entries will succeed downstream. The QBO

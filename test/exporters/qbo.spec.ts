@@ -35,6 +35,7 @@ const FIXTURES = [
   'invoice_payment_succeeded_monthly_with_tax',
   'invoice_payment_succeeded_annual',
   'invoice_payment_succeeded_annual_with_tax',
+  'invoice_payment_succeeded_annual_fx',
   'invoice_payment_succeeded_prorated_upgrade',
   'invoice_payment_succeeded_prorated_downgrade',
   'invoice_payment_succeeded_with_app_fee',
@@ -108,6 +109,23 @@ describe('toQboSchedule', () => {
     ) as Stripe.Event;
     const expected = loadJson(
       'invoice_payment_succeeded_annual_with_tax.schedule.qbo.json',
+    );
+    const result = mapEvent(event);
+    expect(result.schedule).not.toBeNull();
+    const qboEntries = toQboSchedule(result.schedule!, TEST_QBO_ACCOUNT_MAP);
+    expect(qboEntries).toEqual(expected);
+  });
+
+  it('invoice_payment_succeeded_annual_fx: matches the golden schedule output (per-month fxContext)', () => {
+    // FX annual: USD-1200 invoice settled in CAD at rate 1.30 → CAD 1560.
+    // Each of the 12 recognition entries posts CAD 130 (2100 debit / 4000
+    // credit) and carries pro-rated fxContext { USD 100 / CAD 130 } so
+    // downstream tools can compute home-currency FX revaluation per month.
+    const event = loadJson(
+      'invoice_payment_succeeded_annual_fx.event.json',
+    ) as Stripe.Event;
+    const expected = loadJson(
+      'invoice_payment_succeeded_annual_fx.schedule.qbo.json',
     );
     const result = mapEvent(event);
     expect(result.schedule).not.toBeNull();

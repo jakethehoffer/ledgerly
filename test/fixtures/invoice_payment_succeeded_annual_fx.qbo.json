@@ -1,0 +1,46 @@
+{
+  "TxnDate": "2025-01-15",
+  "PrivateNote": "Stripe invoice in_test_annual_fx_001 (customer cus_test_annual_fx_001)",
+  "CurrencyRef": {
+    "value": "CAD"
+  },
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 1513.2,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-1010",
+          "name": "QBO 1010"
+        }
+      },
+      "Description": "Net to Stripe balance"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 46.8,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-6000",
+          "name": "QBO 6000"
+        }
+      },
+      "Description": "Stripe processing fee"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 1560,
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": {
+          "value": "qbo-2100",
+          "name": "QBO 2100"
+        }
+      },
+      "Description": "Annual subscription deferred"
+    }
+  ],
+  "DocNumber": "invoice_annual_fx_001"
+}

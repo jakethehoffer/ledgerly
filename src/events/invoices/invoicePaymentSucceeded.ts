@@ -1,10 +1,50 @@
 import type Stripe from 'stripe';
 import { cents, type Cents } from '../../money.js';
-import type { JournalEntry, JournalLine, MapResult, RecognitionSchedule } from '../../journal.js';
+import type {
+  FxContext,
+  JournalEntry,
+  JournalLine,
+  MapResult,
+  RecognitionSchedule,
+} from '../../journal.js';
 import { requireExpanded } from '../../errors.js';
 import { epochToUtcDate, addMonths } from '../../util/dates.js';
 import { sortLines } from '../../util/lines.js';
 import { invoiceMemo } from '../../util/memo.js';
+
+/**
+ * Build an {@link FxContext} when the source event involved an FX
+ * conversion, or return `undefined` for same-currency events so the
+ * resulting JournalEntry omits the field entirely (same-currency
+ * fixtures stay byte-identical).
+ *
+ * `customerCurrency` and `settlementCurrency` should be the raw
+ * Stripe-payload values (Stripe sends lowercase ISO codes); this
+ * helper normalizes to uppercase to match `JournalEntry.currency`.
+ */
+function buildFxContext(
+  customerCurrency: string,
+  customerAmount: number,
+  settlementCurrency: string,
+  settlementAmount: number,
+): FxContext | undefined {
+  if (customerCurrency === settlementCurrency) return undefined;
+  return {
+    customerCurrency: customerCurrency.toUpperCase(),
+    customerAmount: cents(customerAmount),
+    settlementCurrency: settlementCurrency.toUpperCase(),
+    settlementAmount: cents(settlementAmount),
+  };
+}
+
+/**
+ * Attach an `fxContext` field to a built JournalEntry, but only when
+ * the FX context is defined — same-currency entries keep their existing
+ * shape exactly.
+ */
+function withFx(entry: JournalEntry, fxContext: FxContext | undefined): JournalEntry {
+  return fxContext === undefined ? entry : { ...entry, fxContext };
+}
 
 const SECONDS_PER_DAY = 86400;
 const MONTHLY_THRESHOLD_DAYS = 32;
@@ -59,6 +99,7 @@ function buildMonthlyEntry(
   net: Cents,
   taxInBT: Cents,
   btCurrency: string,
+  fxContext: FxContext | undefined,
 ): JournalEntry {
   const preTax = cents(gross - taxInBT);
   const draft: JournalLine[] = [
@@ -70,15 +111,18 @@ function buildMonthlyEntry(
     draft.push({ accountCode: '2000', side: 'credit', amount: taxInBT, memo: 'Sales tax collected' });
   }
   const lines: ReadonlyArray<JournalLine> = sortLines(draft);
-  return {
-    date: epochToUtcDate(event.created),
-    currency: btCurrency,
-    memo: invoiceMemo(invoice),
-    sourceEventId: event.id,
-    sourceEventType: event.type,
-    sourceObjectId: invoice.id,
-    lines,
-  };
+  return withFx(
+    {
+      date: epochToUtcDate(event.created),
+      currency: btCurrency,
+      memo: invoiceMemo(invoice),
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+      sourceObjectId: invoice.id,
+      lines,
+    },
+    fxContext,
+  );
 }
 
 function buildPlatformEntry(
@@ -88,6 +132,7 @@ function buildPlatformEntry(
   fee: Cents,
   net: Cents,
   btCurrency: string,
+  fxContext: FxContext | undefined,
 ): JournalEntry {
   // Platform's view of a Connect destination-charge invoice:
   // - revenue is the application fee (not the gross subscription amount)
@@ -99,15 +144,18 @@ function buildPlatformEntry(
     { accountCode: '6000', side: 'debit',  amount: fee,    memo: 'Stripe processing fee' },
     { accountCode: '4100', side: 'credit', amount: appFee, memo: 'Application fee revenue' },
   ]);
-  return {
-    date: epochToUtcDate(event.created),
-    currency: btCurrency,
-    memo: invoiceMemo(invoice),
-    sourceEventId: event.id,
-    sourceEventType: event.type,
-    sourceObjectId: invoice.id,
-    lines,
-  };
+  return withFx(
+    {
+      date: epochToUtcDate(event.created),
+      currency: btCurrency,
+      memo: invoiceMemo(invoice),
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+      sourceObjectId: invoice.id,
+      lines,
+    },
+    fxContext,
+  );
 }
 
 function buildAnnualCashEntry(
@@ -118,6 +166,7 @@ function buildAnnualCashEntry(
   net: Cents,
   taxInBT: Cents,
   btCurrency: string,
+  fxContext: FxContext | undefined,
 ): JournalEntry {
   const preTax = cents(gross - taxInBT);
   const draft: JournalLine[] = [
@@ -129,15 +178,18 @@ function buildAnnualCashEntry(
     draft.push({ accountCode: '2000', side: 'credit', amount: taxInBT, memo: 'Sales tax collected' });
   }
   const lines: ReadonlyArray<JournalLine> = sortLines(draft);
-  return {
-    date: epochToUtcDate(event.created),
-    currency: btCurrency,
-    memo: invoiceMemo(invoice),
-    sourceEventId: event.id,
-    sourceEventType: event.type,
-    sourceObjectId: invoice.id,
-    lines,
-  };
+  return withFx(
+    {
+      date: epochToUtcDate(event.created),
+      currency: btCurrency,
+      memo: invoiceMemo(invoice),
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+      sourceObjectId: invoice.id,
+      lines,
+    },
+    fxContext,
+  );
 }
 
 function buildRecognitionSchedule(
@@ -146,6 +198,15 @@ function buildRecognitionSchedule(
   gross: Cents,
   months: number,
   btCurrency: string,
+  /**
+   * Pro-rated fxContext anchor. When the invoice involved FX, the
+   * schedule pro-rates both `customerAmount` and `settlementAmount` per
+   * month, with month 12 absorbing the remainder so the per-month
+   * customer-side sum equals `customerPreTax` and the settlement-side
+   * sum equals `gross` exactly. When `undefined` (same-currency case),
+   * the per-month entries get no fxContext.
+   */
+  scheduleFxAnchor: { customerCurrency: string; customerPreTax: number; settlementCurrency: string } | undefined,
 ): RecognitionSchedule {
   const subscriptionId = resolveSubscriptionId(invoice);
 
@@ -153,22 +214,47 @@ function buildRecognitionSchedule(
   const baseAmount = Math.floor(gross / months);
   const remainder = gross - baseAmount * months;
 
+  // Pro-rate the customer-side preTax with the same floor + remainder
+  // pattern so per-month customer/settlement amounts line up at the
+  // same indices and the schedule sums match both sides exactly.
+  const customerBase = scheduleFxAnchor
+    ? Math.floor(scheduleFxAnchor.customerPreTax / months)
+    : 0;
+  const customerRemainder = scheduleFxAnchor
+    ? scheduleFxAnchor.customerPreTax - customerBase * months
+    : 0;
+
   const entries: JournalEntry[] = [];
   for (let m = 1; m <= months; m++) {
     // Last entry absorbs the remainder so the schedule's sum equals gross exactly.
     const monthAmount = cents(m === months ? baseAmount + remainder : baseAmount);
-    entries.push({
-      date: addMonths(cashDate, m),
-      currency: btCurrency,
-      memo: `${invoiceMemo(invoice)} — month ${String(m)}/${String(months)} recognition`,
-      sourceEventId: event.id,
-      sourceEventType: event.type,
-      sourceObjectId: invoice.id,
-      lines: sortLines([
-        { accountCode: '2100', side: 'debit',  amount: monthAmount, memo: 'Recognize from deferred' },
-        { accountCode: '4000', side: 'credit', amount: monthAmount, memo: 'Subscription revenue' },
-      ]),
-    });
+    const monthCustomerAmount =
+      m === months ? customerBase + customerRemainder : customerBase;
+    const monthlyFxContext: FxContext | undefined = scheduleFxAnchor
+      ? {
+          customerCurrency: scheduleFxAnchor.customerCurrency.toUpperCase(),
+          customerAmount: cents(monthCustomerAmount),
+          settlementCurrency: scheduleFxAnchor.settlementCurrency.toUpperCase(),
+          settlementAmount: monthAmount,
+        }
+      : undefined;
+    entries.push(
+      withFx(
+        {
+          date: addMonths(cashDate, m),
+          currency: btCurrency,
+          memo: `${invoiceMemo(invoice)} — month ${String(m)}/${String(months)} recognition`,
+          sourceEventId: event.id,
+          sourceEventType: event.type,
+          sourceObjectId: invoice.id,
+          lines: sortLines([
+            { accountCode: '2100', side: 'debit',  amount: monthAmount, memo: 'Recognize from deferred' },
+            { accountCode: '4000', side: 'credit', amount: monthAmount, memo: 'Subscription revenue' },
+          ]),
+        },
+        monthlyFxContext,
+      ),
+    );
   }
 
   return {
@@ -206,9 +292,21 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   // bt.amount equals invoice.amount_paid — existing USD fixtures see no
   // behavior change. The taxRatio below is dimensionless (USD/USD), so
   // applying it to the BT-currency gross produces a tax portion in the BT
-  // currency. Proper FX rate handling (account 7000 FX Gain/Loss) remains
-  // spec-deferred.
+  // currency.
+  //
+  // FX gain/loss recognition on annual recognition is left to downstream
+  // tools — the `fxContext` field on the cash entry AND each schedule
+  // entry exposes customerAmount and settlementAmount (pro-rated per month
+  // for the schedule), so an operator with a home-currency rate source can
+  // compute realized FX gain/loss month-by-month. The engine itself can't
+  // do this without external rate lookups it doesn't have.
   const btCurrency = bt.currency.toUpperCase();
+  const cashFxContext = buildFxContext(
+    invoice.currency,
+    invoice.amount_paid,
+    bt.currency,
+    bt.amount,
+  );
 
   const appFee = invoice.application_fee_amount ?? 0;
   const isPlatformInvoice = appFee > 0;
@@ -219,8 +317,12 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   if (isPlatformInvoice) {
     // Connect destination charge on the platform's side: revenue = app fee,
     // no tax, no deferred recognition (force monthly-cash regardless of period).
+    // fxContext on a platform entry is intentionally undefined: the platform's
+    // books only see the application fee, and the customer→settlement
+    // conversion ratio applies to the FULL invoice (which the platform
+    // doesn't book), not to the app-fee slice the platform records.
     return {
-      entries: [buildPlatformEntry(event, invoice, cents(appFee), fee, net, btCurrency)],
+      entries: [buildPlatformEntry(event, invoice, cents(appFee), fee, net, btCurrency, undefined)],
       schedule: null,
     };
   }
@@ -239,15 +341,27 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   const span = periodSpanDays(invoice);
   if (span <= MONTHLY_THRESHOLD_DAYS) {
     return {
-      entries: [buildMonthlyEntry(event, invoice, gross, fee, net, taxInBT, btCurrency)],
+      entries: [buildMonthlyEntry(event, invoice, gross, fee, net, taxInBT, btCurrency, cashFxContext)],
       schedule: null,
     };
   }
 
   const months = periodMonths(invoice);
   const preTax = cents(gross - taxInBT);
+  // Customer-side preTax for the schedule anchor: `amount_paid - tax` is
+  // the recognized-revenue portion in customer currency. Pro-rated across
+  // months in the schedule builder.
+  const customerPreTax = Math.max(invoice.amount_paid - invoiceTax, 0);
+  const scheduleFxAnchor =
+    cashFxContext !== undefined
+      ? {
+          customerCurrency: invoice.currency,
+          customerPreTax,
+          settlementCurrency: bt.currency,
+        }
+      : undefined;
   return {
-    entries: [buildAnnualCashEntry(event, invoice, gross, fee, net, taxInBT, btCurrency)],
-    schedule: buildRecognitionSchedule(event, invoice, preTax, months, btCurrency),
+    entries: [buildAnnualCashEntry(event, invoice, gross, fee, net, taxInBT, btCurrency, cashFxContext)],
+    schedule: buildRecognitionSchedule(event, invoice, preTax, months, btCurrency, scheduleFxAnchor),
   };
 }
