@@ -1,0 +1,39 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-15",
+      "currency": "CAD",
+      "memo": "Stripe charge ch_test_fx_succeeded_001 (customer cus_test_fx_succeeded_001)",
+      "sourceEventId": "evt_test_charge_succeeded_fx_001",
+      "sourceEventType": "charge.succeeded",
+      "sourceObjectId": "ch_test_fx_succeeded_001",
+      "lines": [
+        {
+          "accountCode": "1010",
+          "side": "debit",
+          "amount": 6675,
+          "memo": "Net to Stripe balance"
+        },
+        {
+          "accountCode": "6000",
+          "side": "debit",
+          "amount": 200,
+          "memo": "Stripe processing fee"
+        },
+        {
+          "accountCode": "4000",
+          "side": "credit",
+          "amount": 6875,
+          "memo": "Subscription revenue"
+        }
+      ],
+      "fxContext": {
+        "customerCurrency": "USD",
+        "customerAmount": 5000,
+        "settlementCurrency": "CAD",
+        "settlementAmount": 6875
+      }
+    }
+  ],
+  "schedule": null
+}

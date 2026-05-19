@@ -3,6 +3,7 @@ import { cents } from '../../money.js';
 import type { JournalEntry, JournalLine, MapResult } from '../../journal.js';
 import { requireExpanded } from '../../errors.js';
 import { epochToUtcDate } from '../../util/dates.js';
+import { buildFxContext, withFx } from '../../util/fxContext.js';
 import { sortLines } from '../../util/lines.js';
 import { refundMemo } from '../../util/memo.js';
 
@@ -142,15 +143,29 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
 
     const lines: ReadonlyArray<JournalLine> = sortLines(draft);
 
-    return {
-      date: epochToUtcDate(refund.created),
-      currency: bt.currency.toUpperCase(),
-      memo: refundMemo(charge, refund.id),
-      sourceEventId: event.id,
-      sourceEventType: event.type,
-      sourceObjectId: refund.id,
-      lines,
-    };
+    // FX provenance: settlementAmount is the actual refund clawback in
+    // settlement currency (refund-time rate), customerAmount is the
+    // refund's customer-facing amount. For same-currency refunds the
+    // helper returns undefined and the entry omits the field.
+    const fxContext = buildFxContext(
+      refund.currency,
+      refund.amount,
+      bt.currency,
+      Math.abs(bt.amount),
+    );
+
+    return withFx(
+      {
+        date: epochToUtcDate(refund.created),
+        currency: bt.currency.toUpperCase(),
+        memo: refundMemo(charge, refund.id),
+        sourceEventId: event.id,
+        sourceEventType: event.type,
+        sourceObjectId: refund.id,
+        lines,
+      },
+      fxContext,
+    );
   });
 
   return { entries, schedule: null };

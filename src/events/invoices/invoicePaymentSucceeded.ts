@@ -9,42 +9,9 @@ import type {
 } from '../../journal.js';
 import { requireExpanded } from '../../errors.js';
 import { epochToUtcDate, addMonths } from '../../util/dates.js';
+import { buildFxContext, withFx } from '../../util/fxContext.js';
 import { sortLines } from '../../util/lines.js';
 import { invoiceMemo } from '../../util/memo.js';
-
-/**
- * Build an {@link FxContext} when the source event involved an FX
- * conversion, or return `undefined` for same-currency events so the
- * resulting JournalEntry omits the field entirely (same-currency
- * fixtures stay byte-identical).
- *
- * `customerCurrency` and `settlementCurrency` should be the raw
- * Stripe-payload values (Stripe sends lowercase ISO codes); this
- * helper normalizes to uppercase to match `JournalEntry.currency`.
- */
-function buildFxContext(
-  customerCurrency: string,
-  customerAmount: number,
-  settlementCurrency: string,
-  settlementAmount: number,
-): FxContext | undefined {
-  if (customerCurrency === settlementCurrency) return undefined;
-  return {
-    customerCurrency: customerCurrency.toUpperCase(),
-    customerAmount: cents(customerAmount),
-    settlementCurrency: settlementCurrency.toUpperCase(),
-    settlementAmount: cents(settlementAmount),
-  };
-}
-
-/**
- * Attach an `fxContext` field to a built JournalEntry, but only when
- * the FX context is defined — same-currency entries keep their existing
- * shape exactly.
- */
-function withFx(entry: JournalEntry, fxContext: FxContext | undefined): JournalEntry {
-  return fxContext === undefined ? entry : { ...entry, fxContext };
-}
 
 const SECONDS_PER_DAY = 86400;
 const MONTHLY_THRESHOLD_DAYS = 32;

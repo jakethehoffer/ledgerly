@@ -3,6 +3,7 @@ import { cents } from '../../money.js';
 import type { JournalEntry, JournalLine, MapResult } from '../../journal.js';
 import { requireExpanded } from '../../errors.js';
 import { epochToUtcDate } from '../../util/dates.js';
+import { buildFxContext, withFx } from '../../util/fxContext.js';
 import { sortLines } from '../../util/lines.js';
 import { disputeMemo } from '../../util/memo.js';
 
@@ -173,20 +174,35 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
 
   const lines: ReadonlyArray<JournalLine> = sortLines(rawLines);
 
-  const entry: JournalEntry = {
-    date: epochToUtcDate(event.created),
-    // Use the settlement currency from the BTs, not dispute.currency. For
-    // same-currency disputes they're identical; for FX disputes the entry
-    // must post in settlement currency so it balances against the original
-    // chargeSucceeded entry (which the FX-safe handler also posted in
-    // settlement currency).
-    currency: btCurrency.toUpperCase(),
-    memo: disputeMemo(dispute, 'funds withdrawn'),
-    sourceEventId: event.id,
-    sourceEventType: event.type,
-    sourceObjectId: dispute.id,
-    lines,
-  };
+  // FX provenance: settlementAmount is the actual clawback at dispute time
+  // (not expectedClawback — the 7000 line already captures the rate-drift
+  // delta against original; fxContext describes the conversion that
+  // actually happened on this event). Same-currency disputes omit
+  // fxContext via the helper's undefined return.
+  const fxContext = buildFxContext(
+    dispute.currency,
+    dispute.amount,
+    btCurrency,
+    actualClawback,
+  );
+
+  const entry: JournalEntry = withFx(
+    {
+      date: epochToUtcDate(event.created),
+      // Use the settlement currency from the BTs, not dispute.currency. For
+      // same-currency disputes they're identical; for FX disputes the entry
+      // must post in settlement currency so it balances against the original
+      // chargeSucceeded entry (which the FX-safe handler also posted in
+      // settlement currency).
+      currency: btCurrency.toUpperCase(),
+      memo: disputeMemo(dispute, 'funds withdrawn'),
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+      sourceObjectId: dispute.id,
+      lines,
+    },
+    fxContext,
+  );
 
   return { entries: [entry], schedule: null };
 }

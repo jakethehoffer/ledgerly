@@ -8,11 +8,37 @@
       "sourceEventType": "charge.dispute.funds_withdrawn",
       "sourceObjectId": "dp_test_fx_drift_001",
       "lines": [
-        { "accountCode": "1200", "side": "debit", "amount": 6500, "memo": "Funds held pending dispute outcome" },
-        { "accountCode": "6100", "side": "debit", "amount": 2000, "memo": "Non-refundable dispute fee" },
-        { "accountCode": "7000", "side": "debit", "amount": 500, "memo": "FX loss on dispute clawback (rate moved against us)" },
-        { "accountCode": "1010", "side": "credit", "amount": 9000, "memo": "Funds withdrawn from Stripe balance" }
-      ]
+        {
+          "accountCode": "1200",
+          "side": "debit",
+          "amount": 6500,
+          "memo": "Funds held pending dispute outcome"
+        },
+        {
+          "accountCode": "6100",
+          "side": "debit",
+          "amount": 2000,
+          "memo": "Non-refundable dispute fee"
+        },
+        {
+          "accountCode": "7000",
+          "side": "debit",
+          "amount": 500,
+          "memo": "FX loss on dispute clawback (rate moved against us)"
+        },
+        {
+          "accountCode": "1010",
+          "side": "credit",
+          "amount": 9000,
+          "memo": "Funds withdrawn from Stripe balance"
+        }
+      ],
+      "fxContext": {
+        "customerCurrency": "USD",
+        "customerAmount": 5000,
+        "settlementCurrency": "CAD",
+        "settlementAmount": 7000
+      }
     }
   ],
   "schedule": null

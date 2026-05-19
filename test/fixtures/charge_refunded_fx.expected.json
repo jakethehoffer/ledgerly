@@ -8,10 +8,31 @@
       "sourceEventType": "charge.refunded",
       "sourceObjectId": "re_test_fx_001",
       "lines": [
-        { "accountCode": "4900", "side": "debit", "amount": 13500, "memo": "Refund issued" },
-        { "accountCode": "7000", "side": "debit", "amount": 500, "memo": "FX loss on refund (rate moved against us)" },
-        { "accountCode": "1010", "side": "credit", "amount": 14000, "memo": "Refund deducted from Stripe balance" }
-      ]
+        {
+          "accountCode": "4900",
+          "side": "debit",
+          "amount": 13500,
+          "memo": "Refund issued"
+        },
+        {
+          "accountCode": "7000",
+          "side": "debit",
+          "amount": 500,
+          "memo": "FX loss on refund (rate moved against us)"
+        },
+        {
+          "accountCode": "1010",
+          "side": "credit",
+          "amount": 14000,
+          "memo": "Refund deducted from Stripe balance"
+        }
+      ],
+      "fxContext": {
+        "customerCurrency": "USD",
+        "customerAmount": 10000,
+        "settlementCurrency": "CAD",
+        "settlementAmount": 14000
+      }
     }
   ],
   "schedule": null

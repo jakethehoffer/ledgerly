@@ -1,0 +1,46 @@
+{
+  "TxnDate": "2025-01-15",
+  "PrivateNote": "Stripe charge ch_test_fx_succeeded_001 (customer cus_test_fx_succeeded_001)",
+  "CurrencyRef": {
+    "value": "CAD"
+  },
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 66.75,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-1010",
+          "name": "QBO 1010"
+        }
+      },
+      "Description": "Net to Stripe balance"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 2,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-6000",
+          "name": "QBO 6000"
+        }
+      },
+      "Description": "Stripe processing fee"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 68.75,
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": {
+          "value": "qbo-4000",
+          "name": "QBO 4000"
+        }
+      },
+      "Description": "Subscription revenue"
+    }
+  ],
+  "DocNumber": "arge_succeeded_fx_001"
+}

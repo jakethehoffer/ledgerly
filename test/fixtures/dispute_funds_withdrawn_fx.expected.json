@@ -8,10 +8,31 @@
       "sourceEventType": "charge.dispute.funds_withdrawn",
       "sourceObjectId": "dp_test_fx_001",
       "lines": [
-        { "accountCode": "1200", "side": "debit", "amount": 6875, "memo": "Funds held pending dispute outcome" },
-        { "accountCode": "6100", "side": "debit", "amount": 2000, "memo": "Non-refundable dispute fee" },
-        { "accountCode": "1010", "side": "credit", "amount": 8875, "memo": "Funds withdrawn from Stripe balance" }
-      ]
+        {
+          "accountCode": "1200",
+          "side": "debit",
+          "amount": 6875,
+          "memo": "Funds held pending dispute outcome"
+        },
+        {
+          "accountCode": "6100",
+          "side": "debit",
+          "amount": 2000,
+          "memo": "Non-refundable dispute fee"
+        },
+        {
+          "accountCode": "1010",
+          "side": "credit",
+          "amount": 8875,
+          "memo": "Funds withdrawn from Stripe balance"
+        }
+      ],
+      "fxContext": {
+        "customerCurrency": "USD",
+        "customerAmount": 5000,
+        "settlementCurrency": "CAD",
+        "settlementAmount": 6875
+      }
     }
   ],
   "schedule": null

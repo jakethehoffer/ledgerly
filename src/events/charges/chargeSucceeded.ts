@@ -3,6 +3,7 @@ import { cents } from '../../money.js';
 import type { JournalEntry, JournalLine, MapResult } from '../../journal.js';
 import { requireExpanded } from '../../errors.js';
 import { epochToUtcDate } from '../../util/dates.js';
+import { buildFxContext, withFx } from '../../util/fxContext.js';
 import { sortLines } from '../../util/lines.js';
 import { chargeMemo } from '../../util/memo.js';
 
@@ -50,15 +51,24 @@ export function handleChargeSucceeded(event: Stripe.Event): MapResult {
     revenueLine,
   ]);
 
-  const entry: JournalEntry = {
-    date: epochToUtcDate(event.created),
-    currency: bt.currency.toUpperCase(),
-    memo: chargeMemo(charge),
-    sourceEventId: event.id,
-    sourceEventType: event.type,
-    sourceObjectId: charge.id,
-    lines,
-  };
+  // FX provenance: when Stripe converted between customer-facing and
+  // settlement currencies, expose both sides so downstream tools with a
+  // home-currency rate source can compute realized FX gain/loss.
+  // Same-currency charges omit fxContext (helper returns undefined).
+  const fxContext = buildFxContext(charge.currency, charge.amount, bt.currency, bt.amount);
+
+  const entry: JournalEntry = withFx(
+    {
+      date: epochToUtcDate(event.created),
+      currency: bt.currency.toUpperCase(),
+      memo: chargeMemo(charge),
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+      sourceObjectId: charge.id,
+      lines,
+    },
+    fxContext,
+  );
 
   return { entries: [entry], schedule: null };
 }
