@@ -87,7 +87,7 @@ describe('expandEvent', () => {
     const out = await expandEvent(mock as unknown as Stripe, event);
 
     expect(mock.disputes.retrieve).toHaveBeenCalledWith('dp_1', {
-      expand: ['balance_transactions'],
+      expand: ['balance_transactions', 'charge.balance_transaction'],
     });
     expect(out.data.object).toBe(expanded);
   });

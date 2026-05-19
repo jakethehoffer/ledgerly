@@ -43,9 +43,13 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
     case 'charge.dispute.funds_withdrawn':
     case 'charge.dispute.funds_reinstated':
     case 'charge.dispute.closed': {
+      // `charge.balance_transaction` is expanded so the dispute handlers can
+      // recognize realized FX gain/loss when the dispute's BT rate differs
+      // from the original charge's BT rate (rate drift between charge and
+      // dispute moments). Same pattern as charge.refunded expansion.
       const dispute = event.data.object;
       const expanded = await stripe.disputes.retrieve(dispute.id, {
-        expand: ['balance_transactions'],
+        expand: ['balance_transactions', 'charge.balance_transaction'],
       });
       return cloneEventWithObject(event, expanded);
     }

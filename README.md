@@ -190,19 +190,25 @@ Unrecognized currency codes fall back to two-decimal, matching Stripe's default
 normalization.
 
 Caveats:
-- Realized FX gain/loss is recognized on **refunds** when the FX rate moved
-  between the original charge and the refund: the cash-out leg posts at the
-  refund-time rate (actual clawback), the revenue-offset leg posts at the
-  original-charge rate (matching the original revenue booking), and account
-  `7000 FX Gain/Loss` absorbs the difference. See the
-  `charge_refunded_fx` fixture. The handler falls back to rate-1.0 (no
-  7000 line) when `charge.balance_transaction` isn't expanded, so callers
+- Realized FX gain/loss is recognized on **refunds** and **dispute
+  withdrawals** when the FX rate moved between the original charge and the
+  follow-up event. On both paths: the cash leg posts at the follow-up's
+  rate (actual clawback / refund deduction), the receivable / revenue-offset
+  leg posts at the original-charge rate (matching what was originally
+  booked), and account `7000 FX Gain/Loss` absorbs the rate-movement delta.
+  See the `charge_refunded_fx` and `dispute_funds_withdrawn_fx_rate_drift`
+  fixtures. Both handlers fall back gracefully (no 7000 line) when the
+  original `charge.balance_transaction` isn't expanded, so callers
   bypassing the receiver's `expand.ts` see no behavior change for
-  same-currency refunds.
-- FX gain/loss on **other** event types (multi-period revenue recognition,
-  disputes settled at a different rate than the original charge, payouts
-  in a different currency than the settlement balance) is not yet
-  recognized. Those paths post cleanly in BT settlement currency.
+  same-currency events.
+- FX gain/loss on **multi-period revenue recognition** (annual
+  subscriptions recognized monthly while the rate drifts) and
+  **cross-currency payouts** is not yet recognized. Those paths post
+  cleanly in BT settlement currency. Multi-period recognition drift would
+  require either a home-currency config or month-by-month rate lookups;
+  cross-currency payouts need real fixture data on Stripe's BT shape for
+  payouts that convert between settlement currencies before bank
+  delivery.
 - The operator's QBO/Xero company file must have multi-currency enabled
   (and the relevant accounts configured for the foreign currency) before
   posting non-home-currency entries will succeed downstream. The QBO

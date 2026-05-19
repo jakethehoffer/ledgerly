@@ -1,0 +1,27 @@
+{
+  "Narration": "Stripe dispute dp_test_fx_drift_001 funds withdrawn (charge ch_test_fx_drift_001)",
+  "Date": "2025-01-17",
+  "Status": "DRAFT",
+  "JournalLines": [
+    {
+      "LineAmount": 65,
+      "AccountCode": "1200",
+      "Description": "Funds held pending dispute outcome"
+    },
+    {
+      "LineAmount": 20,
+      "AccountCode": "6100",
+      "Description": "Non-refundable dispute fee"
+    },
+    {
+      "LineAmount": 5,
+      "AccountCode": "7000",
+      "Description": "FX loss on dispute clawback (rate moved against us)"
+    },
+    {
+      "LineAmount": -90,
+      "AccountCode": "1010",
+      "Description": "Funds withdrawn from Stripe balance"
+    }
+  ]
+}

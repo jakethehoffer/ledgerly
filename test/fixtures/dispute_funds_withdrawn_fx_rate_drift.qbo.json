@@ -1,0 +1,58 @@
+{
+  "TxnDate": "2025-01-17",
+  "PrivateNote": "Stripe dispute dp_test_fx_drift_001 funds withdrawn (charge ch_test_fx_drift_001)",
+  "CurrencyRef": {
+    "value": "CAD"
+  },
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 65,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-1200",
+          "name": "QBO 1200"
+        }
+      },
+      "Description": "Funds held pending dispute outcome"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 20,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-6100",
+          "name": "QBO 6100"
+        }
+      },
+      "Description": "Non-refundable dispute fee"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 5,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-7000",
+          "name": "QBO 7000"
+        }
+      },
+      "Description": "FX loss on dispute clawback (rate moved against us)"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 90,
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": {
+          "value": "qbo-1010",
+          "name": "QBO 1010"
+        }
+      },
+      "Description": "Funds withdrawn from Stripe balance"
+    }
+  ],
+  "DocNumber": "ithdrawn_fx_drift_001"
+}

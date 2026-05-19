@@ -1,0 +1,99 @@
+{
+  "id": "evt_test_dispute_withdrawn_fx_drift_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1737115200,
+  "type": "charge.dispute.funds_withdrawn",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "dp_test_fx_drift_001",
+      "object": "dispute",
+      "amount": 5000,
+      "charge": {
+        "id": "ch_test_fx_drift_001",
+        "object": "charge",
+        "amount": 5000,
+        "currency": "usd",
+        "balance_transaction": {
+          "id": "txn_charge_fx_drift_001",
+          "object": "balance_transaction",
+          "amount": 6500,
+          "available_on": 1736424000,
+          "created": 1736294400,
+          "currency": "cad",
+          "description": "Charge ch_test_fx_drift_001",
+          "exchange_rate": 1.30,
+          "fee": 204,
+          "fee_details": [
+            {
+              "amount": 204,
+              "application": null,
+              "currency": "cad",
+              "description": "Stripe processing fees",
+              "type": "stripe_fee"
+            }
+          ],
+          "net": 6296,
+          "reporting_category": "charge",
+          "status": "available",
+          "type": "charge"
+        },
+        "captured": true,
+        "created": 1736294400,
+        "paid": true,
+        "status": "succeeded"
+      },
+      "created": 1737115200,
+      "currency": "usd",
+      "reason": "fraudulent",
+      "status": "needs_response",
+      "balance_transactions": [
+        {
+          "id": "txn_dispute_fx_drift_clawback_001",
+          "object": "balance_transaction",
+          "amount": -7000,
+          "available_on": 1737331200,
+          "created": 1737115200,
+          "currency": "cad",
+          "description": "Chargeback withdrawal for dp_test_fx_drift_001",
+          "exchange_rate": 1.40,
+          "fee": 0,
+          "fee_details": [],
+          "net": -7000,
+          "reporting_category": "dispute",
+          "source": "dp_test_fx_drift_001",
+          "status": "available",
+          "type": "adjustment"
+        },
+        {
+          "id": "txn_dispute_fx_drift_fee_001",
+          "object": "balance_transaction",
+          "amount": -2000,
+          "available_on": 1737331200,
+          "created": 1737115200,
+          "currency": "cad",
+          "description": "Dispute fee for dp_test_fx_drift_001",
+          "exchange_rate": null,
+          "fee": 0,
+          "fee_details": [
+            {
+              "amount": 2000,
+              "application": null,
+              "currency": "cad",
+              "description": "Dispute fee",
+              "type": "dispute"
+            }
+          ],
+          "net": -2000,
+          "reporting_category": "dispute",
+          "source": "dp_test_fx_drift_001",
+          "status": "available",
+          "type": "adjustment"
+        }
+      ]
+    }
+  }
+}

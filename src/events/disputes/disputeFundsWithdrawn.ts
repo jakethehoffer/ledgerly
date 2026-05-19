@@ -6,6 +6,27 @@ import { epochToUtcDate } from '../../util/dates.js';
 import { sortLines } from '../../util/lines.js';
 import { disputeMemo } from '../../util/memo.js';
 
+/**
+ * Compute the FX rate Stripe used at the original charge's settlement,
+ * derived from the (settlement-currency) `charge.balance_transaction.amount`
+ * over the (customer-currency) `charge.amount`. Returns `null` when the
+ * expansion needed isn't present — the caller treats that as "no FX
+ * gain/loss recognition for this dispute" and falls back to v0.1.6 behavior.
+ *
+ * The receiver's `expand.ts` requests `charge.balance_transaction` on every
+ * dispute event so production callers always get a usable rate; the
+ * defensive return-null path exists for fixtures and direct-library callers
+ * that don't expand.
+ */
+function computeOriginalRate(dispute: Stripe.Dispute): number | null {
+  const charge = dispute.charge;
+  if (typeof charge !== 'object') return null;
+  if (charge.amount <= 0) return null;
+  const bt = charge.balance_transaction;
+  if (bt === null || typeof bt === 'string') return null;
+  return Math.abs(bt.amount) / charge.amount;
+}
+
 export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
   if (event.type !== 'charge.dispute.funds_withdrawn') {
     throw new Error(
@@ -81,20 +102,46 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
   }
   const otherBts = sortedBySize.slice(1);
 
-  const clawback = Math.abs(clawbackBt.amount);
+  const actualClawback = Math.abs(clawbackBt.amount);
   const inlineFee = Math.abs(clawbackBt.fee);
   const splitFees = otherBts.reduce(
     (sum, bt) => sum + Math.abs(bt.amount) + Math.abs(bt.fee),
     0,
   );
   const feeTotal = inlineFee + splitFees;
-  const totalWithdrawn = clawback + feeTotal;
+  const totalWithdrawn = actualClawback + feeTotal;
+
+  // FX gain/loss recognition. When the original charge's balance_transaction
+  // is expanded (the receiver's expand.ts requests it on every dispute event;
+  // legacy fixtures and other callers may bypass), compare what the clawback
+  // SHOULD cost at the original charge's rate against what Stripe actually
+  // withdrew. The difference is realized FX gain/loss → account 7000.
+  //
+  // Same pattern as chargeRefunded's FX gain/loss work: the 1200 receivable
+  // releases at the ORIGINAL rate (so it cleanly mirrors what chargeSucceeded
+  // booked when the original charge was settled), the 1010 cash leg posts at
+  // the dispute-time rate (what Stripe really clawed back), and 7000 absorbs
+  // the rate-movement delta.
+  //
+  // When `charge.balance_transaction` isn't expanded (string ID), the rate
+  // can't be computed cross-currency, so we fall back to using the BT's
+  // actual amount for both the 1200 receivable release and the cash leg —
+  // identical to the v0.1.6 behavior. Same-currency disputes are also
+  // identical because their original rate is exactly 1.0 and the
+  // dispute-rate equivalent is `actualClawback / dispute.amount = 1.0`,
+  // giving fxDelta = 0 either way.
+  const originalRate = computeOriginalRate(dispute);
+  const expectedClawback =
+    originalRate !== null && dispute.amount > 0
+      ? Math.round(dispute.amount * originalRate)
+      : actualClawback;
+  const fxDelta = actualClawback - expectedClawback;
 
   const rawLines: JournalLine[] = [
     {
       accountCode: '1200',
       side: 'debit',
-      amount: cents(clawback),
+      amount: cents(expectedClawback),
       memo: 'Funds held pending dispute outcome',
     },
     {
@@ -110,6 +157,17 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
       side: 'debit',
       amount: cents(feeTotal),
       memo: 'Non-refundable dispute fee',
+    });
+  }
+  if (fxDelta !== 0) {
+    rawLines.push({
+      accountCode: '7000',
+      side: fxDelta > 0 ? 'debit' : 'credit',
+      amount: cents(Math.abs(fxDelta)),
+      memo:
+        fxDelta > 0
+          ? 'FX loss on dispute clawback (rate moved against us)'
+          : 'FX gain on dispute clawback (rate moved in our favor)',
     });
   }
 
