@@ -759,6 +759,44 @@ mount point above. Add QBO/Xero env vars from `.env.example` to enable the
 corresponding dispatchers — without them, the scheduler falls back to a
 console dispatcher that logs entries instead of posting.
 
+### Docker Compose (local dev)
+
+`docker-compose.yml` ships in the repo for running ledgerly locally
+without installing Node. Two terminals — `stripe listen` on the host
+mints a fresh webhook signing secret per session and you feed it to
+ledgerly via `.env`:
+
+```bash
+# Terminal 1 — forward Stripe webhooks to local ledgerly.
+$ stripe listen --forward-to localhost:3000/webhook
+> Ready! Your webhook signing secret is whsec_...
+
+# Terminal 2 — paste the whsec_ value into .env, then bring up ledgerly.
+$ cp .env.example .env
+$ vi .env   # set STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET (and others as needed)
+$ docker compose up
+
+# Anytime later, in any terminal — trigger a synthetic event.
+$ stripe trigger charge.succeeded
+```
+
+Compose uses the GHCR image by default (`ghcr.io/jakethehoffer/ledgerly:latest`).
+To build from the local Dockerfile instead — e.g. when iterating on
+ledgerly itself — uncomment the `build:` line in `docker-compose.yml`
+and comment out `image:`, then `docker compose up --build`.
+
+SQLite state lives in a named volume (`ledgerly-data`) that survives
+`docker compose down`. To wipe state between tests, use
+`docker compose down -v`.
+
+**No `stripe-cli` sidecar by design.** `stripe listen` mints a new
+webhook signing secret on every startup, which ledgerly needs at boot
+to verify signatures. Wiring them together inside Compose would
+require a shared volume + entrypoint wait script in the ledgerly
+container — more complexity than it earns for a problem the documented
+Stripe dev workflow already handles cleanly with the host-side `stripe
+listen` above.
+
 ### Verifying the image (build provenance)
 
 Every published image carries a [SLSA-style build provenance attestation](https://slsa.dev/spec/v1.0/provenance)

@@ -1,0 +1,61 @@
+# Docker Compose for running ledgerly locally without installing Node.
+#
+# Quickstart (two terminals):
+#
+#   # Terminal 1 — run Stripe CLI to forward webhooks to local ledgerly.
+#   # The CLI prints a fresh `whsec_...` signing secret per session.
+#   $ stripe listen --forward-to localhost:3000/webhook
+#
+#   # Terminal 2 — paste the whsec_ value into .env, then bring up ledgerly.
+#   $ cp .env.example .env  # if you haven't already
+#   $ vi .env               # set STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET
+#   $ docker compose up
+#
+#   # Anytime later, in any terminal — trigger a test event:
+#   $ stripe trigger charge.succeeded
+#
+# Why no Stripe CLI sidecar in this file: `stripe listen` mints a new
+# webhook signing secret on every startup, but ledgerly needs that secret
+# at boot to verify signatures. Wiring them together in Compose would need
+# a shared volume + an entrypoint wait script in the ledgerly container —
+# more complexity than it earns. The host-side `stripe listen` pattern
+# above is the documented Stripe dev workflow anyway.
+#
+# For deployment beyond local dev, see README's "Deployment" section.
+
+services:
+  ledgerly:
+    # Use the latest tagged release by default; pin to a specific tag
+    # (e.g. ghcr.io/jakethehoffer/ledgerly:v0.1.11) in production. To
+    # build from the local Dockerfile instead, comment `image:` out and
+    # uncomment the `build:` line below.
+    image: ghcr.io/jakethehoffer/ledgerly:latest
+    # build: .
+
+    container_name: ledgerly
+    restart: unless-stopped
+
+    ports:
+      - '3000:3000'
+
+    # All ledgerly env vars come from .env. See `.env.example` for the
+    # complete list and what each one does. STRIPE_SECRET_KEY and
+    # STRIPE_WEBHOOK_SECRET are required; everything else is optional.
+    env_file:
+      - .env
+
+    # The image's Dockerfile defaults LEDGERLY_DB_PATH=/data/ledger.db,
+    # which lines up with the named volume below. Override via .env if
+    # you need a different layout.
+    volumes:
+      - ledgerly-data:/data
+
+    # The image already declares a HEALTHCHECK against /health. Compose
+    # picks it up automatically; no need to re-declare here. Run
+    # `docker compose ps` to see the status.
+
+volumes:
+  ledgerly-data:
+    # Named volume so SQLite state survives `docker compose down`. Use
+    # `docker compose down -v` to wipe the volume along with the
+    # container — useful when you want a fresh database between tests.
