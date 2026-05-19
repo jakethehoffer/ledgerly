@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.7] — 2026-05-18
+
+### Added
+
+- **Account 7000 FX Gain/Loss is now actually posted to.** Realized FX
+  gain/loss is recognized on refunds when the FX rate moved between the
+  original charge and the refund. The `chargeRefunded` handler now reads
+  the original charge's `balance_transaction` (already expanded by the
+  receiver's `expand.ts`), computes the rate Stripe used at charge time,
+  and books each refund's three legs at the rates that match the
+  underlying movement:
+
+  - `4900 Refunds Issued` debits the **original-rate** settlement
+    amount, so it cleanly offsets the original revenue booking (revenue
+    nets to zero on a full refund).
+  - `2000 Sales Tax Payable` debits the proportional tax portion at the
+    same original-rate basis.
+  - `1010 Stripe Clearing` credits the **actual** settlement (refund-rate)
+    that Stripe clawed back.
+  - `7000 FX Gain/Loss` absorbs the difference — debit when the rate
+    moved against the operator (realized loss), credit when it moved in
+    their favor (realized gain).
+
+  See the `charge_refunded_fx` fixture for a worked example:
+  $100 USD charge originally at rate 1.35 (CAD 135 booked), fully
+  refunded later at rate 1.40 (CAD 140 clawed back), producing
+  `4900 debit CAD 135 / 7000 debit CAD 5 / 1010 credit CAD 140`.
+
+- New fixture `charge_refunded_fx` plus QBO and Xero exporter goldens.
+
+### Changed
+
+- README's currency caveat replaced with a precise scope statement:
+  refunds are recognized; multi-period recognition rate drift, disputes
+  settled at a different rate than the original charge, and
+  cross-currency payouts still post in BT settlement currency without
+  7000 lines (those would require state across events or additional
+  config).
+
+### Compatibility
+
+Same-currency refunds are **byte-identical** to v0.1.6: when
+`charge.currency == bt.currency`, both rates are exactly 1.0, the
+expected and actual settlements match, and no 7000 line is emitted.
+All 5 existing same-currency refund fixtures pass unchanged.
+
+Callers bypassing `expand.ts` (where `charge.balance_transaction` is a
+string ID rather than an expanded object) fall back to rate-1.0 and
+skip the 7000 line — same-currency behavior unchanged; FX behavior in
+that path just loses the FX recognition (not worse than v0.1.6).
+
 ## [0.1.6] — 2026-05-18
 
 ### Fixed
@@ -362,6 +413,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.7]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.7
 [0.1.6]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.6
 [0.1.5]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.5
 [0.1.4]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.4
