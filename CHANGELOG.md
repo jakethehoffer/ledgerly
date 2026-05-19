@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.11] — 2026-05-19
+
+### Changed
+
+- **Cross-currency payouts are now detected and rejected with a clear
+  error** instead of silently producing wrong journal entries. Previously,
+  a CAD-settling account paying out to a USD bank account would produce
+  a clean-looking `1000 debit / 1010 credit` transfer in CAD that didn't
+  account for Stripe's FX conversion fee or the destination amount. The
+  journal balanced internally but didn't match the operator's actual
+  books. The receiver's `expand.ts` now requests
+  `expand: ['destination']` on payout events; both `payoutPaid` and
+  `payoutFailed` compare `destination.currency` to `payout.currency` and
+  throw on mismatch with the actual currencies plus a pointer to open an
+  issue with the BT shape so the case can be modeled against real data.
+
+  **This is not an implementation of cross-currency payouts** — the
+  Stripe BT shape (FX fee inline on the payout BT vs separate adjustment
+  BT, `destination_amount` semantics, reverse-conversion behavior on
+  `payout.failed`) isn't documented well enough to implement against
+  without real payloads. Refusing loudly is the honest interim: operators
+  hitting this know immediately that their setup isn't supported, can
+  open an issue with their actual BT structure, and the implementation
+  can follow against real data.
+
+### Added
+
+- New `src/events/payouts/crossCurrency.ts` with
+  `detectCrossCurrencyPayout` (returns the destination currency on
+  mismatch, null otherwise) and `rejectCrossCurrencyPayout` (throw-on-
+  mismatch convenience wrapper). Both payout handlers call the rejector
+  immediately after extracting the payout, before any accounting work.
+
+- New `test/events/payouts/crossCurrency.spec.ts` covering the detection
+  logic across all 5 input shapes (string destination, null destination,
+  same-currency object, mismatched currency, object missing currency)
+  plus integration tests asserting `mapEvent` throws on cross-currency
+  `payout.paid` / `payout.failed` and the actionable error message
+  format. Sanity check: same-currency expanded destination still
+  produces a normal 1000/1010 entry.
+
+### Compatibility
+
+Existing `payout_paid_standard` and `payout_failed_standard` fixtures
+use string `destination` IDs (predate this expansion). They pass
+byte-identical because the detector returns `null` on string
+destinations, falling through to the same accounting as v0.1.10.
+The `server.spec.ts` test suite mocks `stripe.payouts.retrieve` at
+module scope so the existing webhook-flow tests stay off the Stripe
+network now that payout events get expanded.
+
 ## [0.1.10] — 2026-05-19
 
 ### Added
@@ -574,6 +625,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.11]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.11
 [0.1.10]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.10
 [0.1.9]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.9
 [0.1.8]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.8
