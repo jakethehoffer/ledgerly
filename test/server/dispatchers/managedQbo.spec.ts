@@ -272,4 +272,66 @@ describe('managedQboDispatcher', () => {
     });
     await expect(dispatch(makeEntry())).rejects.toThrow(/Token refresh failed/);
   });
+
+  it('falls back to globalThis.fetch when config.fetch is omitted', async () => {
+    // Covers the `config.fetch ?? globalThis.fetch` fallback at construction
+    // AND the `config.fetch !== undefined ? { fetch } : {}` else-branch in
+    // dispatchOnce (the underlying qboDispatcher gets no fetch override, so
+    // it too falls back to globalThis.fetch). The global is stubbed so no
+    // real network call happens. Token expiry is the seedStorage default
+    // (+3600s), so ensureFresh returns early — the API POST is the only call.
+    const storage = inMemoryStorage();
+    seedStorage(storage);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(apiOkResponse());
+    try {
+      const dispatch = managedQboDispatcher({ oauthClient, storage, accountMap });
+      await dispatch(makeEntry());
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url] = fetchSpy.mock.calls[0] ?? [];
+      expect(String(url)).toContain('/v3/company/realm-1/journalentry');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('forwards a custom apiBase to the underlying dispatcher', async () => {
+    // Covers the `config.apiBase !== undefined` true branch in dispatchOnce.
+    const storage = inMemoryStorage();
+    seedStorage(storage);
+    const fetchImpl = vi.fn().mockResolvedValue(apiOkResponse());
+
+    const dispatch = managedQboDispatcher({
+      oauthClient,
+      storage,
+      accountMap,
+      apiBase: 'https://sandbox-quickbooks.api.intuit.com',
+      fetch: fetchImpl,
+    });
+    await dispatch(makeEntry());
+
+    const [url] = fetchImpl.mock.calls[0] ?? [];
+    expect(String(url)).toContain(
+      'https://sandbox-quickbooks.api.intuit.com/v3/company/',
+    );
+  });
+
+  it('rethrows a non-Error rejection from the underlying dispatcher', async () => {
+    // Covers the `err instanceof Error ? err.message : String(err)` else
+    // branch in the 401-retry catch. The catch normally sees Error objects
+    // (qboDispatcher throws Error on non-ok responses), but a fetch impl
+    // that rejects with a bare value exercises the String(err) fallback.
+    // The coerced message contains no '401', so the wrapper rethrows the
+    // original value unchanged for the scheduler's backoff.
+    const storage = inMemoryStorage();
+    seedStorage(storage);
+    const fetchImpl = vi.fn().mockRejectedValue('network glitch');
+
+    const dispatch = managedQboDispatcher({
+      oauthClient,
+      storage,
+      accountMap,
+      fetch: fetchImpl,
+    });
+    await expect(dispatch(makeEntry())).rejects.toBe('network glitch');
+  });
 });

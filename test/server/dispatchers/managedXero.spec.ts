@@ -237,4 +237,63 @@ describe('managedXeroDispatcher', () => {
     };
     expect(sent.ManualJournals[0]?.Status).toBe('POSTED');
   });
+
+  it('falls back to globalThis.fetch when config.fetch is omitted', async () => {
+    // Covers the `config.fetch ?? globalThis.fetch` fallback at construction
+    // AND the `config.fetch !== undefined ? { fetch } : {}` else-branch in
+    // dispatchOnce (the underlying xeroDispatcher gets no fetch override).
+    // The global is stubbed so no real network call happens; token expiry
+    // is the seedStorage default (+1800s) so ensureFresh returns early.
+    const storage = inMemoryStorage();
+    seedStorage(storage);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(apiOkResponse());
+    try {
+      const dispatch = managedXeroDispatcher({ oauthClient, storage, accountMap });
+      await dispatch(makeEntry());
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url] = fetchSpy.mock.calls[0] ?? [];
+      expect(String(url)).toBe('https://api.xero.com/api.xro/2.0/ManualJournals');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('forwards a custom apiBase to the underlying dispatcher', async () => {
+    // Covers the `config.apiBase !== undefined` true branch in dispatchOnce.
+    const storage = inMemoryStorage();
+    seedStorage(storage);
+    const fetchImpl = vi.fn().mockResolvedValue(apiOkResponse());
+
+    const dispatch = managedXeroDispatcher({
+      oauthClient,
+      storage,
+      accountMap,
+      apiBase: 'https://proxy.internal.example.com',
+      fetch: fetchImpl,
+    });
+    await dispatch(makeEntry());
+
+    const [url] = fetchImpl.mock.calls[0] ?? [];
+    expect(String(url)).toBe(
+      'https://proxy.internal.example.com/api.xro/2.0/ManualJournals',
+    );
+  });
+
+  it('rethrows a non-Error rejection from the underlying dispatcher', async () => {
+    // Covers the `err instanceof Error ? err.message : String(err)` else
+    // branch in the 401-retry catch. A fetch impl rejecting with a bare
+    // value exercises the String(err) fallback; the coerced message has
+    // no '401', so the wrapper rethrows the original value unchanged.
+    const storage = inMemoryStorage();
+    seedStorage(storage);
+    const fetchImpl = vi.fn().mockRejectedValue('network glitch');
+
+    const dispatch = managedXeroDispatcher({
+      oauthClient,
+      storage,
+      accountMap,
+      fetch: fetchImpl,
+    });
+    await expect(dispatch(makeEntry())).rejects.toBe('network glitch');
+  });
 });
