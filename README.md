@@ -220,12 +220,14 @@ Caveats:
   account paying out to a USD bank account) are **explicitly rejected
   with a clear error**. The receiver's `expand.ts` expands
   `payout.destination` so the engine can compare `destination.currency`
-  against `payout.currency`; on a mismatch the handler throws with a
-  message pointing operators at where to report the BT shape. The
+  against `payout.currency`; on a mismatch the handler throws. The
   alternative — silently producing a 1000/1010 transfer in the source
   currency that doesn't account for Stripe's FX fee — was worse than
-  refusing. Implementation will follow once real-world fixture data on
-  the cross-currency payout BT shape is available.
+  refusing. The design analysis, the recommended entry shape, and the
+  exact payload to capture when reporting a real one live in
+  [`docs/cross-currency-payouts.md`](./docs/cross-currency-payouts.md);
+  implementation follows once a real cross-currency payout payload is
+  available.
 - The operator's QBO/Xero company file must have multi-currency enabled
   (and the relevant accounts configured for the foreign currency) before
   posting non-home-currency entries will succeed downstream. The QBO

@@ -47,8 +47,9 @@ export function rejectCrossCurrencyPayout(payout: Stripe.Payout): void {
       `source=${payout.currency}, destination=${destCurrency}). ` +
       `The engine doesn't model Stripe's FX conversion fee on these ` +
       `payouts, so silently producing a 1000/1010 transfer in the source ` +
-      `currency would understate the destination value. Please open an ` +
-      `issue with the payout's balance_transaction (and any related ` +
-      `adjustment BT) so the BT shape can be modeled against real data.`,
+      `currency would understate the destination value. See ` +
+      `docs/cross-currency-payouts.md for the design notes and exactly ` +
+      `what to capture — then please open an issue with that payload so ` +
+      `the BT shape can be modeled against real data.`,
   );
 }
