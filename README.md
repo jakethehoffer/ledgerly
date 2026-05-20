@@ -45,13 +45,17 @@ Then renders it as QBO JournalEntry JSON or Xero ManualJournal JSON, ready to pu
 
 ## Quick start
 
-### Install
+### Run the service
+
+ledgerly's primary form is a webhook receiver + scheduler that maps Stripe events and posts to QBO/Xero. The published, build-provenance-attested Docker image is the fastest path — see [Deployment](#deployment) for the full `docker run` / Docker Compose setup:
 
 ```bash
-pnpm add ledgerly stripe
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.12
 ```
 
-### Use
+### Use the engine as a library
+
+The pure mapping functions (`mapEvent`, `toQbo`, `toXero`) can also be embedded directly in your own webhook handler. The npm package is publish-pending; until it lands, build from source — `git clone` this repo, then `pnpm install && pnpm build` — and import the same API shown here (`pnpm add ledgerly stripe` will work once published):
 
 ```typescript
 import {
