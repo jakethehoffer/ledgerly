@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.12] — 2026-05-20
+
+### Added
+
+- **`docker-compose.yml`** for running ledgerly locally without
+  installing Node. Single `ledgerly` service using the published GHCR
+  image, a named volume (`ledgerly-data`) for SQLite persistence, and
+  `env_file: .env` for configuration. The README's new "Docker Compose
+  (local dev)" subsection documents the two-terminal workflow: run
+  `stripe listen` on the host to mint a webhook signing secret, paste
+  it into `.env`, then `docker compose up`.
+
+  No `stripe-cli` sidecar by design — `stripe listen` mints a fresh
+  signing secret per session, which ledgerly needs at boot to verify
+  signatures; bridging them inside Compose would need a shared volume
+  + entrypoint wait script for more complexity than it earns. The
+  compose file's header comment and the README both explain this so
+  the next reader doesn't retry that approach.
+
+### Changed
+
+- Test coverage on the managed dispatchers (`managedQbo`,
+  `managedXero`) raised from 80% to 100% branch coverage. Three tests
+  per file now exercise the previously-untested branches: the
+  `globalThis.fetch` fallback when no `fetch` is configured, the
+  custom-`apiBase` forwarding path, and the `String(err)` coercion in
+  the 401-retry catch when a non-Error value is thrown. No source
+  changes — the branches were always reachable, just untested.
+  Overall coverage: 93.23% statements, 88.94% branches.
+
 ## [0.1.11] — 2026-05-19
 
 ### Changed
@@ -625,6 +655,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.12]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.12
 [0.1.11]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.11
 [0.1.10]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.10
 [0.1.9]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.9

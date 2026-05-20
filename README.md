@@ -14,7 +14,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-583 tests · 13 event types · 35 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+589 tests · 13 event types · 35 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -807,7 +807,7 @@ that produced it — no long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.11 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.12 \
   --repo jakethehoffer/ledgerly
 ```
 
