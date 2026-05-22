@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.13] — 2026-05-20
+
+### Added
+
+- **ledgerly is published to npm** — `pnpm add ledgerly` /
+  `npm install ledgerly` now installs the engine and server. (v0.1.12
+  was the first release, hand-published; from v0.1.13 on, publishing
+  is automated — see below.)
+- **Automated npm publishing.** `release.yml` now publishes the npm
+  package on every `v*` tag push, alongside the existing GHCR image
+  job. It runs `npm publish --provenance`, so the package carries a
+  Sigstore-signed build-provenance attestation — the same supply-chain
+  guarantee the container images already have. The npm job is
+  push-only: npm rejects republishing an existing version, so a
+  `workflow_dispatch` image re-run skips it.
+- `package.json` metadata for a complete npm listing — `license`
+  (Apache-2.0), `repository`, `homepage`, `bugs`, `keywords`,
+  `author` — plus `CHANGELOG.md` in the published `files` and a
+  `prepublishOnly` gate (typecheck + lint + test + build) so a broken
+  or stale build can't be published.
+- `docs/cross-currency-payouts.md` — design notes for the deferred
+  cross-currency payout accounting: the analysis, the recommended
+  journal-entry shape, and the exact Stripe payload to capture when
+  reporting one.
+
+### Fixed
+
+- `bin` path no longer carries a `./` prefix
+  (`"ledgerly-server": "dist/server/cli.js"`) — npm flagged the
+  prefixed form at publish time. The published v0.1.12 bin still works
+  (npm auto-corrected it); v0.1.13 onward publishes warning-free.
+
+### Changed
+
+- README Quick start restructured to lead with `docker pull` (the
+  install path that always works) and to reflect the now-published
+  npm package.
+
 ## [0.1.12] — 2026-05-20
 
 ### Added
@@ -655,6 +693,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.13]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.13
 [0.1.12]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.12
 [0.1.11]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.11
 [0.1.10]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.10

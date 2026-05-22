@@ -1,9 +1,13 @@
 name: Release
 
-# Publishes a Docker image to GHCR on every `v*` tag push, plus a manual
-# `workflow_dispatch` for republishing an existing tag (e.g. after fixing a
-# Dockerfile regression). Multi-arch (linux/amd64 + linux/arm64) so M-series
-# Mac operators and ARM cloud instances both get native binaries.
+# On every `v*` tag push, publishes two artifacts — each with a
+# Sigstore-signed build-provenance attestation:
+#   - a multi-arch (linux/amd64 + linux/arm64) Docker image to GHCR
+#   - the npm package to the npm registry (via `npm publish --provenance`)
+#
+# `workflow_dispatch` (with a tag input) re-runs the IMAGE publish only —
+# the escape hatch for re-pushing an image after a Dockerfile fix. npm
+# rejects republishing an existing version, so the npm job is push-only.
 
 on:
   push:
@@ -121,3 +125,49 @@ jobs:
           subject-name: ${{ steps.tags.outputs.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+  publish-npm:
+    name: publish npm package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Tag-push only. npm rejects republishing an existing version, so a
+    # workflow_dispatch re-run (which exists to rebuild an IMAGE) must not
+    # attempt an npm publish — it would always fail on the already-live
+    # version. The publish-image job above still runs for workflow_dispatch.
+    if: github.event_name == 'push'
+
+    steps:
+      # On a tag push, the default checkout ref IS the tag, so no explicit
+      # `ref:` is needed (unlike publish-image, which also serves
+      # workflow_dispatch).
+      - name: Checkout at tag
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install Node 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+          # Writes an .npmrc that authenticates against the npm registry
+          # using the NODE_AUTH_TOKEN env var set on the publish step.
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `npm publish` runs the package's `prepublishOnly` gate first
+      # (typecheck + lint + test + build), so a broken or stale build can't
+      # ship. `--provenance` attaches a Sigstore-signed provenance
+      # statement: it works because this is a public repo and the workflow
+      # has `id-token: write`, and npm verifies it against package.json's
+      # `repository` field (which points back at this repo).
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

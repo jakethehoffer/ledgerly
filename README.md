@@ -50,7 +50,7 @@ Then renders it as QBO JournalEntry JSON or Xero ManualJournal JSON, ready to pu
 ledgerly's primary form is a webhook receiver + scheduler that maps Stripe events and posts to QBO/Xero. The published, build-provenance-attested Docker image is the fastest path — see [Deployment](#deployment) for the full `docker run` / Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.12
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.13
 ```
 
 ### Use the engine as a library
@@ -817,7 +817,7 @@ that produced it — no long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.12 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.13 \
   --repo jakethehoffer/ledgerly
 ```
 
