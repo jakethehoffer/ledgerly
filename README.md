@@ -1,7 +1,6 @@
 # ledgerly
 
 [![CI](https://github.com/jakethehoffer/ledgerly/actions/workflows/ci.yml/badge.svg)](https://github.com/jakethehoffer/ledgerly/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/jakethehoffer/ledgerly/graph/badge.svg)](https://codecov.io/gh/jakethehoffer/ledgerly)
 [![Release](https://img.shields.io/github/v/release/jakethehoffer/ledgerly?display_name=tag&sort=semver)](https://github.com/jakethehoffer/ledgerly/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-jakethehoffer%2Fledgerly-blue?logo=docker&logoColor=white)](https://github.com/jakethehoffer/ledgerly/pkgs/container/ledgerly)
