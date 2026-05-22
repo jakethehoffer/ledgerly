@@ -12,3 +12,6 @@ coverage/
 ledger.db
 ledger.db-wal
 ledger.db-shm
+
+# Local launch-day notes (marketing copy — never committed).
+LAUNCH.md
