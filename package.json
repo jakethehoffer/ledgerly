@@ -43,7 +43,7 @@
     "node": ">=20"
   },
   "bin": {
-    "ledgerly-server": "./dist/server/cli.js"
+    "ledgerly-server": "dist/server/cli.js"
   },
   "scripts": {
     "test": "vitest run",

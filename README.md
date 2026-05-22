@@ -55,7 +55,11 @@ docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.12
 
 ### Use the engine as a library
 
-The pure mapping functions (`mapEvent`, `toQbo`, `toXero`) can also be embedded directly in your own webhook handler. The npm package is publish-pending; until it lands, build from source — `git clone` this repo, then `pnpm install && pnpm build` — and import the same API shown here (`pnpm add ledgerly stripe` will work once published):
+The pure mapping functions (`mapEvent`, `toQbo`, `toXero`) can also be embedded directly in your own webhook handler — install the package alongside the Stripe SDK:
+
+```bash
+pnpm add ledgerly stripe
+```
 
 ```typescript
 import {
