@@ -15,3 +15,6 @@ ledger.db-shm
 
 # Local launch-day notes (marketing copy — never committed).
 LAUNCH.md
+
+# Local Claude project guidance (workflow notes, never committed).
+CLAUDE.md
