@@ -42,6 +42,35 @@ Cr 4000 Subscription Revenue            $100.00
 
 Then renders it as QBO JournalEntry JSON or Xero ManualJournal JSON, ready to push via each platform's accounting API.
 
+## Try it
+
+No Stripe account needed. Clone the repo and run the demo — it feeds a real `charge.succeeded` event through the engine, prints the balanced journal entry, and renders the QuickBooks Online and Xero JSON:
+
+```bash
+git clone https://github.com/jakethehoffer/ledgerly
+cd ledgerly
+pnpm install
+pnpm demo
+```
+
+Output:
+
+```
+JOURNAL ENTRY  2025-01-15  Stripe charge ch_demo_001 (customer cus_demo_001)
+------------------------------------------------------------
+  Account                               Debit     Credit
+------------------------------------------------------------
+  1010 Stripe Clearing                 $96.80
+  6000 Stripe Processing Fees           $3.20
+  4000 Subscription Revenue                      $100.00
+------------------------------------------------------------
+  Totals                              $100.00    $100.00
+
+  balanced: debits $100.00 == credits $100.00
+```
+
+…followed by the QBO `JournalEntry` and Xero `ManualJournal` JSON for the same entry. The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs) — it imports the same public API you'd use after `npm i ledgerly`. Swap in any of the 35 fixtures under [`test/fixtures/`](./test/fixtures) (refunds, disputes, multi-currency, annual subscriptions with a 12-month recognition schedule) to see the other entry shapes.
+
 ## Quick start
 
 ### Run the service

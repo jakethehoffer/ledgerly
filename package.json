@@ -55,6 +55,7 @@
     "e2e:fixtures": "vitest run test/engine.spec.ts test/exporters",
     "build": "tsc --project tsconfig.build.json",
     "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "demo": "pnpm build && node examples/quickstart.mjs",
     "start": "node dist/server/cli.js"
   },
   "dependencies": {
