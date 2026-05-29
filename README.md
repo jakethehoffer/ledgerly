@@ -44,7 +44,7 @@ Then renders it as QBO JournalEntry JSON or Xero ManualJournal JSON, ready to pu
 
 ## Try it
 
-No Stripe account needed. Clone the repo and run the demo — it feeds a real `charge.succeeded` event through the engine, prints the balanced journal entry, and renders the QuickBooks Online and Xero JSON:
+No Stripe account needed. Clone the repo and run the demo — it walks two events through the engine: a one-time charge, then an annual subscription with revenue recognition.
 
 ```bash
 git clone https://github.com/jakethehoffer/ledgerly
@@ -53,23 +53,36 @@ pnpm install
 pnpm demo
 ```
 
-Output:
+The charge produces a balanced three-line entry, which the demo also renders as QBO and Xero JSON:
 
 ```
-JOURNAL ENTRY  2025-01-15  Stripe charge ch_demo_001 (customer cus_demo_001)
+2025-01-15  Stripe charge ch_demo_001 (customer cus_demo_001)
 ------------------------------------------------------------
-  Account                               Debit     Credit
+Account                                   Debit       Credit
 ------------------------------------------------------------
-  1010 Stripe Clearing                 $96.80
-  6000 Stripe Processing Fees           $3.20
-  4000 Subscription Revenue                      $100.00
+1010 Stripe Clearing                     $96.80
+6000 Stripe Processing Fees               $3.20
+4000 Subscription Revenue                            $100.00
 ------------------------------------------------------------
-  Totals                              $100.00    $100.00
-
-  balanced: debits $100.00 == credits $100.00
+Totals                                  $100.00      $100.00
+balanced: debits $100.00 == credits $100.00
 ```
 
-…followed by the QBO `JournalEntry` and Xero `ManualJournal` JSON for the same entry. The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs) — it imports the same public API you'd use after `npm i ledgerly`. Swap in any of the 35 fixtures under [`test/fixtures/`](./test/fixtures) (refunds, disputes, multi-currency, annual subscriptions with a 12-month recognition schedule) to see the other entry shapes.
+The $1,200 annual subscription is the interesting one. The cash lands in Deferred Revenue (a liability), and the engine emits a 12-month schedule that releases it to Subscription Revenue $100 at a time — summing back to exactly what was deferred:
+
+```
+RECOGNITION SCHEDULE — releases the $1200 deferred over 12 months
+each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue
+----------------------------------------
+2025-02-15                       $100.00
+2025-03-15                       $100.00
+        ... (months 3–11) ...
+2026-01-15                       $100.00
+----------------------------------------
+total recognized                $1200.00
+```
+
+The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs) — it imports the same public API you'd use after `npm i ledgerly`. Refunds (with proportional sales-tax drains and realized FX gain/loss), disputes, payouts, and multi-currency charges are all in [`test/fixtures/`](./test/fixtures); feed any of the 35 fixtures through `mapEvent` to see its entry shape.
 
 ## Why ledgerly?
 

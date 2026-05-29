@@ -2,103 +2,36 @@
 //
 //   pnpm demo
 //
-// Feeds one realistic (expanded) charge.succeeded event through the engine,
-// prints the balanced journal entry it produces, proves debits == credits,
-// then renders the QuickBooks Online and Xero JSON you'd push to each API.
+// Walks two scenarios through the engine:
+//   1. a one-time charge      → a simple 3-line journal entry + QBO/Xero JSON
+//   2. an annual subscription → a deferred-revenue cash entry plus the
+//                               12-month recognition schedule that releases it
 //
 // Everything here is the real published API. `import ... from 'ledgerly'`
 // resolves to this package's own build via its exports map, so the code
-// below is byte-for-byte what you'd write after `npm i ledgerly`.
+// below is byte-for-byte what you'd write after `npm i ledgerly`. The engine
+// never calls Stripe; your webhook receiver pre-expands the nested objects
+// (balance_transaction, invoice.charge) before invoking it — see the README.
 
 import { mapEvent, toQbo, toXero, checkBalance, ACCOUNTS } from 'ledgerly';
 
 // ---------------------------------------------------------------------------
-// 1. A Stripe charge.succeeded event, with balance_transaction expanded.
-//    ($100.00 charge, $3.20 Stripe fee, $96.80 net to your Stripe balance.)
-//    In production your webhook receiver expands this; the engine never
-//    calls Stripe itself. See the README's "Pre-expand balance_transaction".
+// Output helpers
 // ---------------------------------------------------------------------------
-const event = {
-  id: 'evt_demo_charge_succeeded',
-  object: 'event',
-  api_version: '2024-12-18.acacia',
-  created: 1736942400,
-  type: 'charge.succeeded',
-  livemode: false,
-  pending_webhooks: 1,
-  request: { id: null, idempotency_key: null },
-  data: {
-    object: {
-      id: 'ch_demo_001',
-      object: 'charge',
-      amount: 10000,
-      amount_captured: 10000,
-      amount_refunded: 0,
-      application_fee_amount: null,
-      balance_transaction: {
-        id: 'txn_demo_001',
-        object: 'balance_transaction',
-        amount: 10000,
-        available_on: 1737158400,
-        created: 1736942400,
-        currency: 'usd',
-        exchange_rate: null,
-        fee: 320,
-        fee_details: [
-          {
-            amount: 320,
-            application: null,
-            currency: 'usd',
-            description: 'Stripe processing fees',
-            type: 'stripe_fee',
-          },
-        ],
-        net: 9680,
-        reporting_category: 'charge',
-        status: 'available',
-        type: 'charge',
-      },
-      captured: true,
-      created: 1736942400,
-      currency: 'usd',
-      customer: 'cus_demo_001',
-      metadata: {},
-      paid: true,
-      refunded: false,
-      status: 'succeeded',
-    },
-  },
-};
-
-// ---------------------------------------------------------------------------
-// 2. Your chart-of-accounts mapping. ledgerly emits 12 stable account codes;
-//    you map each to your real QBO account ID / Xero account code once. The
-//    placeholder IDs below stand in for yours.
-// ---------------------------------------------------------------------------
-const qboAccountMap = Object.fromEntries(
-  Object.values(ACCOUNTS).map((a, i) => [a.code, { qboId: String(80 + i), name: a.name }]),
-);
-const xeroAccountMap = Object.fromEntries(
-  Object.values(ACCOUNTS).map((a, i) => [a.code, { accountCode: String(600 + i) }]),
-);
-
-// ---------------------------------------------------------------------------
-// 3. Map the event. Pure function: same input always yields the same output.
-// ---------------------------------------------------------------------------
-const result = mapEvent(event);
-
 const usd = (c) => `$${(c / 100).toFixed(2)}`;
-const rule = '-'.repeat(60);
+const rule = (n = 60) => '-'.repeat(n);
 
-console.log('\nINPUT  charge.succeeded');
-console.log(`       $100.00 charge, $3.20 Stripe fee, $96.80 net\n`);
+function banner(title) {
+  console.log('\n' + '='.repeat(60));
+  console.log(' ' + title);
+  console.log('='.repeat(60));
+}
 
-for (const entry of result.entries) {
-  console.log(`JOURNAL ENTRY  ${entry.date}  ${entry.memo}`);
-  console.log(rule);
-  console.log('  ' + 'Account'.padEnd(32) + 'Debit'.padStart(11) + 'Credit'.padStart(11));
-  console.log(rule);
-
+function printEntry(entry) {
+  console.log(`\n${entry.date}  ${entry.memo}`);
+  console.log(rule());
+  console.log('Account'.padEnd(34) + 'Debit'.padStart(13) + 'Credit'.padStart(13));
+  console.log(rule());
   let debitTotal = 0;
   let creditTotal = 0;
   for (const line of entry.lines) {
@@ -107,31 +40,170 @@ for (const entry of result.entries) {
     const credit = line.side === 'credit' ? usd(line.amount) : '';
     if (line.side === 'debit') debitTotal += line.amount;
     else creditTotal += line.amount;
-    console.log('  ' + label.padEnd(32) + debit.padStart(11) + credit.padStart(11));
+    console.log(label.padEnd(34) + debit.padStart(13) + credit.padStart(13));
   }
-
-  console.log(rule);
-  console.log('  ' + 'Totals'.padEnd(32) + usd(debitTotal).padStart(11) + usd(creditTotal).padStart(11));
-
+  console.log(rule());
+  console.log('Totals'.padEnd(34) + usd(debitTotal).padStart(13) + usd(creditTotal).padStart(13));
   const report = checkBalance(entry);
   console.log(
     report.balanced
-      ? `\n  balanced: debits ${usd(report.debitTotal)} == credits ${usd(report.creditTotal)}`
-      : `\n  NOT BALANCED: difference ${usd(report.difference)}`,
+      ? `balanced: debits ${usd(report.debitTotal)} == credits ${usd(report.creditTotal)}`
+      : `NOT BALANCED: difference ${usd(report.difference)}`,
   );
+}
 
-  // -------------------------------------------------------------------------
-  // 4. Render for each accounting platform's API.
-  // -------------------------------------------------------------------------
+// Map ledgerly's 12 stable account codes to your real QBO account IDs / Xero
+// account codes once. The placeholder IDs below stand in for yours.
+const qboAccountMap = Object.fromEntries(
+  Object.values(ACCOUNTS).map((a, i) => [a.code, { qboId: String(80 + i), name: a.name }]),
+);
+const xeroAccountMap = Object.fromEntries(
+  Object.values(ACCOUNTS).map((a, i) => [a.code, { accountCode: String(600 + i) }]),
+);
+
+// ===========================================================================
+// SCENARIO 1 — one-time charge ($100.00, $3.20 Stripe fee, $96.80 net)
+// ===========================================================================
+banner('SCENARIO 1   One-time charge');
+
+const chargeEvent = {
+  id: 'evt_demo_charge',
+  object: 'event',
+  type: 'charge.succeeded',
+  created: 1736942400,
+  data: {
+    object: {
+      id: 'ch_demo_001',
+      object: 'charge',
+      amount: 10000,
+      amount_refunded: 0,
+      application_fee_amount: null,
+      balance_transaction: {
+        id: 'txn_demo_001',
+        object: 'balance_transaction',
+        amount: 10000,
+        currency: 'usd',
+        exchange_rate: null,
+        fee: 320,
+        net: 9680,
+        type: 'charge',
+        created: 1736942400,
+      },
+      captured: true,
+      created: 1736942400,
+      currency: 'usd',
+      customer: 'cus_demo_001',
+      paid: true,
+      refunded: false,
+      status: 'succeeded',
+    },
+  },
+};
+
+const charge = mapEvent(chargeEvent);
+for (const entry of charge.entries) {
+  printEntry(entry);
   console.log('\nQUICKBOOKS ONLINE JSON  (POST to the JournalEntry endpoint)');
   console.log(JSON.stringify(toQbo(entry, qboAccountMap), null, 2));
-
   console.log('\nXERO JSON  (POST to the ManualJournals endpoint)');
   console.log(JSON.stringify(toXero(entry, xeroAccountMap), null, 2));
 }
 
+// ===========================================================================
+// SCENARIO 2 — annual subscription ($1,200.00 paid up front)
+// The cash hits now, but the revenue is earned over 12 months. ledgerly books
+// the cash to Deferred Revenue (a liability) and emits a 12-month schedule
+// that releases $100 to Subscription Revenue each month.
+// ===========================================================================
+banner('SCENARIO 2   Annual subscription with revenue recognition');
+
+const annualEvent = {
+  id: 'evt_demo_invoice_annual',
+  object: 'event',
+  type: 'invoice.payment_succeeded',
+  created: 1736942400,
+  data: {
+    object: {
+      id: 'in_demo_annual',
+      object: 'invoice',
+      amount_due: 120000,
+      amount_paid: 120000,
+      amount_remaining: 0,
+      billing_reason: 'subscription_cycle',
+      charge: {
+        id: 'ch_demo_annual',
+        object: 'charge',
+        amount: 120000,
+        balance_transaction: {
+          id: 'txn_demo_annual',
+          object: 'balance_transaction',
+          amount: 120000,
+          currency: 'usd',
+          exchange_rate: null,
+          fee: 3600,
+          net: 116400,
+          type: 'charge',
+          created: 1736942400,
+        },
+        currency: 'usd',
+        paid: true,
+        status: 'succeeded',
+      },
+      created: 1736942400,
+      currency: 'usd',
+      customer: 'cus_demo_annual',
+      lines: {
+        object: 'list',
+        data: [
+          {
+            id: 'il_demo_annual',
+            object: 'line_item',
+            amount: 120000,
+            currency: 'usd',
+            period: { start: 1736942400, end: 1768478400 }, // ~365 days
+            proration: false,
+            subscription: 'sub_demo_annual',
+            type: 'subscription',
+          },
+        ],
+        has_more: false,
+        total_count: 1,
+      },
+      paid: true,
+      status: 'paid',
+      subscription: 'sub_demo_annual',
+      total: 120000,
+    },
+  },
+};
+
+const annual = mapEvent(annualEvent);
+
+console.log('\nCASH ENTRY (today) — the $1,200 lands in Deferred Revenue, not Revenue:');
+for (const entry of annual.entries) printEntry(entry);
+
+const deferred = annual.entries[0].lines.find((l) => l.accountCode === '2100').amount;
+
+console.log(`\nRECOGNITION SCHEDULE — releases the $${(deferred / 100).toFixed(0)} deferred over 12 months`);
+console.log('each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue');
+console.log(rule(40));
+let recognized = 0;
+for (const entry of annual.schedule.entries) {
+  const amount = entry.lines.find((l) => l.side === 'credit').amount;
+  recognized += amount;
+  console.log(entry.date.padEnd(28) + usd(amount).padStart(12));
+}
+console.log(rule(40));
+console.log('total recognized'.padEnd(28) + usd(recognized).padStart(12));
 console.log(
-  '\nSwap in any of the 35 fixtures under test/fixtures/ (refunds, disputes,\n' +
-    'multi-currency, annual subscriptions with a 12-month recognition schedule)\n' +
-    'to see the other entry shapes.\n',
+  recognized === deferred
+    ? `\nthe schedule releases exactly what was deferred: ${usd(recognized)} == ${usd(deferred)}`
+    : `\nMISMATCH: recognized ${usd(recognized)} != deferred ${usd(deferred)}`,
+);
+
+console.log(
+  '\nThat is the whole engine in two events. Refunds (with proportional sales-tax\n' +
+    'drains and realized FX gain/loss), disputes, payouts, and multi-currency charges\n' +
+    'are all in test/fixtures/ — feed any of the 35 fixtures through mapEvent the\n' +
+    'same way to see its entry shape.\n',
 );
