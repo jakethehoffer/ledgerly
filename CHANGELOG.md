@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.1.14] — 2026-05-28
+
+### Changed
+
+- **Server-only dependencies are now optional `peerDependencies`**
+  ([#1](https://github.com/jakethehoffer/ledgerly/issues/1)). `express`,
+  `better-sqlite3`, and `dotenv` moved out of `dependencies`, so
+  `npm install ledgerly` for engine-only consumers (`mapEvent` /
+  `toQbo` / `toXero`) no longer pulls in Express or the native
+  `better-sqlite3` build — a fresh install drops from 109 packages to
+  23. `stripe` is now a required `peerDependency` (the public types
+  reference `Stripe.*`); installing it alongside ledgerly was already
+  the documented pattern.
+
+  **Breaking for npm consumers who run the bundled webhook receiver:**
+  `npm install ledgerly` no longer installs the server's runtime
+  dependencies. Install them explicitly —
+  `pnpm add ledgerly express better-sqlite3 dotenv stripe` — or use the
+  Docker image, which bundles them. The pure engine and the exporters
+  are unaffected.
+- The `Dockerfile` now assembles the server's production
+  `node_modules` explicitly in the build stage (the server deps are no
+  longer in `dependencies`, so `pnpm prune --prod` would otherwise drop
+  them). Runtime image contents are unchanged.
+
 ## [0.1.13] — 2026-05-20
 
 ### Added
