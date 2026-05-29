@@ -72,7 +72,8 @@ pnpm start
 Open an issue with a minimal repro: ideally a Stripe event JSON plus the
 unexpected output. For accounting questions ("is this entry right?"),
 include your chart-of-accounts assumption — the project's defaults are in
-the README's "Chart of accounts" section.
+the README's "Chart of accounts" section, and the reasoning behind each
+entry shape is documented in [`docs/accounting.md`](./docs/accounting.md).
 
 ## Security
 

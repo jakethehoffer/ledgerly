@@ -312,6 +312,8 @@ Caveats:
 
 Map these codes to your own QBO and Xero account IDs at integration time via the `accountMap` parameter on each exporter.
 
+For the rationale behind every entry — why each Stripe event produces the debits and credits it does, in plain bookkeeping terms — see [`docs/accounting.md`](./docs/accounting.md). It's written to be audited by an accountant without reading the code.
+
 ## Architecture
 
 ```
