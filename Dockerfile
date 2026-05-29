@@ -1,8 +1,16 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- Build stage -----------------------------------------------------------
-# Install all deps (including dev), compile TypeScript, then prune devDeps
-# before handing the resulting node_modules to the runtime stage.
+# Install all deps (including dev), compile TypeScript, then assemble a
+# production-only node_modules holding just the server's runtime deps.
+#
+# The server's runtime deps (express, better-sqlite3, dotenv, stripe) are
+# declared as peerDependencies in package.json — NOT regular dependencies —
+# so that `npm i ledgerly` for engine-only consumers stays lean (no Express,
+# no native SQLite). They live in devDependencies too, so the repo's own
+# typecheck/build resolve them here. Because they aren't in `dependencies`,
+# `pnpm prune --prod` would drop them, so the server image installs that exact
+# set explicitly (below) instead.
 #
 # Build tooling (python3 + build-essential) is here as a safety net for
 # `better-sqlite3`'s native binding: the prebuilt binary usually downloads
@@ -23,19 +31,31 @@ RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN pnpm build && pnpm prune --prod
+RUN pnpm build
+
+# Assemble the server's production dependencies into /opt/app. These mirror
+# package.json's `peerDependencies` ranges — keep them in sync. Built in this
+# stage so better-sqlite3's native binding compiles for the target arch when
+# no prebuilt binary is available; the runtime stage copies the result.
+RUN mkdir -p /opt/app && cd /opt/app \
+    && npm init -y >/dev/null 2>&1 \
+    && npm install --omit=dev --no-audit --no-fund \
+        express@^4.22.2 \
+        better-sqlite3@^11.10.0 \
+        dotenv@^17.4.2 \
+        stripe@^16
 
 # ---- Runtime stage ---------------------------------------------------------
-# Minimal runtime: node:20-slim + the pruned node_modules + compiled dist.
-# No build tooling, no source, no tests. Runs as a non-root user; SQLite
-# state lives on /data which operators mount as a volume to persist across
-# container restarts.
+# Minimal runtime: node:20-slim + the server's production node_modules +
+# compiled dist. No build tooling, no source, no tests, no dev dependencies.
+# Runs as a non-root user; SQLite state lives on /data which operators mount
+# as a volume to persist across container restarts.
 
 FROM node:20-slim AS runtime
 WORKDIR /app
 
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /opt/app/node_modules ./node_modules
 COPY --from=build /app/package.json ./
 
 # Non-root runtime user. Owning /data lets the process write ledger.db

@@ -7,19 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      better-sqlite3:
-        specifier: ^11.10.0
-        version: 11.10.0
-      dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
-      express:
-        specifier: ^4.22.2
-        version: 4.22.2
-      stripe:
-        specifier: ^16
-        version: 16.12.0
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -42,12 +29,24 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^2.1.9
         version: 2.1.9(vitest@2.1.9(@types/node@20.19.41))
+      better-sqlite3:
+        specifier: ^11.10.0
+        version: 11.10.0
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       eslint:
         specifier: ^8.57.1
         version: 8.57.1
+      express:
+        specifier: ^4.22.2
+        version: 4.22.2
       prettier:
         specifier: ^3.8.3
         version: 3.8.3
+      stripe:
+        specifier: ^16
+        version: 16.12.0
       supertest:
         specifier: ^7.2.2
         version: 7.2.2

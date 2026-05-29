@@ -359,7 +359,13 @@ Imported from `ledgerly` (after build, the barrel is at `dist/index.js`):
 
 ## Webhook receiver
 
-ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint: signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel, so importing `mapEvent` keeps the Express-based server out of your bundle. Note that the server's dependencies (Express, `better-sqlite3`) still install with the package today; the pure engine has no runtime dependencies of its own, and making the server deps optional for engine-only consumers is tracked in [#1](https://github.com/jakethehoffer/ledgerly/issues/1).
+ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint: signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel, so importing `mapEvent` keeps the Express-based server out of your bundle. The server's runtime dependencies — `express`, `better-sqlite3`, `dotenv`, and `stripe` — are declared as `peerDependencies`, so engine-only consumers don't install them (`npm i ledgerly` pulls in no Express and no native SQLite module). To run the receiver yourself, install them alongside ledgerly:
+
+```bash
+pnpm add ledgerly express better-sqlite3 dotenv stripe
+```
+
+The published Docker image already bundles them.
 
 Required environment variables:
 
