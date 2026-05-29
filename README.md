@@ -71,6 +71,16 @@ JOURNAL ENTRY  2025-01-15  Stripe charge ch_demo_001 (customer cus_demo_001)
 
 …followed by the QBO `JournalEntry` and Xero `ManualJournal` JSON for the same entry. The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs) — it imports the same public API you'd use after `npm i ledgerly`. Swap in any of the 35 fixtures under [`test/fixtures/`](./test/fixtures) (refunds, disputes, multi-currency, annual subscriptions with a 12-month recognition schedule) to see the other entry shapes.
 
+## Why ledgerly?
+
+Indie SaaS founders reconcile Stripe one of a few ways: by hand in a spreadsheet, with a hosted sync tool (A2X, Synder, and the like), with Stripe's own reporting exports, or by paying a bookkeeper $500–$2,000/mo. ledgerly fills the gap between those.
+
+- **vs. a hosted sync tool** — those are managed SaaS with a monthly fee, and the Stripe-to-journal-entry mapping is a closed box you can't inspect or change. ledgerly is open source and runs on your own infrastructure. The mapping engine is under 2,000 lines of TypeScript, every entry shape is pinned by a fixture test, and you own the chart of accounts. No per-month fee, no third party in your financial data path.
+- **vs. Stripe's native reporting** — Stripe gives you summaries, CSV exports, and a separate paid Revenue Recognition product. ledgerly emits actual balanced double-entry journal entries — deferred revenue released month by month, sales tax drained proportionally on refunds, realized FX gain/loss when rates move between a charge and its refund — ready to POST to the QuickBooks Online or Xero API.
+- **vs. doing it by hand** — the mapping from a Stripe event to a journal entry is deterministic, so it shouldn't be manual work. ledgerly is that determinism as a pure function: same event in, same balanced entry out, every time.
+
+**ledgerly is probably not for you if** you want a turnkey hosted product with a dashboard and zero ops. It's a library plus an optional self-hosted webhook receiver, not a SaaS — it assumes you (or a developer) can run a small service and map 12 account codes to your real QBO/Xero accounts once. It also doesn't yet handle cross-currency payouts or B2B accounts-receivable flows; both are documented as explicit gaps rather than quietly approximated.
+
 ## Quick start
 
 ### Run the service
