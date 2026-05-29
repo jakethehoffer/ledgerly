@@ -359,7 +359,7 @@ Imported from `ledgerly` (after build, the barrel is at `dist/index.js`):
 
 ## Webhook receiver
 
-ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint: signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel — library consumers who only need `mapEvent` don't have to pull Express into their bundles.
+ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint: signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel, so importing `mapEvent` keeps the Express-based server out of your bundle. Note that the server's dependencies (Express, `better-sqlite3`) still install with the package today; the pure engine has no runtime dependencies of its own, and making the server deps optional for engine-only consumers is tracked in [#1](https://github.com/jakethehoffer/ledgerly/issues/1).
 
 Required environment variables:
 
