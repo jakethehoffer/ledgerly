@@ -10,8 +10,9 @@
  *
  * The engine itself is currency-agnostic — it just sums integers. Display
  * formatting (dividing by the appropriate 10^N) happens in the QBO/Xero
- * exporters. Today those exporters assume 2-decimal currencies; supporting
- * zero- or three-decimal currencies in the exporters is a follow-up.
+ * exporters, which derive the per-currency divisor via `currencyMinorUnits`
+ * / `minorToMajor` in `currency.js` — zero-, two-, and three-decimal
+ * currencies are all handled and covered by `test/currency.spec.ts`.
  */
 export type Cents = number & { readonly __brand: 'cents' };
 
