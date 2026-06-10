@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
-## [Unreleased]
+## [0.1.16] — 2026-06-10
 
 ### Fixed
 
@@ -771,6 +771,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.1.16]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.16
 [0.1.15]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.15
 [0.1.14]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.14
 [0.1.13]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.13
