@@ -563,6 +563,35 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(storage.entries.countImmediate()).toBe(0);
         expect(storage.entries.countPendingScheduled()).toBe(0);
       });
+
+      it('is idempotent — re-persisting the same event writes entries once and reports duplicate', () => {
+        const storage = factory();
+        const result: MapResult = {
+          entries: [makeEntry({ sourceEventId: 'evt_dup', memo: 'first' })],
+          schedule: {
+            subscriptionId: 'sub_dup',
+            sourceEventId: 'evt_dup',
+            entries: [makeEntry({ date: '2026-06-01', memo: 'sched' })],
+          },
+        };
+
+        // Two deliveries of the same event reach persistence (e.g. both raced
+        // past the handler's cheap has() pre-check during the await-expansion
+        // gap). The persistence layer is the correctness boundary: the first
+        // claim wins and writes; the second is a no-op duplicate.
+        const first = storage.persistMapResult('evt_dup', result);
+        const second = storage.persistMapResult('evt_dup', result);
+
+        expect(first).toEqual({ duplicate: false });
+        expect(second).toEqual({ duplicate: true });
+
+        // Entries written exactly once — no doubled journal or dispatch rows.
+        expect(storage.entries.countImmediate()).toBe(1);
+        expect(storage.entries.findByEventId('evt_dup')).toHaveLength(1);
+        // 1 immediate dispatch row + 1 recognition row = 2, not 4.
+        expect(storage.entries.countPendingScheduled()).toBe(2);
+        expect(storage.dedup.has('evt_dup')).toBe(true);
+      });
     });
 
     describe('ping', () => {

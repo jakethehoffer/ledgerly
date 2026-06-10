@@ -190,6 +190,44 @@ describe('createServer', () => {
       expect(second.body).toEqual({ duplicate: true });
     });
 
+    it('acks a persistence-level duplicate even when it slips past the has() pre-check', async () => {
+      // Simulate the race the has() pre-check can't close: two deliveries of the
+      // same event both pass has() during the await-expansion gap and both reach
+      // persistence. The backend is the correctness boundary — exactly one wins
+      // the claim. Here the stub's has() stays false (so the cheap pre-check does
+      // NOT catch it) while persistMapResult reports the claim was lost. The
+      // handler must ack as a duplicate, not report the event as processed.
+      const real = inMemoryStorage();
+      let persistCalls = 0;
+      const racy: Storage = {
+        ...real,
+        persistMapResult() {
+          persistCalls += 1;
+          return { duplicate: true };
+        },
+      };
+      const metrics = inMemoryMetrics();
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+        storage: racy,
+        metrics,
+      });
+      const { raw } = loadFixture('payout_paid_standard');
+      const sig = signPayload(raw);
+      const res = await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', sig)
+        .send(raw);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ duplicate: true }); // not { ok: true } — processed branch NOT taken
+      expect(persistCalls).toBe(1); // it did reach persistence, i.e. past the has() gate
+      expect(metrics.render()).toContain('ledgerly_webhook_duplicate_total 1');
+    });
+
     it('acknowledges unhandled event types with 200 and unhandled:true', async () => {
       const { app } = createServer({
         stripe,

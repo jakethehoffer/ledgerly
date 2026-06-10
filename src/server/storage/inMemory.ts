@@ -4,6 +4,7 @@ import type {
   Deduplicator,
   JournalEntryStore,
   OAuthTokenStore,
+  PersistResult,
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
@@ -260,7 +261,19 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       // In-memory storage is reachable for as long as the process is alive.
       // No I/O happens; if this function is reachable at all, the storage is.
     },
-    persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): void {
+    persistMapResult(
+      eventId: string,
+      result: MapResult,
+      now: number = Date.now(),
+    ): PersistResult {
+      // Idempotency boundary. The has() check, the writes, and record() run
+      // with no `await` between them, so under JS single-threaded semantics
+      // this whole block is atomic with respect to other webhook handlers — a
+      // duplicate that raced past the receiver's cheap has() pre-check loses
+      // here and writes nothing. record() stays AFTER the writes so a mid-write
+      // throw never marks the event processed (this backend has no transaction
+      // to roll back), leaving Stripe's redelivery free to retry cleanly.
+      if (dedup.has(eventId)) return { duplicate: true };
       for (const entry of result.entries) {
         entries.saveImmediate(entry, eventId);
         // Also enqueue for dispatch. Synthetic subscriptionId distinguishes
@@ -276,6 +289,7 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         }
       }
       dedup.record(eventId, now);
+      return { duplicate: false };
     },
   };
 }

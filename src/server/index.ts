@@ -22,7 +22,7 @@ import {
   getXeroConnections,
 } from './oauth/xero.js';
 import { inMemoryStorage } from './storage/inMemory.js';
-import type { Deduplicator, Storage } from './storage/types.js';
+import type { Deduplicator, PersistResult, Storage } from './storage/types.js';
 
 /**
  * OAuth client configuration block, attached to {@link ServerConfig.oauth}.
@@ -113,7 +113,13 @@ function resolveStorage(config: ServerConfig): Storage {
       ping(): void {
         base.ping();
       },
-      persistMapResult(eventId, result, now = Date.now()): void {
+      persistMapResult(eventId, result, now = Date.now()): PersistResult {
+        // Same idempotency boundary as the first-class backends: a duplicate
+        // that raced past the receiver's has() pre-check writes nothing. No
+        // `await` between has() and record(), so this is atomic under JS
+        // single-threaded semantics; record() stays last so a mid-write throw
+        // doesn't mark the event processed.
+        if (customDedup.has(eventId)) return { duplicate: true };
         for (const entry of result.entries) {
           base.entries.saveImmediate(entry, eventId);
         }
@@ -123,6 +129,7 @@ function resolveStorage(config: ServerConfig): Storage {
           }
         }
         customDedup.record(eventId, now);
+        return { duplicate: false };
       },
     };
   }
@@ -245,13 +252,26 @@ export function createServer(config: ServerConfig): ServerInstance {
 
     try {
       const result = mapEvent(expanded);
+      let persistResult: PersistResult;
       try {
-        // Atomic per backend: persist all entries + record dedup, or roll back.
-        storage.persistMapResult(event.id, result);
+        // Atomic + idempotent per backend: persist all entries + record dedup,
+        // or roll back. The persistence layer — not the has() pre-check above —
+        // is the correctness boundary: if a concurrent delivery already claimed
+        // this event during the await-expansion gap, this returns
+        // { duplicate: true } and writes nothing, so entries post exactly once.
+        persistResult = storage.persistMapResult(event.id, result);
       } catch (err) {
         metrics.inc('webhook_error', { type: event.type });
         log.error('Persistence failed', { eventId: event.id, err });
         res.status(500).json({ error: 'Persistence failed' });
+        return;
+      }
+      if (persistResult.duplicate) {
+        metrics.inc('webhook_duplicate');
+        log.info('Duplicate event ignored at persistence (raced past pre-check)', {
+          eventId: event.id,
+        });
+        res.status(200).json({ duplicate: true });
         return;
       }
       metrics.inc('webhook_processed', { type: event.type });

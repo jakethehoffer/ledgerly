@@ -6,6 +6,7 @@ import type {
   Deduplicator,
   JournalEntryStore,
   OAuthTokenStore,
+  PersistResult,
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
@@ -498,42 +499,56 @@ export function sqliteStorage(db: Database.Database): Storage {
     'INSERT OR IGNORE INTO processed_events (event_id, processed_at) VALUES (?, ?)',
   );
 
-  const persistTxn = db.transaction((eventId: string, result: MapResult, now: number) => {
-    for (const entry of result.entries) {
-      insertImmediate.run(
-        eventId,
-        now,
-        entry.date,
-        entry.currency,
-        entry.memo,
-        entry.sourceEventType,
-        entry.sourceObjectId ?? null,
-        JSON.stringify(entry),
-      );
-      // Also enqueue for dispatch. Synthetic subscriptionId distinguishes
-      // immediate dispatch rows from real recognition-schedule rows.
-      // next_attempt_at defaults to NULL via the schema, so the entry is
-      // eligible on the next scheduler tick.
-      insertScheduled.run(
-        entry.sourceEventId,
-        `immediate:${entry.sourceEventId}`,
-        entry.date,
-        JSON.stringify(entry),
-      );
-    }
-    if (result.schedule) {
-      const sched = result.schedule;
-      for (const entry of sched.entries) {
+  const persistTxn = db.transaction(
+    (eventId: string, result: MapResult, now: number): PersistResult => {
+      // Claim the event FIRST. INSERT OR IGNORE against the processed_events
+      // PRIMARY KEY is an atomic compare-and-set: the first caller inserts
+      // (changes === 1) and proceeds to write; any concurrent or later caller
+      // for the same id gets changes === 0 and writes nothing, so entries post
+      // exactly once even if two deliveries race past the receiver's has()
+      // pre-check. Claiming first is safe precisely because this is a
+      // transaction — if a later insert throws, the whole unit (including this
+      // claim) rolls back, leaving the event un-recorded for Stripe to redeliver.
+      const claim = recordEvent.run(eventId, now);
+      if (claim.changes === 0) {
+        return { duplicate: true };
+      }
+      for (const entry of result.entries) {
+        insertImmediate.run(
+          eventId,
+          now,
+          entry.date,
+          entry.currency,
+          entry.memo,
+          entry.sourceEventType,
+          entry.sourceObjectId ?? null,
+          JSON.stringify(entry),
+        );
+        // Also enqueue for dispatch. Synthetic subscriptionId distinguishes
+        // immediate dispatch rows from real recognition-schedule rows.
+        // next_attempt_at defaults to NULL via the schema, so the entry is
+        // eligible on the next scheduler tick.
         insertScheduled.run(
-          sched.sourceEventId,
-          sched.subscriptionId,
+          entry.sourceEventId,
+          `immediate:${entry.sourceEventId}`,
           entry.date,
           JSON.stringify(entry),
         );
       }
-    }
-    recordEvent.run(eventId, now);
-  });
+      if (result.schedule) {
+        const sched = result.schedule;
+        for (const entry of sched.entries) {
+          insertScheduled.run(
+            sched.sourceEventId,
+            sched.subscriptionId,
+            entry.date,
+            JSON.stringify(entry),
+          );
+        }
+      }
+      return { duplicate: false };
+    },
+  );
 
   // Prepared once for the lifetime of this Storage instance; readiness
   // probes call this on every request and the prepare cost should not
@@ -550,8 +565,12 @@ export function sqliteStorage(db: Database.Database): Storage {
       // etc.); the /readyz handler catches and surfaces the message.
       pingStmt.get();
     },
-    persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): void {
-      persistTxn(eventId, result, now);
+    persistMapResult(
+      eventId: string,
+      result: MapResult,
+      now: number = Date.now(),
+    ): PersistResult {
+      return persistTxn(eventId, result, now);
     },
   };
 }

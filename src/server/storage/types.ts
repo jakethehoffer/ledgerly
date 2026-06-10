@@ -209,6 +209,21 @@ export interface OAuthTokenStore {
 }
 
 /**
+ * Outcome of {@link Storage.persistMapResult}.
+ *
+ * `duplicate` is `true` when the event had already been recorded as processed
+ * and this call wrote nothing. The persistence layer is the idempotency
+ * boundary: a duplicate delivery that races past the receiver's cheap
+ * `dedup.has()` pre-check (the check and the record straddle an `await`, so two
+ * concurrent deliveries can both pass it) still posts entries exactly once,
+ * because only the first caller to claim the event ID writes. `false` means
+ * this call won the claim and persisted its entries.
+ */
+export interface PersistResult {
+  readonly duplicate: boolean;
+}
+
+/**
  * Aggregate persistence handle bundling a deduplicator and journal entry store.
  *
  * `persistMapResult` is the single-call entry point the server uses after a
@@ -242,6 +257,10 @@ export interface Storage {
    * Atomic per-backend: either all writes land and the event is recorded, or
    * none do.
    *
+   * Idempotent: if `eventId` was already recorded, nothing is written and the
+   * call returns `{ duplicate: true }`. This is the receiver's correctness
+   * boundary against double-posting (see {@link PersistResult}).
+   *
    * For each immediate entry in `result.entries`, the implementation writes
    * to BOTH the journal entry audit log AND the scheduled-entries dispatch
    * queue (with a synthetic `immediate:<sourceEventId>` subscription ID and
@@ -253,5 +272,5 @@ export interface Storage {
    * Recognition-schedule entries in `result.schedule.entries` are enqueued
    * the usual way (future-dated, real subscription ID).
    */
-  persistMapResult(eventId: string, result: MapResult, now?: number): void;
+  persistMapResult(eventId: string, result: MapResult, now?: number): PersistResult;
 }

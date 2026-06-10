@@ -10,6 +10,20 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ### Fixed
 
+- **Duplicate webhook deliveries can no longer double-post journal entries.**
+  Idempotency was enforced only by an in-memory `dedup.has()` pre-check that is
+  separated from the dedup `record()` by the `await` that expands the event, so
+  two concurrent deliveries of the same Stripe event could both pass the check
+  and both persist — writing a duplicate set of journal and dispatch rows. The
+  SQLite path made it worse by inserting all entries first and only
+  `INSERT OR IGNORE`-ing the dedup row last, discarding the very signal that
+  should have stopped it. `persistMapResult` is now the idempotency boundary on
+  every backend: it claims the event ID atomically (SQLite via the
+  `processed_events` primary key inside the existing transaction; in-memory via
+  a synchronous guard) and writes entries only if it wins the claim, returning
+  `{ duplicate }`. A delivery that loses the race writes nothing and the
+  receiver acks it as a duplicate. No schema change; single-delivery behavior is
+  unchanged.
 - **FX dispute resolution no longer strands the `1200` Disputes Receivable
   clearing account.** When a charge settled in a currency different from the
   dispute's customer-facing currency, `funds_withdrawn` parked the receivable
