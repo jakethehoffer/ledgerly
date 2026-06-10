@@ -1,0 +1,26 @@
+{
+  "TxnDate": "2025-02-01",
+  "DocNumber": "te_closed_fx_lost_001",
+  "PrivateNote": "Stripe dispute dp_test_fx_drift_001 closed lost (charge ch_test_fx_drift_001)",
+  "CurrencyRef": { "value": "CAD" },
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 65,
+      "Description": "Dispute lost — writeoff of receivable",
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": { "value": "qbo-6100", "name": "QBO 6100" }
+      }
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 65,
+      "Description": "Release receivable to expense",
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": { "value": "qbo-1200", "name": "QBO 1200" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "entries": [
+    {
+      "date": "2025-02-02",
+      "currency": "CAD",
+      "memo": "Stripe dispute dp_test_fx_drift_001 funds reinstated (charge ch_test_fx_drift_001)",
+      "sourceEventId": "evt_test_dispute_reinstated_fx_drift_001",
+      "sourceEventType": "charge.dispute.funds_reinstated",
+      "sourceObjectId": "dp_test_fx_drift_001",
+      "lines": [
+        {
+          "accountCode": "1010",
+          "side": "debit",
+          "amount": 6750,
+          "memo": "Funds reinstated to Stripe balance"
+        },
+        {
+          "accountCode": "1200",
+          "side": "credit",
+          "amount": 6500,
+          "memo": "Release receivable on dispute win"
+        },
+        {
+          "accountCode": "7000",
+          "side": "credit",
+          "amount": 250,
+          "memo": "FX gain on dispute reinstatement (rate moved in our favor)"
+        }
+      ],
+      "fxContext": {
+        "customerCurrency": "USD",
+        "customerAmount": 5000,
+        "settlementCurrency": "CAD",
+        "settlementAmount": 6750
+      }
+    }
+  ],
+  "schedule": null
+}

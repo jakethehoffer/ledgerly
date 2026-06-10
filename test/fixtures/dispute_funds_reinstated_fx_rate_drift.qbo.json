@@ -1,0 +1,46 @@
+{
+  "TxnDate": "2025-02-02",
+  "PrivateNote": "Stripe dispute dp_test_fx_drift_001 funds reinstated (charge ch_test_fx_drift_001)",
+  "CurrencyRef": {
+    "value": "CAD"
+  },
+  "Line": [
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 67.5,
+      "JournalEntryLineDetail": {
+        "PostingType": "Debit",
+        "AccountRef": {
+          "value": "qbo-1010",
+          "name": "QBO 1010"
+        }
+      },
+      "Description": "Funds reinstated to Stripe balance"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 65,
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": {
+          "value": "qbo-1200",
+          "name": "QBO 1200"
+        }
+      },
+      "Description": "Release receivable on dispute win"
+    },
+    {
+      "DetailType": "JournalEntryLineDetail",
+      "Amount": 2.5,
+      "JournalEntryLineDetail": {
+        "PostingType": "Credit",
+        "AccountRef": {
+          "value": "qbo-7000",
+          "name": "QBO 7000"
+        }
+      },
+      "Description": "FX gain on dispute reinstatement (rate moved in our favor)"
+    }
+  ],
+  "DocNumber": "instated_fx_drift_001"
+}

@@ -1,0 +1,22 @@
+{
+  "Narration": "Stripe dispute dp_test_fx_drift_001 funds reinstated (charge ch_test_fx_drift_001)",
+  "Date": "2025-02-02",
+  "Status": "DRAFT",
+  "JournalLines": [
+    {
+      "LineAmount": 67.5,
+      "AccountCode": "1010",
+      "Description": "Funds reinstated to Stripe balance"
+    },
+    {
+      "LineAmount": -65,
+      "AccountCode": "1200",
+      "Description": "Release receivable on dispute win"
+    },
+    {
+      "LineAmount": -2.5,
+      "AccountCode": "7000",
+      "Description": "FX gain on dispute reinstatement (rate moved in our favor)"
+    }
+  ]
+}

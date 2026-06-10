@@ -6,27 +6,7 @@ import { epochToUtcDate } from '../../util/dates.js';
 import { buildFxContext, withFx } from '../../util/fxContext.js';
 import { sortLines } from '../../util/lines.js';
 import { disputeMemo } from '../../util/memo.js';
-
-/**
- * Compute the FX rate Stripe used at the original charge's settlement,
- * derived from the (settlement-currency) `charge.balance_transaction.amount`
- * over the (customer-currency) `charge.amount`. Returns `null` when the
- * expansion needed isn't present — the caller treats that as "no FX
- * gain/loss recognition for this dispute" and falls back to v0.1.6 behavior.
- *
- * The receiver's `expand.ts` requests `charge.balance_transaction` on every
- * dispute event so production callers always get a usable rate; the
- * defensive return-null path exists for fixtures and direct-library callers
- * that don't expand.
- */
-function computeOriginalRate(dispute: Stripe.Dispute): number | null {
-  const charge = dispute.charge;
-  if (typeof charge !== 'object') return null;
-  if (charge.amount <= 0) return null;
-  const bt = charge.balance_transaction;
-  if (bt === null || typeof bt === 'string') return null;
-  return Math.abs(bt.amount) / charge.amount;
-}
+import { originalChargeSettlement } from './disputeRate.js';
 
 export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
   if (event.type !== 'charge.dispute.funds_withdrawn') {
@@ -131,7 +111,7 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
   // identical because their original rate is exactly 1.0 and the
   // dispute-rate equivalent is `actualClawback / dispute.amount = 1.0`,
   // giving fxDelta = 0 either way.
-  const originalRate = computeOriginalRate(dispute);
+  const originalRate = originalChargeSettlement(dispute)?.rate ?? null;
   const expectedClawback =
     originalRate !== null && dispute.amount > 0
       ? Math.round(dispute.amount * originalRate)

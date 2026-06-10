@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [Unreleased]
+
+### Fixed
+
+- **FX dispute resolution no longer strands the `1200` Disputes Receivable
+  clearing account.** When a charge settled in a currency different from the
+  dispute's customer-facing currency, `funds_withdrawn` parked the receivable
+  at the original charge rate (in settlement currency), but the resolution
+  handlers released it at the wrong basis: `funds_reinstated` credited `1200`
+  at the reinstatement-time rate, and a lost `closed` wrote it off using the
+  customer-facing amount in the customer-facing currency. Both left a residual
+  balance in `1200` across the dispute lifecycle, and the lost path also mixed
+  two currencies within one account. Both handlers now release `1200` at the
+  same original-charge-rate amount it was parked at, posting in the settlement
+  currency: `funds_reinstated` books the actual funds returned to `1010` and
+  routes the rate-movement delta to `7000` (FX gain/loss), and a lost `closed`
+  writes the receivable off to `6100` at its carried value. The clearing
+  account now nets to exactly zero on both the won and lost paths. Same-currency
+  and unexpanded-charge disputes stay byte-identical. The shared original-rate
+  computation is now factored into `disputeRate.ts` so the leg that parks the
+  receivable and the legs that release it can never drift apart.
+
 ## [0.1.14] — 2026-05-28
 
 ### Changed

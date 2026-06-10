@@ -78,6 +78,50 @@ describe('integration: dispute lost lifecycle', () => {
   });
 });
 
+describe('integration: dispute won lifecycle under FX (rate drift)', () => {
+  // Same dispute as dispute_funds_withdrawn_fx_rate_drift (dp_test_fx_drift_001):
+  // USD 5000 charge settled in CAD at rate 1.30 (1200 parked at 6500 CAD), then
+  // reinstated at a drifted rate 1.35 (6750 CAD actually returned). The clearing
+  // account 1200 must still net to zero — it releases at the ORIGINAL rate (6500),
+  // and the 250 CAD rate-movement delta lands in 7000 as an FX gain.
+  it('charge clawed back then reinstated at a drifted rate still clears 1200 to zero', () => {
+    const { balances } = replayAll([
+      'dispute_funds_withdrawn_fx_rate_drift',
+      'dispute_funds_reinstated_fx_rate_drift',
+    ]);
+
+    expect(balances['1200']).toBeUndefined(); // receivable fully cleared despite rate drift
+    expect(balances['1010']).toBe(-2250);     // -9000 withdrawn + 6750 reinstated
+    expect(balances['6100']).toBe(2000);      // non-refundable dispute fee (CAD)
+    expect(balances['7000']).toBe(250);       // net FX: 500 loss at withdrawal - 250 gain at reinstatement
+
+    const total = Object.values(balances).reduce<number>((acc, v) => acc + (v ?? 0), 0);
+    expect(total).toBe(0);
+  });
+});
+
+describe('integration: dispute lost lifecycle under FX', () => {
+  // Alternate ending of the same withdrawn dispute: lost instead of won. The
+  // receivable was parked at 6500 CAD (original rate); the writeoff to 6100 must
+  // release it at that same carried value and in the settlement currency (CAD),
+  // not the customer-facing 5000 USD — otherwise 1200 strands and the account
+  // mixes currencies.
+  it('charge clawed back then closed lost writes off the receivable at its carried CAD value', () => {
+    const { balances } = replayAll([
+      'dispute_funds_withdrawn_fx_rate_drift',
+      'dispute_closed_lost_fx',
+    ]);
+
+    expect(balances['1200']).toBeUndefined(); // receivable cleared via writeoff (no currency mixing)
+    expect(balances['1010']).toBe(-9000);     // funds withdrawn, never returned
+    expect(balances['6100']).toBe(8500);      // dispute fee 2000 + writeoff 6500 (CAD)
+    expect(balances['7000']).toBe(500);       // FX loss realized at withdrawal; close adds none
+
+    const total = Object.values(balances).reduce<number>((acc, v) => acc + (v ?? 0), 0);
+    expect(total).toBe(0);
+  });
+});
+
 describe('integration: annual subscription recognition', () => {
   it('invoice_payment_succeeded_annual drains deferred revenue to zero over 12 monthly recognitions', () => {
     const { balances } = replayAll([

@@ -1,0 +1,56 @@
+{
+  "id": "evt_test_dispute_closed_fx_lost_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1738410000,
+  "type": "charge.dispute.closed",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "dp_test_fx_drift_001",
+      "object": "dispute",
+      "amount": 5000,
+      "charge": {
+        "id": "ch_test_fx_drift_001",
+        "object": "charge",
+        "amount": 5000,
+        "currency": "usd",
+        "balance_transaction": {
+          "id": "txn_charge_fx_drift_001",
+          "object": "balance_transaction",
+          "amount": 6500,
+          "available_on": 1736424000,
+          "created": 1736294400,
+          "currency": "cad",
+          "description": "Charge ch_test_fx_drift_001",
+          "exchange_rate": 1.30,
+          "fee": 204,
+          "fee_details": [
+            {
+              "amount": 204,
+              "application": null,
+              "currency": "cad",
+              "description": "Stripe processing fees",
+              "type": "stripe_fee"
+            }
+          ],
+          "net": 6296,
+          "reporting_category": "charge",
+          "status": "available",
+          "type": "charge"
+        },
+        "captured": true,
+        "created": 1736294400,
+        "paid": true,
+        "status": "succeeded"
+      },
+      "created": 1738410000,
+      "currency": "usd",
+      "reason": "fraudulent",
+      "status": "lost",
+      "balance_transactions": []
+    }
+  }
+}

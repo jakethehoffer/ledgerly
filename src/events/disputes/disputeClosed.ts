@@ -2,8 +2,10 @@ import type Stripe from 'stripe';
 import { cents } from '../../money.js';
 import type { JournalEntry, JournalLine, MapResult } from '../../journal.js';
 import { epochToUtcDate } from '../../util/dates.js';
+import { buildFxContext, withFx } from '../../util/fxContext.js';
 import { sortLines } from '../../util/lines.js';
 import { disputeMemo } from '../../util/memo.js';
+import { originalChargeSettlement } from './disputeRate.js';
 
 export function handleDisputeClosed(event: Stripe.Event): MapResult {
   if (event.type !== 'charge.dispute.closed') {
@@ -12,15 +14,12 @@ export function handleDisputeClosed(event: Stripe.Event): MapResult {
     );
   }
   const dispute = event.data.object;
-  // FX limitation: this handler only sees dispute.amount (in dispute.currency).
-  // If the originating chargeSucceeded entry posted in the account's
-  // settlement currency (BT currency) and that differs from dispute.currency,
-  // the 'lost' entry below will record 6100/1200 in dispute.currency while
-  // the original 1200 receivable sits in BT currency — producing account-level
-  // currency mixing. funds_withdrawn now rejects FX disputes, so this handler
-  // is shielded in practice via the typical close-after-withdraw lifecycle;
-  // direct close paths under FX remain spec-deferred (charge.dispute.closed
-  // events do not expand BTs the way funds_withdrawn does).
+  // FX-aware writeoff: a lost dispute releases the 1200 receivable that
+  // funds_withdrawn parked at the ORIGINAL charge rate, in the account's
+  // settlement currency. The receiver's expand.ts requests
+  // `charge.balance_transaction` on closed events, so originalChargeSettlement
+  // recovers that rate and currency; the lost branch below uses them so the
+  // writeoff clears 1200 exactly with no account-level currency mixing.
 
   switch (dispute.status) {
     case 'won':
@@ -32,7 +31,23 @@ export function handleDisputeClosed(event: Stripe.Event): MapResult {
       if (dispute.amount === 0) {
         return { entries: [], schedule: null };
       }
-      const amount = cents(dispute.amount);
+      // Write the receivable off at its CARRIED value — the same
+      // original-charge-rate amount funds_withdrawn parked in 1200 — and post
+      // in the settlement currency so it clears 1200 exactly. The FX gain/loss
+      // was already realized at withdrawal (its 7000 line); a lost close just
+      // reclassifies the parked receivable to expense, so no new 7000 line.
+      //
+      // Fallback when the charge BT isn't expanded (string id): the dispute's
+      // own customer-facing amount and currency — byte-identical to v0.1.6 and
+      // to same-currency disputes (original rate 1.0).
+      const settlement = originalChargeSettlement(dispute);
+      const writeoff =
+        settlement !== null && dispute.amount > 0
+          ? Math.round(dispute.amount * settlement.rate)
+          : dispute.amount;
+      const settlementCurrencyRaw =
+        settlement !== null ? settlement.currency : dispute.currency;
+      const amount = cents(writeoff);
       const rawLines: JournalLine[] = [
         {
           accountCode: '6100',
@@ -48,15 +63,24 @@ export function handleDisputeClosed(event: Stripe.Event): MapResult {
         },
       ];
       const lines: ReadonlyArray<JournalLine> = sortLines(rawLines);
-      const entry: JournalEntry = {
-        date: epochToUtcDate(event.created),
-        currency: dispute.currency.toUpperCase(),
-        memo: disputeMemo(dispute, 'closed lost'),
-        sourceEventId: event.id,
-        sourceEventType: event.type,
-        sourceObjectId: dispute.id,
-        lines,
-      };
+      const fxContext = buildFxContext(
+        dispute.currency,
+        dispute.amount,
+        settlementCurrencyRaw,
+        writeoff,
+      );
+      const entry: JournalEntry = withFx(
+        {
+          date: epochToUtcDate(event.created),
+          currency: settlementCurrencyRaw.toUpperCase(),
+          memo: disputeMemo(dispute, 'closed lost'),
+          sourceEventId: event.id,
+          sourceEventType: event.type,
+          sourceObjectId: dispute.id,
+          lines,
+        },
+        fxContext,
+      );
       return { entries: [entry], schedule: null };
     }
     default:
