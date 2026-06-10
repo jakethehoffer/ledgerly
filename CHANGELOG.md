@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [Unreleased]
+
+### Fixed
+
+- **Multi-refund sales-tax drainage no longer strands a penny in `2000` Sales
+  Tax Payable.** Each refund reversed its own tax share as
+  `round(refundAmount × taxRatio)`, rounded independently. Across a sequence of
+  partial refunds those roundings drift: e.g. an `11000` charge carrying `825`
+  tax, refunded as two `5500` halves, reversed `413 + 413 = 826` against the
+  `825` collected — leaving `2000` at `−1` after a full refund instead of zero
+  (and the reverse, stranding `+1`, for other splits). Sales-tax shares are now
+  allocated with cumulative rounding —
+  `round(cumulativeThrough × taxRatio) − round(cumulativeBefore × taxRatio)`,
+  with refunds ordered by creation — so the reversals telescope to exactly the
+  tax collected once the charge is fully refunded. Single-refund and
+  no-tax-refund books are byte-identical (cumulativeBefore = 0 or taxRatio = 0).
+
 ## [0.1.15] — 2026-06-10
 
 ### Fixed

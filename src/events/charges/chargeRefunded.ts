@@ -63,6 +63,30 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
       ? Math.abs(chargeBt.amount) / charge.amount
       : 1;
 
+  // Cumulative tax allocation. Order every refund on the charge by creation so
+  // each refund's sales-tax share is computed as
+  //   round(cumulativeThrough * taxRatio) - round(cumulativeBefore * taxRatio)
+  // rather than rounding each refund's tax independently. Independent rounding
+  // drifts: two 5500 refunds of an 11000 / tax-825 charge each round 412.5 -> 413,
+  // reversing 826 against the 825 collected and stranding -1 in 2000 Sales Tax
+  // Payable after a full refund. The cumulative form telescopes to exactly the
+  // collected tax once the charge is fully refunded, and reduces to the previous
+  // per-refund value for the single-refund and no-tax cases (cumulativeBefore = 0
+  // or taxRatio = 0) — so existing fixtures stay byte-identical.
+  const expectedSettlementOf = (r: Stripe.Refund): number =>
+    Math.round(r.amount * originalRate);
+  const cumulativeBeforeById = new Map<string, number>();
+  {
+    const ordered = [...refundsList.data].sort((a, b) =>
+      a.created !== b.created ? a.created - b.created : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    );
+    let running = 0;
+    for (const r of ordered) {
+      cumulativeBeforeById.set(r.id, running);
+      running += expectedSettlementOf(r);
+    }
+  }
+
   const entries: JournalEntry[] = targetRefunds.map((refund) => {
     const bt = requireExpanded<Stripe.BalanceTransaction>(
       refund.balance_transaction,
@@ -94,10 +118,19 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     // line, byte-identical to the pre-FX-gain/loss behavior. The
     // existing same-currency refund fixtures pass unchanged.
     const actualSettlement = Math.abs(bt.amount);
-    const expectedSettlement = Math.round(refund.amount * originalRate);
+    const expectedSettlement = expectedSettlementOf(refund);
     const fxDelta = actualSettlement - expectedSettlement;
 
-    const taxPortion = Math.round(expectedSettlement * taxRatio);
+    // Tax share via cumulative rounding (see cumulativeBeforeById above) so the
+    // 2000 reversals across a multi-refund sequence sum to exactly the tax
+    // collected at charge time. Reduces to the prior per-refund value when
+    // there's no tax (taxRatio = 0) or this is the first/only refund.
+    const cumulativeBefore = cumulativeBeforeById.get(refund.id) ?? 0;
+    const taxPortion =
+      taxRatio > 0
+        ? Math.round((cumulativeBefore + expectedSettlement) * taxRatio) -
+          Math.round(cumulativeBefore * taxRatio)
+        : 0;
     const revenuePortion = expectedSettlement - taxPortion;
 
     const draft: JournalLine[] = [];
