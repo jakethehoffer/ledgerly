@@ -13,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-589 tests · 13 event types · 35 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+620 tests · 13 event types · 37 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -82,7 +82,7 @@ each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue
 total recognized                $1200.00
 ```
 
-The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs) — it imports the same public API you'd use after `npm i ledgerly`. Refunds (with proportional sales-tax drains and realized FX gain/loss), disputes, payouts, and multi-currency charges are all in [`test/fixtures/`](./test/fixtures); feed any of the 35 fixtures through `mapEvent` to see its entry shape.
+The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs) — it imports the same public API you'd use after `npm i ledgerly`. Refunds (with proportional sales-tax drains and realized FX gain/loss), disputes, payouts, and multi-currency charges are all in [`test/fixtures/`](./test/fixtures); feed any of the 37 fixtures through `mapEvent` to see its entry shape.
 
 ## Why ledgerly?
 
@@ -101,7 +101,7 @@ Indie SaaS founders reconcile Stripe one of a few ways: by hand in a spreadsheet
 ledgerly's primary form is a webhook receiver + scheduler that maps Stripe events and posts to QBO/Xero. The published, build-provenance-attested Docker image is the fastest path — see [Deployment](#deployment) for the full `docker run` / Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.13
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.16
 ```
 
 ### Use the engine as a library
@@ -308,7 +308,7 @@ Caveats:
 | 4900 | Refunds Issued | Contra-Revenue | Refund offsets (separate from 4000 for net-revenue reporting) |
 | 6000 | Stripe Processing Fees | Expense | Per-transaction Stripe fees from `balance_transaction.fee` |
 | 6100 | Payment Disputes | Expense | Closed-lost writeoffs + non-refundable dispute fees |
-| 7000 | FX Gain/Loss | Other Income | Currency conversion P&L (deferred — multi-currency not yet supported) |
+| 7000 | FX Gain/Loss | Other Income | Realized currency gain/loss between a charge and its refund or dispute |
 
 Map these codes to your own QBO and Xero account IDs at integration time via the `accountMap` parameter on each exporter.
 
@@ -333,7 +333,7 @@ Core invariants (test-enforced):
 Engine assumptions:
 
 - **Integer minor units throughout** — `Cents = number & { readonly __brand: 'cents' }` prevents accidentally passing dollars where cents are expected
-- **Single functional currency** — USD in MVP; multi-currency conversion deferred to a future phase
+- **Posts in the settlement currency** — entries are stamped with the currency from `balance_transaction`, and realized FX gain/loss between a charge and its refund or dispute is booked to `7000`. Converting to a single home currency is left to downstream tools via the exposed `fxContext` (see [Currency support](#currency-support))
 - **Caller pre-expands nested objects** — `balance_transaction` (and refund / dispute / invoice nested objects) must be expanded before invocation; the engine throws `MissingExpansionError` otherwise
 - **Caller handles event deduplication** — Stripe redelivers; ledgerly is stateless, so the caller stores processed `event.id`s
 
@@ -790,7 +790,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.16
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -820,7 +820,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ghcr.io/jakethehoffer/ledgerly:v0.1.0
+  ghcr.io/jakethehoffer/ledgerly:v0.1.16
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -876,7 +876,7 @@ that produced it — no long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.13 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.1.16 \
   --repo jakethehoffer/ledgerly
 ```
 
@@ -962,9 +962,15 @@ pnpm start          # Run the built webhook receiver (requires pnpm build first)
 
 ## Status
 
-The engine MVP is **feature-complete** for the design spec's §6 event coverage matrix, excluding two explicitly deferred items: multi-currency FX conversion (touches the 7000 account) and B2B AR flows (touches the 1100 account).
+Both layers are built and documented above: the pure mapping engine (13 event types, multi-currency with realized FX gain/loss, QBO and Xero exporters) and the optional webhook receiver (signature verification, idempotent persistence, a recognition scheduler with retry and dead-letter, QBO/Xero OAuth, Prometheus metrics, and admin endpoints). It's published to npm and GHCR with signed build provenance.
 
-What's next: a webhook receiver layer that wraps this engine — verifying Stripe signatures, deduplicating redelivered events, expanding nested objects via the Stripe API, and persisting results.
+A few things are deferred deliberately, and called out in the code where they'd otherwise have to be guessed at rather than quietly approximated:
+
+- **Cross-currency payouts** are rejected with a clear error instead of posting a number that ignores Stripe's conversion fee. The analysis and the payload needed to implement them are in [`docs/cross-currency-payouts.md`](./docs/cross-currency-payouts.md).
+- **Multi-period FX revaluation** is not auto-computed; each entry instead carries an `fxContext` so a downstream tool with a home-currency rate source can do it. See [Currency support](#currency-support).
+- **B2B accounts-receivable** flows (the `1100` account), invoice-then-pay terms, aren't modeled yet.
+
+The accounting is the part most worth scrutinizing. The reasoning behind every entry is written up in plain bookkeeping terms in [`docs/accounting.md`](./docs/accounting.md), meant to be audited without reading the code — if you keep books for a SaaS, or you know where the Stripe API gets strange, that's the place to start.
 
 ## License
 
