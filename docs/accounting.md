@@ -159,9 +159,12 @@ Dr  2000 Sales Tax Payable         (tax portion)
 Cr  1010 Stripe Clearing                   (total refunded)
 ```
 
-The tax portion is computed from the original invoice's tax ratio. This requires
-the charge's `invoice` to be expanded; if it isn't, the refund falls back to the
-flat two-line shape above. *(`charge_refunded_with_tax`)*
+The tax portion is computed from the original invoice's tax ratio. When a taxed
+sale is refunded across several partial refunds, the tax is drawn back
+cumulatively, so the pieces sum to exactly the tax originally collected and 2000
+returns to zero once the sale is fully refunded — no penny stranded by rounding.
+This requires the charge's `invoice` to be expanded; if it isn't, the refund falls
+back to the flat two-line shape above. *(`charge_refunded_with_tax`)*
 
 ## Disputes (chargebacks)
 
@@ -245,13 +248,20 @@ posts in your **settlement** currency, taken from the balance transaction. That
 keeps each entry internally balanced and consistent with the currency your books
 are actually in.
 
-**Realized FX gain/loss (account 7000).** On a refund or a dispute withdrawal,
-the exchange rate may have moved since the original charge. ledgerly books the
-revenue-offset / receivable legs at the *original* charge's rate (so they cleanly
-mirror what was booked) and the cash leg at the *current* rate (what Stripe
-actually moved), and routes the difference to **7000 FX Gain/Loss**. This is a
-realized gain or loss in the accounting sense. *(`charge_refunded_fx`,
-`dispute_funds_withdrawn_fx_rate_drift`)*
+**Realized FX gain/loss (account 7000).** When the exchange rate moves between an
+original charge and a later refund or dispute, ledgerly books the revenue-offset
+and receivable legs at the *original* charge's rate (so they cleanly mirror what
+was booked) and the cash leg at the *current* rate (what Stripe actually moved),
+and routes the difference to **7000 FX Gain/Loss** as a realized gain or loss.
+
+This runs through the whole dispute lifecycle, not just the withdrawal. The 1200
+Disputes Receivable is *parked* at the original charge's rate when funds are
+withdrawn and *released* at that same rate when the dispute resolves, so it clears
+back to exactly zero no matter how the rate moved in between. A win
+(`funds_reinstated`) returns the cash at the current rate and sends the rate delta
+to 7000; a loss (`closed`) writes the receivable off to 6100 at its carried
+settlement value. *(`charge_refunded_fx`, `dispute_funds_withdrawn_fx_rate_drift`,
+`dispute_funds_reinstated_fx_rate_drift`, `dispute_closed_lost_fx`)*
 
 **Multi-period FX is not auto-computed.** For an annual subscription billed in a
 foreign currency, ledgerly doesn't revalue each month's recognition against that
