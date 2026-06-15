@@ -1,4 +1,4 @@
-// ledgerly quickstart — watch the engine work with no Stripe account.
+// ledgerly quickstart, watch the engine work with no Stripe account.
 //
 //   pnpm demo
 //
@@ -11,7 +11,7 @@
 // resolves to this package's own build via its exports map, so the code
 // below is byte-for-byte what you'd write after `npm i ledgerly`. The engine
 // never calls Stripe; your webhook receiver pre-expands the nested objects
-// (balance_transaction, invoice.charge) before invoking it — see the README.
+// (balance_transaction, invoice.charge) before invoking it. See the README.
 
 import { mapEvent, toQbo, toXero, checkBalance, ACCOUNTS } from 'ledgerly';
 
@@ -62,7 +62,7 @@ const xeroAccountMap = Object.fromEntries(
 );
 
 // ===========================================================================
-// SCENARIO 1 — one-time charge ($100.00, $3.20 Stripe fee, $96.80 net)
+// SCENARIO 1: one-time charge ($100.00, $3.20 Stripe fee, $96.80 net)
 // ===========================================================================
 banner('SCENARIO 1   One-time charge');
 
@@ -110,7 +110,7 @@ for (const entry of charge.entries) {
 }
 
 // ===========================================================================
-// SCENARIO 2 — annual subscription ($1,200.00 paid up front)
+// SCENARIO 2: annual subscription ($1,200.00 paid up front)
 // The cash hits now, but the revenue is earned over 12 months. ledgerly books
 // the cash to Deferred Revenue (a liability) and emits a 12-month schedule
 // that releases $100 to Subscription Revenue each month.
@@ -179,12 +179,12 @@ const annualEvent = {
 
 const annual = mapEvent(annualEvent);
 
-console.log('\nCASH ENTRY (today) — the $1,200 lands in Deferred Revenue, not Revenue:');
+console.log('\nCASH ENTRY (today). The $1,200 lands in Deferred Revenue, not Revenue:');
 for (const entry of annual.entries) printEntry(entry);
 
 const deferred = annual.entries[0].lines.find((l) => l.accountCode === '2100').amount;
 
-console.log(`\nRECOGNITION SCHEDULE — releases the $${(deferred / 100).toFixed(0)} deferred over 12 months`);
+console.log(`\nRECOGNITION SCHEDULE releases the $${(deferred / 100).toFixed(0)} deferred over 12 months`);
 console.log('each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue');
 console.log(rule(40));
 let recognized = 0;
@@ -204,6 +204,6 @@ console.log(
 console.log(
   '\nThat is the whole engine in two events. Refunds (with proportional sales-tax\n' +
     'drains and realized FX gain/loss), disputes, payouts, and multi-currency charges\n' +
-    'are all in test/fixtures/ — feed any of the 35 fixtures through mapEvent the\n' +
+    'are all in test/fixtures/, feed any of the 37 fixtures through mapEvent the\n' +
     'same way to see its entry shape.\n',
 );

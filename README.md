@@ -71,7 +71,7 @@ balanced: debits $100.00 == credits $100.00
 The $1,200 annual subscription is the more interesting case. The cash lands in Deferred Revenue, a liability, and the engine emits a 12-month schedule that releases it to Subscription Revenue $100 at a time, summing back to exactly what was deferred:
 
 ```
-RECOGNITION SCHEDULE — releases the $1200 deferred over 12 months
+RECOGNITION SCHEDULE releases the $1200 deferred over 12 months
 each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue
 ----------------------------------------
 2025-02-15                       $100.00
@@ -127,7 +127,7 @@ const qboAccountMap: QboAccountMap = {
   '1010': { qboId: '84', name: 'Stripe Clearing' },
   '4000': { qboId: '101', name: 'Subscription Revenue' },
   '6000': { qboId: '201', name: 'Merchant Fees' },
-  // ... (all 12 codes — see Chart of Accounts below)
+  // ... (all 12 codes, see Chart of Accounts below)
 };
 
 const xeroAccountMap: XeroAccountMap = {
@@ -184,7 +184,7 @@ app.post('/webhook', async (req, res) => {
     });
     event.data.object = expanded;
   }
-  // Similar expansion for invoice/dispute events — see Architecture below.
+  // Similar expansion for invoice/dispute events, see Architecture below.
 
   const result = mapEvent(event);
   // ... persist / forward
@@ -299,7 +299,7 @@ Caveats:
 | Code | Name | Type | Purpose |
 |------|------|------|---------|
 | 1000 | Operating Bank | Asset | Real bank where Stripe payouts settle |
-| 1010 | Stripe Clearing | Asset | Stripe balance — received, not yet paid out |
+| 1010 | Stripe Clearing | Asset | Stripe balance received, not yet paid out |
 | 1100 | Accounts Receivable | Asset | Reserved for B2B invoice-then-pay flows (deferred) |
 | 1200 | Disputes Receivable | Asset | Funds withdrawn for active disputes, pending outcome |
 | 2000 | Sales Tax Payable | Liability | Stripe Tax / VAT collected, owed to authorities |
@@ -389,9 +389,9 @@ npx ledgerly-server
 
 Endpoints:
 
-- `POST /webhook` — Stripe event endpoint. Verifies the signature, dedupes by `event.id`, expands nested fields via the Stripe API, then calls `mapEvent`. Returns `200` on success, `200 { duplicate: true }` for redeliveries, `200 { unhandled: true }` for events outside the supported list, `400` for missing/invalid signatures, and `500` for expansion or processing errors.
-- `GET /health` — Liveness probe; returns `{ ok: true, dedupSize }`.
-- `GET /metrics` — Prometheus text exposition format (see [Metrics](#metrics) below).
+- `POST /webhook` is the Stripe event endpoint. It verifies the signature, dedupes by `event.id`, expands nested fields via the Stripe API, then calls `mapEvent`. Returns `200` on success, `200 { duplicate: true }` for redeliveries, `200 { unhandled: true }` for events outside the supported list, `400` for missing/invalid signatures, and `500` for expansion or processing errors.
+- `GET /health` is the liveness probe. It returns `{ ok: true, dedupSize }`.
+- `GET /metrics` returns Prometheus text exposition format (see [Metrics](#metrics) below).
 
 To embed the receiver in a larger Express app, import `createServer` directly:
 
@@ -415,8 +415,8 @@ The receiver persists two things: a record of processed Stripe event IDs (so red
 
 Two backends ship in the box, both implementing the same `Storage` interface (`src/server/storage/types.ts`):
 
-- **In-memory** — the default. Fine for tests and quick demos; loses everything on restart.
-- **SQLite** (via `better-sqlite3`) — opt-in by setting `LEDGERLY_DB_PATH`. Survives restarts, uses WAL mode, durable across crashes by SQLite default.
+- **In-memory.** The default. Fine for tests and quick demos; loses everything on restart.
+- **SQLite** (via `better-sqlite3`). Opt-in by setting `LEDGERLY_DB_PATH`. Survives restarts, uses WAL mode, durable across crashes by SQLite default.
 
 Enable SQLite:
 
@@ -704,25 +704,25 @@ Exposed metrics:
 
 **Counters** (monotonically increasing; `_total` suffix per Prometheus convention):
 
-- `ledgerly_webhook_received_total` — every inbound POST `/webhook`
-- `ledgerly_webhook_duplicate_total` — events suppressed by the deduplicator
-- `ledgerly_webhook_signature_error_total` — missing or invalid `Stripe-Signature` header
-- `ledgerly_webhook_expansion_error_total` — Stripe API expansion failed
-- `ledgerly_webhook_processed_total{type="<event.type>"}` — successful map + persist, partitioned by event type
-- `ledgerly_webhook_unhandled_total{type="<event.type>"}` — event type outside the supported list
-- `ledgerly_webhook_error_total{type="<event.type>"}` — `mapEvent` or persistence threw
-- `ledgerly_scheduler_ticks_total` — scheduler tick invocations
-- `ledgerly_scheduler_attempts_total` — dispatcher invocations across all ticks
-- `ledgerly_scheduler_posted_total` — successful dispatches
-- `ledgerly_scheduler_failed_total` — failed dispatches (sums retries and dead-letters)
-- `ledgerly_scheduler_deadlettered_total` — entries transitioned to `'failed'` on this tick
+- `ledgerly_webhook_received_total`, every inbound POST `/webhook`
+- `ledgerly_webhook_duplicate_total`, events suppressed by the deduplicator
+- `ledgerly_webhook_signature_error_total`, missing or invalid `Stripe-Signature` header
+- `ledgerly_webhook_expansion_error_total`, Stripe API expansion failed
+- `ledgerly_webhook_processed_total{type="<event.type>"}`, successful map + persist, partitioned by event type
+- `ledgerly_webhook_unhandled_total{type="<event.type>"}`, event type outside the supported list
+- `ledgerly_webhook_error_total{type="<event.type>"}`, `mapEvent` or persistence threw
+- `ledgerly_scheduler_ticks_total`, scheduler tick invocations
+- `ledgerly_scheduler_attempts_total`, dispatcher invocations across all ticks
+- `ledgerly_scheduler_posted_total`, successful dispatches
+- `ledgerly_scheduler_failed_total`, failed dispatches (sums retries and dead-letters)
+- `ledgerly_scheduler_deadlettered_total`, entries transitioned to `'failed'` on this tick
 
 **Gauges** (snapshot values; refreshed from storage on every scrape):
 
-- `ledgerly_dedup_size` — current number of recorded event IDs
-- `ledgerly_journal_entries` — count of persisted immediate journal entries
-- `ledgerly_scheduled_pending` — pending future-dated entries
-- `ledgerly_scheduled_failed` — dead-lettered scheduled entries
+- `ledgerly_dedup_size`, current number of recorded event IDs
+- `ledgerly_journal_entries`, count of persisted immediate journal entries
+- `ledgerly_scheduled_pending`, pending future-dated entries
+- `ledgerly_scheduled_failed`, dead-lettered scheduled entries
 
 Override the namespace prefix (`ledgerly_`) by setting `LEDGERLY_METRICS_NAMESPACE`. Example: `LEDGERLY_METRICS_NAMESPACE=myapp` exposes `myapp_webhook_received_total`, etc.
 
@@ -755,14 +755,14 @@ comparison. When the env var is unset, the routes are not mounted at all, so
 unauthenticated requests get a generic 404 and the admin surface is invisible
 to scanners.
 
-- `GET /admin/entries?limit=N` — list immediate journal entries, newest-first.
+- `GET /admin/entries?limit=N` lists immediate journal entries, newest-first.
   `limit` defaults to 50, capped at 500.
-- `GET /admin/scheduled?status=pending|posted|cancelled|failed&limit=N` — list
+- `GET /admin/scheduled?status=pending|posted|cancelled|failed&limit=N` lists
   scheduled entries (recognition rows + immediate-dispatch rows). `status`
   defaults to `pending`.
-- `GET /admin/scheduled/:id` — fetch one scheduled entry with full retry
+- `GET /admin/scheduled/:id` fetches one scheduled entry with full retry
   metadata (attempts, lastError, nextAttemptAt). 404 when not found.
-- `POST /admin/scheduled/:id/retry` — re-queue a dead-lettered entry. Resets
+- `POST /admin/scheduled/:id/retry` re-queues a dead-lettered entry. Resets
   `status='pending'`, `attempts=0`, `lastAttemptedAt=null`, `nextAttemptAt=null`,
   `lastError=null`. The next scheduler tick picks it up. Idempotent on
   already-pending rows. 404 when the id does not exist.
@@ -837,16 +837,16 @@ mints a fresh webhook signing secret per session, and you feed it to
 ledgerly via `.env`:
 
 ```bash
-# Terminal 1 — forward Stripe webhooks to local ledgerly.
+# Terminal 1: forward Stripe webhooks to local ledgerly.
 $ stripe listen --forward-to localhost:3000/webhook
 > Ready! Your webhook signing secret is whsec_...
 
-# Terminal 2 — paste the whsec_ value into .env, then bring up ledgerly.
+# Terminal 2: paste the whsec_ value into .env, then bring up ledgerly.
 $ cp .env.example .env
 $ vi .env   # set STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET (and others as needed)
 $ docker compose up
 
-# Anytime later, in any terminal — trigger a synthetic event.
+# Anytime later, in any terminal, trigger a synthetic event.
 $ stripe trigger charge.succeeded
 ```
 
@@ -902,8 +902,8 @@ bindings for both supported architectures.
 
 Two endpoints distinguish "process alive" from "ready to serve":
 
-- `GET /health` — always 200; body includes dedup size + entry counts. Suitable for Docker's `HEALTHCHECK` (which the image already declares) and as a Kubernetes `livenessProbe`. Storage counts are observability sugar, not a readiness gate — slow counts won't restart your pod.
-- `GET /readyz` — 200 if the storage backend responds to a cheap reachability ping (SQLite: `SELECT 1`; in-memory: no-op), 503 otherwise with the error message under `checks.storage`. Use as a Kubernetes `readinessProbe` so a corrupt or unmounted SQLite file pulls the pod out of the load balancer without triggering a liveness restart.
+- `GET /health` always returns 200. The body includes dedup size + entry counts. Suitable for Docker's `HEALTHCHECK` (which the image already declares) and as a Kubernetes `livenessProbe`. Storage counts are observability sugar, not a readiness gate, so slow counts won't restart your pod.
+- `GET /readyz` returns 200 if the storage backend responds to a cheap reachability ping (SQLite: `SELECT 1`; in-memory: no-op), 503 otherwise with the error message under `checks.storage`. Use as a Kubernetes `readinessProbe` so a corrupt or unmounted SQLite file pulls the pod out of the load balancer without triggering a liveness restart.
 
 ```yaml
 # Kubernetes pod-spec excerpt
