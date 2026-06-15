@@ -7,7 +7,7 @@
 
 A pure TypeScript engine that converts Stripe webhook events into balanced double-entry journal entries, ready to export as **QuickBooks Online `JournalEntry`** JSON or **Xero `ManualJournal`** JSON.
 
-Built for indie SaaS founders who want clean books without paying an accountant $500–$2,000/mo to reconcile Stripe data manually.
+Built for indie SaaS founders who want clean books without paying an accountant $500 to $2,000 a month to reconcile Stripe data by hand.
 
 ```
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
@@ -44,7 +44,7 @@ Then renders it as QBO JournalEntry JSON or Xero ManualJournal JSON, ready to pu
 
 ## Try it
 
-No Stripe account needed. Clone the repo and run the demo — it walks two events through the engine: a one-time charge, then an annual subscription with revenue recognition.
+No Stripe account needed. Clone the repo and run the demo. It runs two events through the engine, a one-time charge and an annual subscription with revenue recognition.
 
 ```bash
 git clone https://github.com/jakethehoffer/ledgerly
@@ -68,7 +68,7 @@ Totals                                  $100.00      $100.00
 balanced: debits $100.00 == credits $100.00
 ```
 
-The $1,200 annual subscription is the interesting one. The cash lands in Deferred Revenue (a liability), and the engine emits a 12-month schedule that releases it to Subscription Revenue $100 at a time — summing back to exactly what was deferred:
+The $1,200 annual subscription is the more interesting case. The cash lands in Deferred Revenue, a liability, and the engine emits a 12-month schedule that releases it to Subscription Revenue $100 at a time, summing back to exactly what was deferred:
 
 ```
 RECOGNITION SCHEDULE — releases the $1200 deferred over 12 months
@@ -82,23 +82,23 @@ each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue
 total recognized                $1200.00
 ```
 
-The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs) — it imports the same public API you'd use after `npm i ledgerly`. Refunds (with proportional sales-tax drains and realized FX gain/loss), disputes, payouts, and multi-currency charges are all in [`test/fixtures/`](./test/fixtures); feed any of the 37 fixtures through `mapEvent` to see its entry shape.
+The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs). It imports the same public API you'd use after `npm i ledgerly`. Refunds, disputes, payouts, and multi-currency charges all live in [`test/fixtures/`](./test/fixtures), and the refund fixtures cover proportional sales-tax drains and realized FX gain/loss. Feed any of the 37 fixtures through `mapEvent` to see its entry shape.
 
 ## Why ledgerly?
 
-Indie SaaS founders reconcile Stripe one of a few ways: by hand in a spreadsheet, with a hosted sync tool (A2X, Synder, and the like), with Stripe's own reporting exports, or by paying a bookkeeper $500–$2,000/mo. ledgerly fills the gap between those.
+Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsheet, with a hosted sync tool like A2X or Synder, with Stripe's own reporting exports, or by paying a bookkeeper $500 to $2,000 a month. ledgerly fills the gap between those.
 
-- **vs. a hosted sync tool** — those are managed SaaS with a monthly fee, and the Stripe-to-journal-entry mapping is a closed box you can't inspect or change. ledgerly is open source and runs on your own infrastructure. The mapping engine is under 2,000 lines of TypeScript, every entry shape is pinned by a fixture test, and you own the chart of accounts. No per-month fee, no third party in your financial data path.
-- **vs. Stripe's native reporting** — Stripe gives you summaries, CSV exports, and a separate paid Revenue Recognition product. ledgerly emits actual balanced double-entry journal entries — deferred revenue released month by month, sales tax drained proportionally on refunds, realized FX gain/loss when rates move between a charge and its refund — ready to POST to the QuickBooks Online or Xero API.
-- **vs. doing it by hand** — the mapping from a Stripe event to a journal entry is deterministic, so it shouldn't be manual work. ledgerly is that determinism as a pure function: same event in, same balanced entry out, every time.
+- **vs. a hosted sync tool.** Those are managed SaaS with a monthly fee, and the mapping from Stripe events to journal entries is a closed box you can't inspect or change. ledgerly is open source and runs on your own infrastructure. The mapping engine is under 2,000 lines of TypeScript, every entry shape is pinned by a fixture test, and you own the chart of accounts. No monthly fee, no third party in your financial data path.
+- **vs. Stripe's native reporting.** Stripe gives you summaries, CSV exports, and a separate paid Revenue Recognition product. ledgerly emits actual balanced double-entry journal entries, ready to POST to the QuickBooks Online or Xero API. Deferred revenue is released month by month, sales tax is drained proportionally on refunds, and realized FX gain/loss is booked when rates move between a charge and its refund.
+- **vs. doing it by hand.** The mapping from a Stripe event to a journal entry is deterministic, so it shouldn't be manual work. ledgerly makes that mapping a pure function, where the same event always produces the same balanced entry.
 
-**ledgerly is probably not for you if** you want a turnkey hosted product with a dashboard and zero ops. It's a library plus an optional self-hosted webhook receiver, not a SaaS — it assumes you (or a developer) can run a small service and map 12 account codes to your real QBO/Xero accounts once. It also doesn't yet handle cross-currency payouts or B2B accounts-receivable flows; both are documented as explicit gaps rather than quietly approximated.
+**ledgerly is probably not for you if** you want a turnkey hosted product with a dashboard and zero ops. It's a library plus an optional self-hosted webhook receiver, not a SaaS. It assumes you or a developer can run a small service and map 12 account codes to your real QBO/Xero accounts once. It also doesn't yet handle cross-currency payouts or B2B accounts-receivable flows. Both are documented as explicit gaps rather than quietly approximated.
 
 ## Quick start
 
 ### Run the service
 
-ledgerly's primary form is a webhook receiver + scheduler that maps Stripe events and posts to QBO/Xero. The published, build-provenance-attested Docker image is the fastest path — see [Deployment](#deployment) for the full `docker run` / Docker Compose setup:
+ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
 docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.16
@@ -106,7 +106,7 @@ docker pull ghcr.io/jakethehoffer/ledgerly:v0.1.16
 
 ### Use the engine as a library
 
-The pure mapping functions (`mapEvent`, `toQbo`, `toXero`) can also be embedded directly in your own webhook handler — install the package alongside the Stripe SDK:
+The pure mapping functions `mapEvent`, `toQbo`, and `toXero` can also be embedded directly in your own webhook handler. Install the package alongside the Stripe SDK:
 
 ```bash
 pnpm add ledgerly stripe
@@ -161,7 +161,7 @@ function handleWebhook(event: Stripe.Event) {
 
 ### Pre-expand `balance_transaction` before calling `mapEvent`
 
-ledgerly is a pure function. It performs no I/O and does not call the Stripe API. Your webhook receiver must expand the `balance_transaction` field (and other nested objects) before invoking the engine — otherwise `MissingExpansionError` is thrown.
+ledgerly is a pure function. It performs no I/O and does not call the Stripe API. Your webhook receiver must expand the `balance_transaction` field and other nested objects before invoking the engine, otherwise it throws `MissingExpansionError`.
 
 Recommended pattern with the `stripe` Node SDK:
 
@@ -204,7 +204,7 @@ if (event.type === 'charge.refunded') {
 }
 ```
 
-If `charge.invoice` is not expanded (a string ID or null), refunds are booked as a flat Dr 4900 / Cr 1010 — no tax split. This matches the engine's prior behavior for backwards compatibility. The built-in `expandEvent` helper in `src/server/expand.ts` already includes `'invoice'` in its `charge.refunded` expansion.
+If `charge.invoice` is not expanded, meaning a string ID or null, refunds are booked as a flat Dr 4900 / Cr 1010 with no tax split. This matches the engine's prior behavior for backwards compatibility. The built-in `expandEvent` helper in `src/server/expand.ts` already includes `'invoice'` in its `charge.refunded` expansion.
 
 ## Supported events
 
@@ -251,10 +251,11 @@ normalization.
 Caveats:
 - Realized FX gain/loss is recognized on **refunds** and **dispute
   withdrawals** when the FX rate moved between the original charge and the
-  follow-up event. On both paths: the cash leg posts at the follow-up's
-  rate (actual clawback / refund deduction), the receivable / revenue-offset
-  leg posts at the original-charge rate (matching what was originally
-  booked), and account `7000 FX Gain/Loss` absorbs the rate-movement delta.
+  follow-up event. On both paths the cash leg posts at the follow-up's
+  rate, the actual clawback or refund deduction, while the receivable or
+  revenue-offset leg posts at the original-charge rate to match what was
+  originally booked, and account `7000 FX Gain/Loss` absorbs the
+  rate-movement delta.
   See the `charge_refunded_fx` and `dispute_funds_withdrawn_fx_rate_drift`
   fixtures. Both handlers fall back gracefully (no 7000 line) when the
   original `charge.balance_transaction` isn't expanded, so callers
@@ -265,7 +266,7 @@ Caveats:
   rate source can do it themselves. When an FX invoice is recognized
   monthly, every cash entry AND every monthly recognition entry carries
   an optional `fxContext` field (`{ customerCurrency, customerAmount,
-  settlementCurrency, settlementAmount }`) with **pro-rated** amounts —
+  settlementCurrency, settlementAmount }`) with **pro-rated** amounts,
   so an operator with a USD-home rate source for, say, a USD→CAD
   account can revalue each month's `settlementAmount` against that
   month's rate and post their own FX gain/loss against the
@@ -280,9 +281,9 @@ Caveats:
   with a clear error**. The receiver's `expand.ts` expands
   `payout.destination` so the engine can compare `destination.currency`
   against `payout.currency`; on a mismatch the handler throws. The
-  alternative — silently producing a 1000/1010 transfer in the source
-  currency that doesn't account for Stripe's FX fee — was worse than
-  refusing. The design analysis, the recommended entry shape, and the
+  alternative was worse than refusing. It would silently produce a
+  1000/1010 transfer in the source currency that doesn't account for
+  Stripe's FX fee. The design analysis, the recommended entry shape, and the
   exact payload to capture when reporting a real one live in
   [`docs/cross-currency-payouts.md`](./docs/cross-currency-payouts.md);
   implementation follows once a real cross-currency payout payload is
@@ -312,7 +313,7 @@ Caveats:
 
 Map these codes to your own QBO and Xero account IDs at integration time via the `accountMap` parameter on each exporter.
 
-For the rationale behind every entry — why each Stripe event produces the debits and credits it does, in plain bookkeeping terms — see [`docs/accounting.md`](./docs/accounting.md). It's written to be audited by an accountant without reading the code.
+For the rationale behind every entry, why each Stripe event produces the debits and credits it does in plain bookkeeping terms, see [`docs/accounting.md`](./docs/accounting.md). It's written to be audited by an accountant without reading the code.
 
 ## Architecture
 
@@ -320,7 +321,7 @@ For the rationale behind every entry — why each Stripe event produces the debi
 mapEvent(event: Stripe.Event) ─▶ MapResult { entries: JournalEntry[], schedule: RecognitionSchedule | null }
 ```
 
-Pure function. No state, no I/O, no Stripe API calls. Deterministic — same input always produces the same output.
+Pure function. No state, no I/O, no Stripe API calls. Deterministic, so the same input always produces the same output.
 
 Core invariants (test-enforced):
 
@@ -332,10 +333,10 @@ Core invariants (test-enforced):
 
 Engine assumptions:
 
-- **Integer minor units throughout** — `Cents = number & { readonly __brand: 'cents' }` prevents accidentally passing dollars where cents are expected
-- **Posts in the settlement currency** — entries are stamped with the currency from `balance_transaction`, and realized FX gain/loss between a charge and its refund or dispute is booked to `7000`. Converting to a single home currency is left to downstream tools via the exposed `fxContext` (see [Currency support](#currency-support))
-- **Caller pre-expands nested objects** — `balance_transaction` (and refund / dispute / invoice nested objects) must be expanded before invocation; the engine throws `MissingExpansionError` otherwise
-- **Caller handles event deduplication** — Stripe redelivers; ledgerly is stateless, so the caller stores processed `event.id`s
+- **Integer minor units throughout.** `Cents = number & { readonly __brand: 'cents' }` prevents accidentally passing dollars where cents are expected.
+- **Posts in the settlement currency.** Entries are stamped with the currency from `balance_transaction`, and realized FX gain/loss between a charge and its refund or dispute is booked to `7000`. Converting to a single home currency is left to downstream tools via the exposed `fxContext`. See [Currency support](#currency-support).
+- **Caller pre-expands nested objects.** `balance_transaction` and the refund, dispute, and invoice nested objects must be expanded before invocation, otherwise the engine throws `MissingExpansionError`.
+- **Caller handles event deduplication.** Stripe redelivers, and ledgerly is stateless, so the caller stores processed `event.id`s.
 
 For the full design rationale, decisions log, and invariants, see [`docs/superpowers/specs/2026-05-16-ledgerly-engine-design.md`](docs/superpowers/specs/2026-05-16-ledgerly-engine-design.md).
 
@@ -361,7 +362,7 @@ Imported from `ledgerly` (after build, the barrel is at `dist/index.js`):
 
 ## Webhook receiver
 
-ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint: signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel, so importing `mapEvent` keeps the Express-based server out of your bundle. The server's runtime dependencies — `express`, `better-sqlite3`, `dotenv`, and `stripe` — are declared as `peerDependencies`, so engine-only consumers don't install them (`npm i ledgerly` pulls in no Express and no native SQLite module). To run the receiver yourself, install them alongside ledgerly:
+ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint, including signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel, so importing `mapEvent` keeps the Express server out of your bundle. The server's runtime dependencies, `express`, `better-sqlite3`, `dotenv`, and `stripe`, are declared as `peerDependencies`, so engine-only consumers don't install them. `npm i ledgerly` pulls in no Express and no native SQLite module. To run the receiver yourself, install them alongside ledgerly:
 
 ```bash
 pnpm add ledgerly express better-sqlite3 dotenv stripe
@@ -444,9 +445,9 @@ After a successful `mapEvent`, the server calls `storage.persistMapResult(eventI
 2. Inserts every entry in `result.schedule?.entries` (if present) into `scheduled_entries` with `status='pending'`.
 3. Records the event ID in `processed_events`.
 
-If any insert throws (disk full, constraint violation), the entire bundle rolls back and the event ID is *not* recorded — so Stripe's next redelivery retries cleanly.
+If any insert throws, like disk full or a constraint violation, the entire bundle rolls back and the event ID is not recorded, so Stripe's next redelivery retries cleanly.
 
-For unhandled event types (where `mapEvent` throws `UnhandledEventError` because there's nothing to emit), the event ID is recorded but no entries are written — Stripe redeliveries of the same unhandled event still get the dedup short-circuit.
+For unhandled event types, where `mapEvent` throws `UnhandledEventError` because there's nothing to emit, the event ID is recorded but no entries are written, so Stripe redeliveries of the same unhandled event still get the dedup short-circuit.
 
 #### Querying
 
@@ -488,11 +489,11 @@ LEDGERLY_SCHEDULER_INTERVAL_MS=60000 \
 pnpm start
 ```
 
-The default dispatcher logs each due entry to console. Production deployments will replace it with a QBO/Xero API pusher — see `src/server/dispatchers/` for the contract.
+The default dispatcher logs each due entry to console. Production deployments will replace it with a QBO/Xero API pusher. See `src/server/dispatchers/` for the contract.
 
 **Contract:** dispatchers must be idempotent. The scheduler may invoke a dispatcher more than once for the same entry if a prior attempt failed after dispatch but before the database recorded the success.
 
-**Retry behavior:** when a dispatcher throws, the scheduler increments the entry's attempt counter and schedules the next retry via exponential backoff (default: 60s × 2^(attempts-1), capped at 24h — so attempt 1 waits 60s, attempt 2 waits 120s, attempt 10 waits ~8.5h). After `maxAttempts` failures (default 10, configurable via `LEDGERLY_SCHEDULER_MAX_ATTEMPTS`), the entry is moved to the `failed` state — operator intervention required.
+**Retry behavior:** when a dispatcher throws, the scheduler increments the entry's attempt counter and schedules the next retry via exponential backoff. The default is 60s × 2^(attempts-1), capped at 24h, so attempt 1 waits 60s, attempt 2 waits 120s, and attempt 10 waits ~8.5h. After `maxAttempts` failures (default 10, configurable via `LEDGERLY_SCHEDULER_MAX_ATTEMPTS`), the entry is moved to the `failed` state and needs operator intervention.
 
 **Dead-letter queue:** entries in `status='failed'` are surfaced via the `/health` endpoint's `failedScheduled` counter and via raw SQL:
 
@@ -529,7 +530,7 @@ LEDGERLY_QBO_API_BASE=https://sandbox-quickbooks.api.intuit.com \
 pnpm start
 ```
 
-All three of `LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_QBO_REALM_ID`, and `LEDGERLY_QBO_ACCOUNT_MAP_JSON` must be set to enable the QBO dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_QBO_API_BASE` is optional and defaults to the QBO production base URL — point it at `https://sandbox-quickbooks.api.intuit.com` for testing.
+All three of `LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_QBO_REALM_ID`, and `LEDGERLY_QBO_ACCOUNT_MAP_JSON` must be set to enable the QBO dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_QBO_API_BASE` is optional and defaults to the QBO production base URL. Point it at `https://sandbox-quickbooks.api.intuit.com` for testing.
 
 The `LEDGERLY_QBO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your real QBO account IDs and display names. All 12 codes must be present.
 
@@ -539,7 +540,7 @@ The `LEDGERLY_QBO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your rea
 
 #### Xero API dispatcher
 
-Like the QBO dispatcher, but for Xero's `ManualJournals` endpoint. Useful for indie SaaS founders outside the US (UK, AU, NZ — Xero's strongholds).
+Like the QBO dispatcher, but for Xero's `ManualJournals` endpoint. Useful for indie SaaS founders outside the US, where Xero is strong in the UK, AU, and NZ.
 
 Configure via env vars alongside the scheduler:
 
@@ -553,17 +554,17 @@ LEDGERLY_XERO_STATUS=DRAFT \
 pnpm start
 ```
 
-All three of `LEDGERLY_XERO_ACCESS_TOKEN`, `LEDGERLY_XERO_TENANT_ID`, and `LEDGERLY_XERO_ACCOUNT_MAP_JSON` must be set to enable the Xero dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_XERO_API_BASE` is optional and defaults to `https://api.xero.com` — Xero has no separate sandbox base (the demo company is a flag on the user's tenant).
+All three of `LEDGERLY_XERO_ACCESS_TOKEN`, `LEDGERLY_XERO_TENANT_ID`, and `LEDGERLY_XERO_ACCOUNT_MAP_JSON` must be set to enable the Xero dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_XERO_API_BASE` is optional and defaults to `https://api.xero.com`. Xero has no separate sandbox base, since the demo company is a flag on the user's tenant.
 
 The `LEDGERLY_XERO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your Xero account codes. All 12 codes must be present.
 
-`LEDGERLY_XERO_STATUS` is `DRAFT` (default — entries land as drafts for user review) or `POSTED` (entries go straight into the ledger). DRAFT is safer for initial integration; switch to POSTED once you trust the mapping.
+`LEDGERLY_XERO_STATUS` is `DRAFT` or `POSTED`. The default `DRAFT` lands entries as drafts for user review, and `POSTED` sends them straight into the ledger. DRAFT is safer for initial integration; switch to POSTED once you trust the mapping.
 
 **OAuth is not handled by ledgerly.** Obtain access tokens via Xero's OAuth 2.0 authorization code flow out-of-band, store refresh tokens per-tenant, and refresh access tokens before they expire (Xero tokens expire in 30 minutes). For a real SaaS deployment, you'll need a separate OAuth service; that's a future iteration.
 
-**Idempotency:** Xero supports a native `Idempotency-Key` header which ledgerly populates with `scheduled_entry.id`. A scheduler retry after a partial failure is safe — Xero will deduplicate.
+**Idempotency:** Xero supports a native `Idempotency-Key` header which ledgerly populates with `scheduled_entry.id`. A scheduler retry after a partial failure is safe, since Xero will deduplicate.
 
-**Precedence:** if both QBO and Xero env vars are configured, the QBO dispatcher wins (CLI selects the first match). For multi-target deployments, run two ledgerly processes — one per target — each with its own env config.
+**Precedence:** if both QBO and Xero env vars are configured, the QBO dispatcher wins (CLI selects the first match). For multi-target deployments, run two ledgerly processes, one per target, each with its own env config.
 
 #### OAuth setup (QBO + Xero)
 
@@ -621,7 +622,7 @@ When `LEDGERLY_*_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` are all set for
 - Mounts `GET /oauth/<provider>/start` and `GET /oauth/<provider>/callback` routes.
 - Uses the `managed<Qbo|Xero>Dispatcher` for scheduler dispatch (reads tokens from storage, refreshes automatically). The account map env var is still required.
 
-The static-token variables (`LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_XERO_ACCESS_TOKEN`, etc.) continue to work for environments that prefer to manage tokens outside ledgerly — the OAuth client config takes precedence when both are set.
+The static-token variables (`LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_XERO_ACCESS_TOKEN`, etc.) continue to work for environments that prefer to manage tokens outside ledgerly. The OAuth client config takes precedence when both are set.
 
 **4. Complete the consent flow.**
 
@@ -629,7 +630,7 @@ Visit `https://your-domain.example.com/oauth/qbo/start` (or `/oauth/xero/start`)
 
 **5. The scheduler dispatches automatically.**
 
-From this point on, the background scheduler dispatches due scheduled entries to QBO / Xero using the stored tokens. Access tokens are refreshed proactively (60 seconds before expiry) and reactively (on a `401` from the provider). Xero refresh tokens rotate on every use — ledgerly always persists the new pair before issuing further calls.
+From this point on, the background scheduler dispatches due scheduled entries to QBO / Xero using the stored tokens. Access tokens are refreshed proactively (60 seconds before expiry) and reactively (on a `401` from the provider). Xero refresh tokens rotate on every use, and ledgerly always persists the new pair before issuing further calls.
 
 **Production caveats:**
 
@@ -641,13 +642,13 @@ From this point on, the background scheduler dispatches due scheduled entries to
 
 #### Production caveats
 
-The persistence layer is intentionally minimal — it solves "don't lose events on restart" and "give me a queryable audit log of every journal entry" without dragging in a separate database server. Things it does *not* do:
+The persistence layer is intentionally minimal. It keeps you from losing events on restart and gives you a queryable audit log of every journal entry, without dragging in a separate database server. Things it does not do:
 
 - **No automatic backups.** `cp ledgerly.db ledgerly.db.bak` while the receiver is running is safe (SQLite WAL mode supports concurrent readers), but you need to schedule it yourself.
 - **No schema migrations beyond the initial DDL.** The schema is set in stone for v0; future changes will need a versioned migration runner.
-- **Single-writer.** SQLite is fine for one webhook receiver process. Horizontal scaling (multiple instances behind a load balancer) will need a real database — implement the `Storage` interface against Postgres / MySQL / DynamoDB to do that.
+- **Single-writer.** SQLite is fine for one webhook receiver process. Horizontal scaling with multiple instances behind a load balancer will need a real database. Implement the `Storage` interface against Postgres, MySQL, or DynamoDB to do that.
 - **No retention policy.** `processed_events` and `journal_entries` grow without bound. For a small SaaS that's many years of data before it matters, but plan for it.
-- **No PII redaction.** `JournalEntry.memo` may contain customer references inherited from Stripe (`subscriptionId`, `chargeId`). The receiver does not redact, encrypt, or otherwise sanitize — treat the database with the same care you'd give a Stripe export.
+- **No PII redaction.** `JournalEntry.memo` may contain customer references inherited from Stripe (`subscriptionId`, `chargeId`). The receiver does not redact, encrypt, or otherwise sanitize. Treat the database with the same care you'd give a Stripe export.
 
 ### Logging
 
@@ -684,11 +685,11 @@ const log: Logger = {
 const { app } = createServer({ stripe, webhookSecret, storage, log });
 ```
 
-For tests, ledgerly also exports `silentLogger()` — a no-op `Logger` that discards everything.
+For tests, ledgerly also exports `silentLogger()`, a no-op `Logger` that discards everything.
 
 ### Metrics
 
-The receiver exposes a `GET /metrics` endpoint in Prometheus text exposition format (v0.0.4). The default backend is an in-memory implementation with zero runtime dependencies — point a Prometheus scraper at the receiver and you get counters and gauges for free.
+The receiver exposes a `GET /metrics` endpoint in Prometheus text exposition format (v0.0.4). The default backend is an in-memory implementation with zero runtime dependencies. Point a Prometheus scraper at the receiver and you get counters and gauges for free.
 
 ```yaml
 # prometheus.yml
@@ -750,7 +751,7 @@ Override the namespace prefix (`ledgerly_`) by setting `LEDGERLY_METRICS_NAMESPA
 
 When `LEDGERLY_ADMIN_TOKEN` is set (min 32 characters), the receiver mounts
 four operator-facing endpoints, all gated behind a constant-time bearer
-comparison. When the env var is unset, the routes are not mounted at all —
+comparison. When the env var is unset, the routes are not mounted at all, so
 unauthenticated requests get a generic 404 and the admin surface is invisible
 to scanners.
 
@@ -825,14 +826,14 @@ docker run -d --name ledgerly \
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
 mount point above. Add QBO/Xero env vars from `.env.example` to enable the
-corresponding dispatchers — without them, the scheduler falls back to a
+corresponding dispatchers. Without them, the scheduler falls back to a
 console dispatcher that logs entries instead of posting.
 
 ### Docker Compose (local dev)
 
 `docker-compose.yml` ships in the repo for running ledgerly locally
-without installing Node. Two terminals — `stripe listen` on the host
-mints a fresh webhook signing secret per session and you feed it to
+without installing Node. You'll use two terminals. `stripe listen` on the host
+mints a fresh webhook signing secret per session, and you feed it to
 ledgerly via `.env`:
 
 ```bash
@@ -850,8 +851,8 @@ $ stripe trigger charge.succeeded
 ```
 
 Compose uses the GHCR image by default (`ghcr.io/jakethehoffer/ledgerly:latest`).
-To build from the local Dockerfile instead — e.g. when iterating on
-ledgerly itself — uncomment the `build:` line in `docker-compose.yml`
+To build from the local Dockerfile instead, for example when iterating on
+ledgerly itself, uncomment the `build:` line in `docker-compose.yml`
 and comment out `image:`, then `docker compose up --build`.
 
 SQLite state lives in a named volume (`ledgerly-data`) that survives
@@ -861,8 +862,8 @@ SQLite state lives in a named volume (`ledgerly-data`) that survives
 **No `stripe-cli` sidecar by design.** `stripe listen` mints a new
 webhook signing secret on every startup, which ledgerly needs at boot
 to verify signatures. Wiring them together inside Compose would
-require a shared volume + entrypoint wait script in the ledgerly
-container — more complexity than it earns for a problem the documented
+require a shared volume and entrypoint wait script in the ledgerly
+container. That's more complexity than it earns for a problem the documented
 Stripe dev workflow already handles cleanly with the host-side `stripe
 listen` above.
 
@@ -871,7 +872,7 @@ listen` above.
 Every published image carries a [SLSA-style build provenance attestation](https://slsa.dev/spec/v1.0/provenance)
 signed via Sigstore by the release workflow's OIDC identity. The attestation
 binds the image's digest to the exact workflow run, commit SHA, and Dockerfile
-that produced it — no long-lived signing key, nothing to rotate.
+that produced it. No long-lived signing key, nothing to rotate.
 
 Verify before pulling into production:
 
@@ -920,8 +921,8 @@ readinessProbe:
 
 The Stripe webhook handler verifies signatures against the raw request body.
 Any reverse proxy in front of ledgerly (nginx, Caddy, Cloudflare, Traefik,
-...) must pass `POST /webhook` through unmodified — no buffering, no body
-rewrites, no JSON normalization. Other routes are well-behaved JSON and need
+...) must pass `POST /webhook` through unmodified, with no buffering, no body
+rewrites, and no JSON normalization. Other routes are well-behaved JSON and need
 no special handling.
 
 ### Required environment
@@ -958,22 +959,26 @@ pnpm start          # Run the built webhook receiver (requires pnpm build first)
 - TypeScript (strict, NodeNext ESM, `verbatimModuleSyntax`)
 - Vitest
 - ESLint + Prettier
-- `stripe` package (types only — no runtime dependency)
+- `stripe` package (types only, no runtime dependency)
 
 ## Status
 
-Both layers are built and documented above: the pure mapping engine (13 event types, multi-currency with realized FX gain/loss, QBO and Xero exporters) and the optional webhook receiver (signature verification, idempotent persistence, a recognition scheduler with retry and dead-letter, QBO/Xero OAuth, Prometheus metrics, and admin endpoints). It's published to npm and GHCR with signed build provenance.
+Both layers are built and documented above. The pure mapping engine handles 13 event types, multi-currency with realized FX gain/loss, and the QBO and Xero exporters. The optional webhook receiver adds signature verification, idempotent persistence, a recognition scheduler with retry and dead-letter, QBO/Xero OAuth, Prometheus metrics, and admin endpoints. It's published to npm and GHCR with signed build provenance.
 
 A few things are deferred deliberately, and called out in the code where they'd otherwise have to be guessed at rather than quietly approximated:
 
 - **Cross-currency payouts** are rejected with a clear error instead of posting a number that ignores Stripe's conversion fee. The analysis and the payload needed to implement them are in [`docs/cross-currency-payouts.md`](./docs/cross-currency-payouts.md).
-- **Multi-period FX revaluation** is not auto-computed; each entry instead carries an `fxContext` so a downstream tool with a home-currency rate source can do it. See [Currency support](#currency-support).
-- **B2B accounts-receivable** flows (the `1100` account), invoice-then-pay terms, aren't modeled yet.
+- **Multi-period FX revaluation** is not auto-computed. Each entry instead carries an `fxContext` so a downstream tool with a home-currency rate source can do it. See [Currency support](#currency-support).
+- **B2B accounts-receivable** flows, the invoice-then-pay terms that use the `1100` account, aren't modeled yet.
 
-The accounting is the part most worth scrutinizing. The reasoning behind every entry is written up in plain bookkeeping terms in [`docs/accounting.md`](./docs/accounting.md), meant to be audited without reading the code — if you keep books for a SaaS, or you know where the Stripe API gets strange, that's the place to start.
+The accounting is the part most worth scrutinizing. The reasoning behind every entry is written up in plain bookkeeping terms in [`docs/accounting.md`](./docs/accounting.md), meant to be audited without reading the code. If you keep books for a SaaS, or you know where the Stripe API gets strange, that's the place to start.
 
 ## License
 
 Copyright 2026 Jake Hoffman
 
-Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE) for the full text.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
+
+---
+
+Need this wired into your own stack? I build custom Stripe billing and accounting integrations for SaaS teams. Clean books, exports to QuickBooks and Xero, and multi-currency reconciliation that ties out. Email me at jakehoffman.dev@gmail.com.
