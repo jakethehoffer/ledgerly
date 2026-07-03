@@ -93,6 +93,35 @@ describe('OAuth endpoints', () => {
       expect(stored?.refreshToken).toBe('r');
     });
 
+    it('escapes a malicious realmId in the success page (no reflected XSS)', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          access_token: 'a',
+          refresh_token: 'r',
+          expires_in: 3600,
+          scope: 'com.intuit.quickbooks.accounting',
+        }),
+      );
+      const { app } = createServer({
+        stripe,
+        webhookSecret: 'whsec_',
+        log: silentLogger(),
+        oauth: makeOauthConfig({}, fetchImpl),
+      });
+      const signer = createStateSigner(STATE_SECRET);
+      const state = signer.sign({ provider: 'qbo' });
+      const evil = '<script>alert(1)</script>';
+
+      const res = await request(app)
+        .get('/oauth/qbo/callback')
+        .query({ code: 'AUTH-CODE', state, realmId: evil });
+
+      expect(res.status).toBe(200);
+      // The raw script tag must not appear; the escaped form must.
+      expect(res.text).not.toContain('<script>alert(1)</script>');
+      expect(res.text).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    });
+
     it('400 when state is missing', async () => {
       const { app } = createServer({
         stripe,

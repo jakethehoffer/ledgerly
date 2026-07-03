@@ -137,18 +137,37 @@ function resolveStorage(config: ServerConfig): Storage {
 }
 
 /**
+ * Escape the five characters that matter for HTML text/attribute contexts so a
+ * value interpolated into {@link renderConnectedPage} can't inject markup.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
  * Tiny HTML page rendered after a successful OAuth callback. Intentionally
  * minimal — production deployments will want to customize this to match
  * their app's branding and to redirect somewhere useful.
+ *
+ * `tenantId` is escaped: for QBO it is the `realmId` query parameter, which is
+ * attacker-controllable on the callback URL, so reflecting it verbatim into the
+ * page would be a reflected-XSS vector. `provider` comes from a fixed union and
+ * needs no escaping.
  */
 function renderConnectedPage(provider: OAuthProvider, tenantId: string): string {
+  const safeTenant = escapeHtml(tenantId);
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>${provider.toUpperCase()} connected</title>
 <style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;color:#222}h1{font-size:1.5rem}code{background:#f4f4f5;padding:0.1em 0.3em;border-radius:4px}</style>
 </head><body>
 <h1>${provider.toUpperCase()} connected</h1>
-<p>ledgerly is now authorized against tenant <code>${tenantId}</code>. You can close this window.</p>
+<p>ledgerly is now authorized against tenant <code>${safeTenant}</code>. You can close this window.</p>
 </body></html>`;
 }
 
