@@ -122,6 +122,90 @@ describe('integration: dispute lost lifecycle under FX', () => {
   });
 });
 
+describe('integration: small-value dispute lifecycle (fee > disputed amount)', () => {
+  // A $9.99 charge disputed incurs a ~$15 dispute fee, so Stripe's shape-2
+  // withdrawal has a fee BT (1500) LARGER than the clawback BT (999). The
+  // withdrawal must still park exactly the disputed principal (999) in 1200 and
+  // expense the fee (1500) to 6100 — otherwise the receivable strands when the
+  // dispute later resolves against dispute.amount (999). Build the reinstated /
+  // closed events from the same dispute so the whole lifecycle is exercised.
+  const withdrawn = loadEvent('dispute_funds_withdrawn_small_amount');
+  const disputeOf = (ev: Stripe.Event): Record<string, unknown> =>
+    (ev.data.object as unknown as Record<string, unknown>);
+
+  function buildReinstated(): Stripe.Event {
+    const ev = structuredClone(withdrawn);
+    ev.id = 'evt_test_dispute_reinstated_small_001';
+    (ev as unknown as { type: string }).type = 'charge.dispute.funds_reinstated';
+    const dispute = disputeOf(ev);
+    dispute['status'] = 'won';
+    dispute['balance_transactions'] = [
+      {
+        id: 'txn_dispute_small_reinstate_001',
+        object: 'balance_transaction',
+        amount: 999,
+        net: 999,
+        fee: 0,
+        fee_details: [],
+        currency: 'usd',
+        reporting_category: 'dispute',
+        type: 'adjustment',
+        status: 'available',
+        created: 1737201600,
+        available_on: 1737417600,
+      },
+    ];
+    return ev;
+  }
+
+  function buildClosedLost(): Stripe.Event {
+    const ev = structuredClone(withdrawn);
+    ev.id = 'evt_test_dispute_closed_small_001';
+    (ev as unknown as { type: string }).type = 'charge.dispute.closed';
+    const dispute = disputeOf(ev);
+    dispute['status'] = 'lost';
+    return ev;
+  }
+
+  it('withdrawn parks the disputed principal (not the larger fee) in 1200', () => {
+    const result = mapEvent(withdrawn);
+    const entry = result.entries[0];
+    if (!entry) throw new Error('expected an entry');
+    const receivable = entry.lines.find((l) => l.accountCode === '1200');
+    const feeExpense = entry.lines.find((l) => l.accountCode === '6100');
+    expect(receivable?.amount).toBe(999); // disputed principal, not the 1500 fee
+    expect(feeExpense?.amount).toBe(1500); // non-refundable dispute fee
+    // No phantom 7000 line: same-currency, so no FX delta once the split is right.
+    expect(entry.lines.some((l) => l.accountCode === '7000')).toBe(false);
+  });
+
+  it('withdrawn -> reinstated (won) clears 1200 to zero, only the fee remains as loss', () => {
+    const allEntries: JournalEntry[] = [];
+    for (const ev of [withdrawn, buildReinstated()]) {
+      allEntries.push(...flattenMapResult(mapEvent(ev)));
+    }
+    const balances: Partial<Record<string, number>> = computeBalances(allEntries);
+    expect(balances['1200']).toBeUndefined(); // receivable fully cleared
+    expect(balances['1010']).toBe(-1500);     // -2499 withdrawn + 999 reinstated
+    expect(balances['6100']).toBe(1500);      // only the non-refundable fee
+    const total = Object.values(balances).reduce<number>((acc, v) => acc + (v ?? 0), 0);
+    expect(total).toBe(0);
+  });
+
+  it('withdrawn -> closed_lost clears 1200 and posts principal + fee to 6100', () => {
+    const allEntries: JournalEntry[] = [];
+    for (const ev of [withdrawn, buildClosedLost()]) {
+      allEntries.push(...flattenMapResult(mapEvent(ev)));
+    }
+    const balances: Partial<Record<string, number>> = computeBalances(allEntries);
+    expect(balances['1200']).toBeUndefined(); // receivable written off to zero
+    expect(balances['1010']).toBe(-2499);     // funds withdrawn, never returned
+    expect(balances['6100']).toBe(2499);      // fee 1500 + writeoff of principal 999
+    const total = Object.values(balances).reduce<number>((acc, v) => acc + (v ?? 0), 0);
+    expect(total).toBe(0);
+  });
+});
+
 describe('integration: annual subscription recognition', () => {
   it('invoice_payment_succeeded_annual drains deferred revenue to zero over 12 monthly recognitions', () => {
     const { balances } = replayAll([

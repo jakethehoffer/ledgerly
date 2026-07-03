@@ -185,6 +185,11 @@ Cr  1010 Stripe Clearing                   $115.00   (total pulled from balance)
 ```
 *(`dispute_funds_withdrawn_standard`)*
 
+The disputed amount and the fee are told apart by Stripe's fee metadata, not by
+which is larger — so a **small-value dispute** where the fee exceeds the disputed
+amount (e.g. a $9.99 charge with a $15 fee) still parks the $9.99 in 1200 and
+expenses the $15 to 6100, rather than inverting them. *(`dispute_funds_withdrawn_small_amount`)*
+
 ### 2a. You lose: `charge.dispute.closed` (status `lost`)
 
 The disputed funds are gone. The receivable becomes an expense (a write-off):

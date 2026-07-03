@@ -61,36 +61,42 @@ export function handleDisputeFundsWithdrawn(event: Stripe.Event): MapResult {
   //   (1) A single adjustment BT carrying the fee inline in bt.fee
   //       (amount = -|clawback|, fee = dispute_fee, net = amount - fee).
   //   (2) Multiple adjustment BTs, all with reporting_category='dispute':
-  //       one large BT (the clawback) plus one or more smaller BTs that
-  //       carry the dispute fee in bt.amount with bt.fee = 0.
+  //       a clawback BT plus one or more BTs that carry the dispute fee in
+  //       bt.amount with bt.fee = 0.
   //
-  // Same-currency case (BT currency == dispute.currency): the historical
-  // heuristic was `|bt.amount| === dispute.amount` to spot the clawback,
-  // but that breaks for FX disputes where bt.amount is in settlement
-  // currency and dispute.amount is in customer-facing currency. The
-  // currency-agnostic identification used here: the clawback BT is the
-  // one with the LARGEST |bt.amount| within the dispute-category set.
-  // Every remaining dispute-category BT is treated as a fee, contributing
-  // both its |amount| and its inline `fee` to the fee total. This handles
-  // both shapes above identically and works regardless of currency.
-  const sortedBySize = [...disputeBts].sort(
-    (a, b) => Math.abs(b.amount) - Math.abs(a.amount),
-  );
-  const clawbackBt = sortedBySize[0];
-  if (clawbackBt === undefined) {
-    // Unreachable: we already early-returned on disputeBts.length === 0.
-    throw new Error(`dispute ${dispute.id} unexpected: sortedBySize empty`);
-  }
-  const otherBts = sortedBySize.slice(1);
-
-  const actualClawback = Math.abs(clawbackBt.amount);
-  const inlineFee = Math.abs(clawbackBt.fee);
-  const splitFees = otherBts.reduce(
+  // We split the withdrawal into "disputed principal" (parked in 1200) and
+  // "dispute fee" (expensed to 6100) by identifying the fee via Stripe's
+  // `fee_details` type tag, NOT by BT magnitude. The previous heuristic
+  // ("the clawback is the BT with the largest |amount|") inverts the split
+  // for small-value disputes: a $9.99 charge disputed incurs a ~$15 dispute
+  // fee, so the fee BT is LARGER than the clawback BT and would be misread as
+  // the principal — parking $15 in 1200 and expensing $9.99, then stranding
+  // the receivable when the dispute later resolves against dispute.amount.
+  //
+  // Magnitude-independent identification, correct for both shapes above and
+  // regardless of currency:
+  //   totalWithdrawn = Σ(|amount| + |fee|)      — all cash pulled from balance
+  //   feeTotal       = Σ dispute-typed fee_details across every BT
+  //                    (shape 1: itemizes the inline bt.fee; shape 2: itemizes
+  //                     the dedicated fee BT's amount — Stripe always breaks
+  //                     bt.fee down in fee_details, so this captures both)
+  //   actualClawback = totalWithdrawn − feeTotal — the disputed principal
+  // On the existing standard and FX fixtures (clawback > fee) this yields
+  // byte-identical output to the prior heuristic.
+  const totalWithdrawn = disputeBts.reduce(
     (sum, bt) => sum + Math.abs(bt.amount) + Math.abs(bt.fee),
     0,
   );
-  const feeTotal = inlineFee + splitFees;
-  const totalWithdrawn = actualClawback + feeTotal;
+  const feeTotal = disputeBts.reduce(
+    (sum, bt) =>
+      sum +
+      bt.fee_details.reduce(
+        (s, detail) => s + (detail.type === 'dispute' ? Math.abs(detail.amount) : 0),
+        0,
+      ),
+    0,
+  );
+  const actualClawback = totalWithdrawn - feeTotal;
 
   // FX gain/loss recognition. When the original charge's balance_transaction
   // is expanded (the receiver's expand.ts requests it on every dispute event;
