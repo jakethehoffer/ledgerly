@@ -63,27 +63,37 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
       ? Math.abs(chargeBt.amount) / charge.amount
       : 1;
 
+  const expectedSettlementOf = (r: Stripe.Refund): number =>
+    Math.round(r.amount * originalRate);
+
   // Cumulative tax allocation. Order every refund on the charge by creation so
   // each refund's sales-tax share is computed as
-  //   round(cumulativeThrough * taxRatio) - round(cumulativeBefore * taxRatio)
+  //   round(cumulativeThrough * rate * taxRatio) - round(cumulativeBefore * rate * taxRatio)
   // rather than rounding each refund's tax independently. Independent rounding
   // drifts: two 5500 refunds of an 11000 / tax-825 charge each round 412.5 -> 413,
   // reversing 826 against the 825 collected and stranding -1 in 2000 Sales Tax
-  // Payable after a full refund. The cumulative form telescopes to exactly the
-  // collected tax once the charge is fully refunded, and reduces to the previous
-  // per-refund value for the single-refund and no-tax cases (cumulativeBefore = 0
-  // or taxRatio = 0) — so existing fixtures stay byte-identical.
-  const expectedSettlementOf = (r: Stripe.Refund): number =>
-    Math.round(r.amount * originalRate);
-  const cumulativeBeforeById = new Map<string, number>();
+  // Payable after a full refund.
+  //
+  // The cumulative basis is the CUSTOMER-currency amount (`refund.amount`), not
+  // the per-refund settlement amount. Customer amounts sum EXACTLY to
+  // charge.amount on a full refund, so the telescoped total is
+  //   round(charge.amount * originalRate * taxRatio)
+  //     = round(chargeBt.amount * taxRatio)
+  //     = the settlement-currency tax booked at charge time.
+  // Telescoping on the per-refund settlement amounts instead (Σ round(r*rate))
+  // can drift a cent from chargeBt.amount under FX and strand it in 2000. For
+  // same-currency (originalRate = 1) the customer cumulative equals the
+  // settlement cumulative, so this reduces to the previous expression and all
+  // existing fixtures stay byte-identical.
+  const cumulativeCustomerBeforeById = new Map<string, number>();
   {
     const ordered = [...refundsList.data].sort((a, b) =>
       a.created !== b.created ? a.created - b.created : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
     );
     let running = 0;
     for (const r of ordered) {
-      cumulativeBeforeById.set(r.id, running);
-      running += expectedSettlementOf(r);
+      cumulativeCustomerBeforeById.set(r.id, running);
+      running += r.amount;
     }
   }
 
@@ -121,15 +131,16 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     const expectedSettlement = expectedSettlementOf(refund);
     const fxDelta = actualSettlement - expectedSettlement;
 
-    // Tax share via cumulative rounding (see cumulativeBeforeById above) so the
-    // 2000 reversals across a multi-refund sequence sum to exactly the tax
-    // collected at charge time. Reduces to the prior per-refund value when
-    // there's no tax (taxRatio = 0) or this is the first/only refund.
-    const cumulativeBefore = cumulativeBeforeById.get(refund.id) ?? 0;
+    // Tax share via cumulative rounding on customer amounts, folding the
+    // settlement rate into the factor (see cumulativeCustomerBeforeById above)
+    // so the 2000 reversals across a multi-refund sequence sum to exactly the
+    // tax collected at charge time — under FX as well as same-currency.
+    const cumCustomerBefore = cumulativeCustomerBeforeById.get(refund.id) ?? 0;
+    const cumCustomerThrough = cumCustomerBefore + refund.amount;
     const taxPortion =
       taxRatio > 0
-        ? Math.round((cumulativeBefore + expectedSettlement) * taxRatio) -
-          Math.round(cumulativeBefore * taxRatio)
+        ? Math.round(cumCustomerThrough * originalRate * taxRatio) -
+          Math.round(cumCustomerBefore * originalRate * taxRatio)
         : 0;
     const revenuePortion = expectedSettlement - taxPortion;
 

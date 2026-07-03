@@ -150,3 +150,97 @@ describe('integration: refund sales-tax drainage invariant', () => {
     });
   }
 });
+
+// FX variant: the charge settled in a different currency than it was billed in,
+// so tax was collected in SETTLEMENT currency at charge time
+// (taxInBT = round(chargeBt * tax / chargeAmount)). A multi-refund sequence must
+// drain exactly that settlement tax — otherwise Sales Tax Payable strands a cent
+// under FX the same way it did same-currency before the cumulative fix. The
+// refund BTs post at the original charge rate (no rate drift), so 7000 stays out
+// of it and this isolates the tax-rounding path.
+interface FxCase {
+  chargeAmount: number; // customer-currency total
+  chargeBt: number; // settlement-currency charge BT amount (defines the rate)
+  tax: number; // customer-currency tax
+  custSplits: number[]; // per-refund customer amounts (sum to chargeAmount)
+  desc: string;
+}
+
+function buildFxRefundEvents(fx: FxCase): Stripe.Event[] {
+  const rate = fx.chargeBt / fx.chargeAmount;
+  const settleSplits = fx.custSplits.map((a) => Math.round(a * rate));
+  const refunds = fx.custSplits.map((amount, i) => {
+    const r = makeRefund(`re_fx_${String(i + 1)}`, amount, 2000 + i * 1000);
+    // Settlement-currency BT: clawback posts in CAD at the original rate.
+    r.balance_transaction.amount = -settleSplits[i]!;
+    r.balance_transaction.net = -settleSplits[i]!;
+    r.balance_transaction.currency = 'cad';
+    return r;
+  });
+  return fx.custSplits.map((_, i) => {
+    const ev = structuredClone(BASE);
+    const charge = ev.data.object as unknown as MutableCharge & {
+      balance_transaction: { amount: number; currency: string };
+    };
+    charge.id = 'ch_fx_drain';
+    charge.amount = fx.chargeAmount;
+    charge.currency = 'usd';
+    // Expanded charge BT (object, not string) so the handler recovers the rate.
+    (charge as unknown as { balance_transaction: unknown }).balance_transaction = {
+      id: 'txn_fx_charge',
+      object: 'balance_transaction',
+      amount: fx.chargeBt,
+      net: fx.chargeBt,
+      fee: 0,
+      currency: 'cad',
+      exchange_rate: rate,
+      reporting_category: 'charge',
+      type: 'charge',
+      status: 'available',
+      created: 1000,
+      available_on: 1000,
+    };
+    charge.amount_refunded = fx.custSplits.slice(0, i + 1).reduce((s, a) => s + a, 0);
+    charge.invoice.tax = fx.tax;
+    charge.invoice.amount_paid = fx.chargeAmount;
+    charge.invoice.amount_due = fx.chargeAmount;
+    charge.invoice.total = fx.chargeAmount;
+    charge.invoice.currency = 'usd';
+    charge.refunds.data = refunds.slice(0, i + 1);
+    charge.refunds.total_count = i + 1;
+    ev.id = `evt_fx_drain_${String(i + 1)}`;
+    (ev as unknown as { created: number }).created = refunds[i]!.created;
+    return ev;
+  });
+}
+
+const FX_CASES: ReadonlyArray<FxCase> = [
+  // rate 1.3344; Σround(split*rate)=13345 ≠ chargeBt 13344, and 13344*0.10=1334.4
+  // rounds to 1334 while the drifted 13345*0.10=1334.5 rounds to 1335 — so the
+  // old settlement-cumulative basis over-drains by a cent.
+  {
+    chargeAmount: 10000,
+    chargeBt: 13344,
+    tax: 1000,
+    custSplits: [3334, 3333, 3333],
+    desc: 'rate 1.3344, three thirds, settlement rounding drifts the tax',
+  },
+  // Control: clean rate, drainage already exact on old and new code.
+  {
+    chargeAmount: 10000,
+    chargeBt: 13000,
+    tax: 1000,
+    custSplits: [5000, 5000],
+    desc: 'rate 1.30, two halves, exact (control)',
+  },
+];
+
+describe('integration: refund sales-tax drainage invariant under FX', () => {
+  for (const fx of FX_CASES) {
+    it(`drains exactly the settlement-currency tax — ${fx.desc}`, () => {
+      const events = buildFxRefundEvents(fx);
+      const expectedSettlementTax = Math.round((fx.chargeBt * fx.tax) / fx.chargeAmount);
+      expect(taxDebitsAcross(events)).toBe(expectedSettlementTax);
+    });
+  }
+});
