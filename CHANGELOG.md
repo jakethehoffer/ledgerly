@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.2.0] — 2026-07-04
+
+### Added
+
+- **Per-line revenue recognition.** Recognition is now decided per invoice line
+  item by each line's own billing span, instead of classifying the whole invoice
+  by its longest line. A one-time charge billed alongside an annual subscription
+  — a setup or onboarding fee on the same invoice — is recognized immediately
+  (`4000`) while only the subscription line is deferred (`2100`) and drawn down
+  over its term; previously the whole invoice was deferred over 12 months.
+  Pre-tax revenue is split between immediate and deferred in proportion to each
+  portion's share of the pre-tax line total, and sales tax stays wholly in `2000`
+  at collection. Pure single-term invoices (all lines immediate, or all deferred)
+  reduce to the existing monthly / annual paths with byte-identical output.
+
+### Fixed
+
+- **Dispute fee vs. disputed principal are now split by Stripe's `fee_details`,
+  not by balance-transaction magnitude.** `funds_withdrawn` treated the largest
+  balance transaction as the disputed principal and the rest as the fee, which
+  inverts for a small-value dispute: a $9.99 charge incurs a ~$15 dispute fee, so
+  the fee transaction is the larger one — parking $15 in `1200` Disputes
+  Receivable and expensing $9.99, then stranding the receivable when the dispute
+  resolved against `dispute.amount` (and, under FX, booking a phantom `7000`
+  line). The fee is now identified by its `fee_details` type tag, so the split is
+  correct regardless of which amount is larger. Existing standard and FX fixtures
+  (principal > fee) are byte-identical.
+- **Multi-refund sales-tax drainage no longer strands a penny under FX.** The
+  cumulative tax allocation telescoped on per-refund settlement amounts
+  (`Σ round(refundAmount × rate)`), which can drift a cent from the charge's
+  balance-transaction amount, leaving `2000` off by ±1 after a full refund of a
+  taxed sale. It now telescopes on customer-currency amounts (which sum exactly
+  to the charge amount) with the settlement rate folded into the tax factor, so
+  it drains to exactly the tax booked at charge time. Same-currency books are
+  byte-identical.
+- **Invoices paid with no charge are acknowledged instead of erroring.** An
+  invoice paid entirely from the customer's credit balance or out of band
+  (`charge` is `null`, `amount_paid > 0`) ran into the charge-expansion guard and
+  threw `MissingExpansionError`, 500ing the webhook and putting Stripe into a
+  perpetual retry loop. No cash moves through the Stripe balance on these and the
+  engine doesn't model customer credit balances, so they now produce no entry,
+  like the other no-accounting-impact events. A charge present as an unexpanded
+  string id still throws — that's a caller error, not a credit-balance invoice.
+
+### Security
+
+- **The QBO OAuth callback success page now HTML-escapes the tenant id.** For QBO
+  the tenant id is the `realmId` query parameter, which is attacker-controllable
+  on the callback URL, so reflecting it verbatim into the page was a
+  reflected-XSS vector. The value is now escaped before interpolation.
+
 ## [0.1.16] — 2026-06-10
 
 ### Fixed
@@ -771,6 +822,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.2.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.2.0
 [0.1.16]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.16
 [0.1.15]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.15
 [0.1.14]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.14
