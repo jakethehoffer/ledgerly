@@ -113,6 +113,26 @@ month absorbs any rounding remainder). Your server persists these and posts each
 on its scheduled date. This is standard ASC 606 / IFRS 15 ratable recognition.
 *(`invoice_payment_succeeded_annual`)*
 
+### Mixed invoices — recognize each line by its own term
+
+Recognition is decided **per line item**, not once for the whole invoice. When an
+annual subscription is billed on the same invoice as a one-time charge — a setup
+or onboarding fee, say — the one-time line is earned now and only the
+subscription line is deferred. A $1,200 annual plan plus a $300 onboarding fee:
+
+```
+Dr  1010 Stripe Clearing         (net of fee)
+Dr  6000 Stripe Processing Fees  (fee)
+Cr  4000 Subscription Revenue          $300.00    (one-time fee, earned now)
+Cr  2100 Deferred Revenue            $1,200.00    (subscription, deferred)
+```
+
+Then the usual 12-month schedule draws down only the $1,200. The pre-tax revenue
+is split between now and deferred in proportion to each portion's share of the
+line total; any sales tax stays wholly in 2000 at collection, since it's owed now
+regardless of when the revenue is earned.
+*(`invoice_payment_succeeded_annual_plus_onetime`)*
+
 ### Sales tax
 
 When the invoice carries Stripe Tax, the tax portion is *not* revenue — it's

@@ -36,6 +36,32 @@ function periodMonths(invoice: Stripe.Invoice): number {
   return Math.max(1, Math.round(days / 30));
 }
 
+/**
+ * Sum the invoice's line-item amounts (customer currency, pre-tax) into the
+ * portion earned immediately vs. the portion deferred, classifying each line by
+ * its OWN billing span. A line spanning a month or less (including a one-time
+ * item with an instant period) is immediate; a longer line is deferred over its
+ * term. Line amounts are pre-tax, so the two sums add up to the invoice's
+ * pre-tax subtotal — the basis for splitting settlement-currency pre-tax
+ * revenue between recognize-now (4000) and defer (2100).
+ */
+function partitionLineAmounts(invoice: Stripe.Invoice): {
+  immediateCustomer: number;
+  deferredCustomer: number;
+} {
+  let immediateCustomer = 0;
+  let deferredCustomer = 0;
+  for (const line of invoice.lines.data) {
+    const span = (line.period.end - line.period.start) / SECONDS_PER_DAY;
+    if (span > MONTHLY_THRESHOLD_DAYS) {
+      deferredCustomer += line.amount;
+    } else {
+      immediateCustomer += line.amount;
+    }
+  }
+  return { immediateCustomer, deferredCustomer };
+}
+
 function getCharge(invoice: Stripe.Invoice, eventId: string): Stripe.Charge {
   return requireExpanded<Stripe.Charge>(invoice.charge, 'invoice.charge', eventId);
 }
@@ -140,6 +166,41 @@ function buildAnnualCashEntry(
     { accountCode: '1010', side: 'debit',  amount: net,    memo: 'Net to Stripe balance' },
     { accountCode: '6000', side: 'debit',  amount: fee,    memo: 'Stripe processing fee' },
     { accountCode: '2100', side: 'credit', amount: preTax, memo: 'Annual subscription deferred' },
+  ];
+  if (taxInBT > 0) {
+    draft.push({ accountCode: '2000', side: 'credit', amount: taxInBT, memo: 'Sales tax collected' });
+  }
+  const lines: ReadonlyArray<JournalLine> = sortLines(draft);
+  return withFx(
+    {
+      date: epochToUtcDate(event.created),
+      currency: btCurrency,
+      memo: invoiceMemo(invoice),
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+      sourceObjectId: invoice.id,
+      lines,
+    },
+    fxContext,
+  );
+}
+
+function buildMixedCashEntry(
+  event: Stripe.Event,
+  invoice: Stripe.Invoice,
+  immediatePreTax: Cents,
+  deferredPreTax: Cents,
+  fee: Cents,
+  net: Cents,
+  taxInBT: Cents,
+  btCurrency: string,
+  fxContext: FxContext | undefined,
+): JournalEntry {
+  const draft: JournalLine[] = [
+    { accountCode: '1010', side: 'debit',  amount: net,            memo: 'Net to Stripe balance' },
+    { accountCode: '6000', side: 'debit',  amount: fee,            memo: 'Stripe processing fee' },
+    { accountCode: '4000', side: 'credit', amount: immediatePreTax, memo: 'Subscription revenue (recognized now)' },
+    { accountCode: '2100', side: 'credit', amount: deferredPreTax,  memo: 'Deferred subscription revenue' },
   ];
   if (taxInBT > 0) {
     draft.push({ accountCode: '2000', side: 'credit', amount: taxInBT, memo: 'Sales tax collected' });
@@ -323,30 +384,93 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
       ? cents(Math.round(bt.amount * (invoiceTax / invoice.amount_paid)))
       : cents(0);
 
-  const span = periodSpanDays(invoice);
-  if (span <= MONTHLY_THRESHOLD_DAYS) {
+  // Recognize revenue per line item by each line's OWN billing span, not one
+  // classification for the whole invoice. A line whose period is a month or
+  // shorter — including a one-time invoice item with an instant period — is
+  // earned now; a longer line is deferred and recognized over its term. This
+  // stops a one-time setup fee that rides on an annual invoice from being
+  // deferred over 12 months alongside the subscription.
+  //
+  // `periodSpanDays` still runs first to preserve the "no line periods" guard.
+  // Pure single-term invoices reduce to the monthly / annual paths below with
+  // byte-identical output: an all-immediate invoice has deferredPreTax = 0
+  // (monthly path), an all-deferred invoice has immediatePreTax = 0 (annual
+  // path with the same `amount_paid - tax` schedule anchor as before).
+  periodSpanDays(invoice);
+  const months = periodMonths(invoice);
+  const preTax = cents(gross - taxInBT);
+
+  const { immediateCustomer, deferredCustomer } = partitionLineAmounts(invoice);
+  const lineTotal = immediateCustomer + deferredCustomer;
+  // Split pre-tax revenue by the immediate portion's share of the pre-tax line
+  // total (line amounts are pre-tax and sum to the subtotal), so the immediate
+  // and deferred credits sum back to preTax exactly. With no usable line
+  // breakdown, recognize now.
+  const immediatePreTax =
+    lineTotal > 0 ? Math.round((preTax * immediateCustomer) / lineTotal) : preTax;
+  const deferredPreTax = preTax - immediatePreTax;
+
+  if (deferredPreTax <= 0) {
+    // Nothing to defer — every line is earned now.
     return {
       entries: [buildMonthlyEntry(event, invoice, gross, fee, net, taxInBT, btCurrency, cashFxContext)],
       schedule: null,
     };
   }
 
-  const months = periodMonths(invoice);
-  const preTax = cents(gross - taxInBT);
-  // Customer-side preTax for the schedule anchor: `amount_paid - tax` is
-  // the recognized-revenue portion in customer currency. Pro-rated across
-  // months in the schedule builder.
-  const customerPreTax = Math.max(invoice.amount_paid - invoiceTax, 0);
+  if (immediatePreTax <= 0) {
+    // Everything is deferred — a single-term subscription invoice. Schedule
+    // anchored on the whole customer pre-tax amount, exactly as before.
+    const customerPreTax = Math.max(invoice.amount_paid - invoiceTax, 0);
+    const scheduleFxAnchor =
+      cashFxContext !== undefined
+        ? {
+            customerCurrency: invoice.currency,
+            customerPreTax,
+            settlementCurrency: bt.currency,
+          }
+        : undefined;
+    return {
+      entries: [buildAnnualCashEntry(event, invoice, gross, fee, net, taxInBT, btCurrency, cashFxContext)],
+      schedule: buildRecognitionSchedule(event, invoice, preTax, months, btCurrency, scheduleFxAnchor),
+    };
+  }
+
+  // Mixed invoice: recognize the immediate portion now (4000) and defer the
+  // rest (2100), then draw the deferred portion down over its term. Tax is a
+  // liability owed at collection regardless of recognition timing, so it stays
+  // wholly in 2000 on the cash entry and is never deferred. The schedule is
+  // anchored on the DEFERRED customer amount so its FX pro-rating covers only
+  // the deferred slice.
   const scheduleFxAnchor =
     cashFxContext !== undefined
       ? {
           customerCurrency: invoice.currency,
-          customerPreTax,
+          customerPreTax: deferredCustomer,
           settlementCurrency: bt.currency,
         }
       : undefined;
   return {
-    entries: [buildAnnualCashEntry(event, invoice, gross, fee, net, taxInBT, btCurrency, cashFxContext)],
-    schedule: buildRecognitionSchedule(event, invoice, preTax, months, btCurrency, scheduleFxAnchor),
+    entries: [
+      buildMixedCashEntry(
+        event,
+        invoice,
+        cents(immediatePreTax),
+        cents(deferredPreTax),
+        fee,
+        net,
+        taxInBT,
+        btCurrency,
+        cashFxContext,
+      ),
+    ],
+    schedule: buildRecognitionSchedule(
+      event,
+      invoice,
+      cents(deferredPreTax),
+      months,
+      btCurrency,
+      scheduleFxAnchor,
+    ),
   };
 }

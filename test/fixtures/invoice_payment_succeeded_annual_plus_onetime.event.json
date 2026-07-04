@@ -1,0 +1,81 @@
+{
+  "id": "evt_test_invoice_annual_plus_onetime_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "invoice.payment_succeeded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "in_test_annual_plus_onetime_001",
+      "object": "invoice",
+      "amount_due": 150000,
+      "amount_paid": 150000,
+      "amount_remaining": 0,
+      "billing_reason": "subscription_create",
+      "charge": {
+        "id": "ch_test_annual_plus_onetime_001",
+        "object": "charge",
+        "amount": 150000,
+        "balance_transaction": {
+          "id": "txn_test_annual_plus_onetime_001",
+          "object": "balance_transaction",
+          "amount": 150000,
+          "currency": "usd",
+          "exchange_rate": null,
+          "fee": 4500,
+          "fee_details": [
+            { "amount": 4500, "currency": "usd", "description": "Stripe processing fees", "type": "stripe_fee" }
+          ],
+          "net": 145500,
+          "reporting_category": "charge",
+          "status": "available",
+          "type": "charge",
+          "created": 1736942400,
+          "available_on": 1737158400
+        },
+        "currency": "usd",
+        "paid": true,
+        "status": "succeeded"
+      },
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_annual_plus_onetime_001",
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_test_annual_line_001",
+            "object": "line_item",
+            "amount": 120000,
+            "currency": "usd",
+            "description": "Annual plan",
+            "period": { "start": 1736942400, "end": 1768478400 },
+            "proration": false,
+            "subscription": "sub_test_annual_plus_onetime_001",
+            "type": "subscription"
+          },
+          {
+            "id": "il_test_onetime_setup_001",
+            "object": "line_item",
+            "amount": 30000,
+            "currency": "usd",
+            "description": "One-time onboarding fee",
+            "period": { "start": 1736942400, "end": 1736942400 },
+            "proration": false,
+            "type": "invoiceitem"
+          }
+        ],
+        "has_more": false,
+        "total_count": 2,
+        "url": "/v1/invoices/in_test_annual_plus_onetime_001/lines"
+      },
+      "paid": true,
+      "status": "paid",
+      "subscription": "sub_test_annual_plus_onetime_001",
+      "total": 150000
+    }
+  }
+}
