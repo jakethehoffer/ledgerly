@@ -13,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-638 tests · 13 event types · 40 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+641 tests · 13 event types · 41 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -82,7 +82,7 @@ each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue
 total recognized                $1200.00
 ```
 
-The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs). It imports the same public API you'd use after `npm i ledgerly`. Refunds, disputes, payouts, and multi-currency charges all live in [`test/fixtures/`](./test/fixtures), and the refund fixtures cover proportional sales-tax drains and realized FX gain/loss. Feed any of the 40 fixtures through `mapEvent` to see its entry shape.
+The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs). It imports the same public API you'd use after `npm i ledgerly`. Refunds, disputes, payouts, and multi-currency charges all live in [`test/fixtures/`](./test/fixtures), and the refund fixtures cover proportional sales-tax drains and realized FX gain/loss. Feed any of the 41 fixtures through `mapEvent` to see its entry shape.
 
 ## Why ledgerly?
 
@@ -101,7 +101,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.2.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.2.1
 ```
 
 ### Use the engine as a library
@@ -791,7 +791,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.2.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.2.1
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -821,7 +821,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ghcr.io/jakethehoffer/ledgerly:v0.2.0
+  ghcr.io/jakethehoffer/ledgerly:v0.2.1
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -877,7 +877,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.2.0 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.2.1 \
   --repo jakethehoffer/ledgerly
 ```
 

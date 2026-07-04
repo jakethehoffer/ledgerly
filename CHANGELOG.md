@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.2.1] — 2026-07-04
+
+### Fixed
+
+- **One-off invoices no longer error on the webhook.** A pure one-time invoice —
+  no subscription, every line a one-off item with an instant period
+  (`period.start === period.end`) — tripped the "no line-item periods; cannot
+  classify subscription term" guard and threw, 500ing the webhook and forcing
+  Stripe to retry a legitimate invoice indefinitely (a one-off consulting or
+  usage charge, say). Per-line recognition treats it as all-immediate and books
+  it now; the term calculation is only reached once a genuinely deferred line
+  exists, so it never sees a zero span. Monthly, annual, and mixed invoices are
+  byte-identical.
+
 ## [0.2.0] — 2026-07-04
 
 ### Added
@@ -822,6 +836,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.2.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.2.0
 [0.1.16]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.16
 [0.1.15]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.15
