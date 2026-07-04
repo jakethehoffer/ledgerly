@@ -391,13 +391,14 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   // stops a one-time setup fee that rides on an annual invoice from being
   // deferred over 12 months alongside the subscription.
   //
-  // `periodSpanDays` still runs first to preserve the "no line periods" guard.
   // Pure single-term invoices reduce to the monthly / annual paths below with
   // byte-identical output: an all-immediate invoice has deferredPreTax = 0
   // (monthly path), an all-deferred invoice has immediatePreTax = 0 (annual
-  // path with the same `amount_paid - tax` schedule anchor as before).
-  periodSpanDays(invoice);
-  const months = periodMonths(invoice);
+  // path with the same `amount_paid - tax` schedule anchor as before). A pure
+  // one-time invoice (every line has an instant period, e.g. a one-off
+  // consulting charge) is all-immediate, so it recognizes now instead of
+  // throwing "no line periods" — `periodMonths` is only computed once we know
+  // a deferred line exists (span > threshold > 0), so it never sees a zero span.
   const preTax = cents(gross - taxInBT);
 
   const { immediateCustomer, deferredCustomer } = partitionLineAmounts(invoice);
@@ -417,6 +418,10 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
       schedule: null,
     };
   }
+
+  // A deferred portion exists, so at least one line spans longer than a month:
+  // periodMonths (→ periodSpanDays) has a positive max span and won't throw.
+  const months = periodMonths(invoice);
 
   if (immediatePreTax <= 0) {
     // Everything is deferred — a single-term subscription invoice. Schedule

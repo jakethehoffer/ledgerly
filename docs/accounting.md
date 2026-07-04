@@ -86,6 +86,10 @@ Cr  4000 Subscription Revenue              $100.00
 ```
 *(`invoice_payment_succeeded_monthly`)*
 
+A **one-off invoice** with no subscription — every line a one-time item with an
+instant period — is earned now too, and books the same immediate shape.
+*(`invoice_payment_succeeded_one_time_only`)*
+
 ### Annual (period > ~1 month) — defer, then recognize monthly
 
 A customer pays $1,200 up front for a year. You have the cash, but you have *not*
