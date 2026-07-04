@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Stripe from 'stripe';
 import { mapEvent } from '../src/engine.js';
-import { UnhandledEventError } from '../src/errors.js';
+import { MissingExpansionError, UnhandledEventError } from '../src/errors.js';
 import { checkBalance } from '../src/journal.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +33,43 @@ describe('mapEvent unknown event', () => {
     expect(() => mapEvent(event)).toThrow(UnhandledEventError);
     expect(() => mapEvent(event)).toThrow(/foo\.bar\.baz/);
     expect(() => mapEvent(event)).toThrow(/evt_unknown_001/);
+  });
+});
+
+describe('invoice.payment_succeeded charge presence', () => {
+  // A credit-balance / out-of-band-paid invoice (charge === null, amount_paid > 0)
+  // is acknowledged with no entry — see the paid_from_credit_balance fixture.
+  // But a charge present as an UNEXPANDED string id is a caller error (they
+  // forgot to expand it): that must still throw, not silently no-op, or the
+  // engine would drop a real cash-bearing invoice.
+  it('throws MissingExpansionError when charge is an unexpanded string id', () => {
+    const event = {
+      id: 'evt_invoice_unexpanded_charge_001',
+      type: 'invoice.payment_succeeded',
+      created: 1736942400,
+      data: {
+        object: {
+          id: 'in_unexpanded_001',
+          object: 'invoice',
+          amount_paid: 5000,
+          currency: 'usd',
+          charge: 'ch_unexpanded_001',
+          lines: {
+            object: 'list',
+            data: [
+              {
+                amount: 5000,
+                currency: 'usd',
+                period: { start: 1736942400, end: 1739620800 },
+              },
+            ],
+            has_more: false,
+          },
+        },
+      },
+    } as unknown as Stripe.Event;
+
+    expect(() => mapEvent(event)).toThrow(MissingExpansionError);
   });
 });
 

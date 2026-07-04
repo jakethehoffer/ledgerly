@@ -129,6 +129,13 @@ Cr  2000 Sales Tax Payable           (tax collected)
 An invoice with `amount_paid` of $0 (e.g. a fully-discounted or $0 trial invoice)
 produces no entry.
 
+An invoice paid **without a charge** — entirely from the customer's credit
+balance, or marked paid out of band (`charge` is `null`) — also produces no
+entry. No cash moved through the Stripe balance on this event, and ledgerly
+doesn't model customer credit balances (see [Known limitations](#known-limitations)),
+so it acknowledges the event rather than booking a leg it can't balance.
+*(`invoice_payment_succeeded_paid_from_credit_balance`)*
+
 ## A refund: `charge.refunded`
 
 You refund a $100 sale. The money leaves your Stripe balance, and the sale is
@@ -304,6 +311,10 @@ These are deliberate gaps, documented rather than approximated:
 - **B2B accounts-receivable** (invoice issued now, paid later) — account 1100 is
   reserved but the flow isn't implemented; today's handlers assume
   charge-at-invoice.
+- **Customer credit balances / out-of-band payments** — an invoice paid with no
+  charge (`charge` is `null`) is acknowledged with no entry rather than booked.
+  Modeling it would need a customer-credit liability account and handling of the
+  credit-note events that create the balance, neither of which exists yet.
 - **Multi-period FX revaluation** — exposed via `fxContext`, not auto-posted (see
   above).
 - **Cross-currency payouts** — rejected with a clear error (see above).

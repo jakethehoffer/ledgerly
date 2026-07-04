@@ -246,6 +246,24 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
     );
   }
 
+  // An invoice can be paid without a charge: entirely from the customer's
+  // credit balance, or marked paid out of band. There's no charge and no
+  // balance transaction, so no cash moved through the Stripe balance on this
+  // event. ledgerly doesn't model the customer-credit-balance / out-of-band
+  // mechanics (there's no customer-credit liability account, and the credit
+  // itself is created by events — credit notes — the engine doesn't handle),
+  // so a fabricated entry would be wrong and can't be balanced. Acknowledge
+  // with no entry, like the other no-accounting-impact events, rather than
+  // throwing and forcing Stripe into a perpetual webhook-retry loop.
+  //
+  // This is specifically `charge` being ABSENT (null — Stripe always sends the
+  // field, set to null, for these invoices). A charge present as an unexpanded
+  // string id still throws below via getCharge — that is a caller error (forgot
+  // to expand), not a credit-balance invoice.
+  if (invoice.charge === null) {
+    return { entries: [], schedule: null };
+  }
+
   const charge = getCharge(invoice, event.id);
   const bt = getBalanceTxn(charge, event.id);
 
