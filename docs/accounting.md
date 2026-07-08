@@ -581,12 +581,17 @@ These are deliberate gaps, documented rather than approximated:
   `credit_note.voided` undoes it symmetrically (invert the draw-down entry,
   re-inflate the schedule). See
   [Crediting a deferred-schedule invoice](#crediting-a-deferred-schedule-invoice).
-  One gap and one residual remain: an **FX-bearing** deferred draw-down (the
-  schedule's settlement currency differs from the credit's currency) is refused
-  rather than approximated; and when a deferred credit is later voided, any months
-  that recognized at the reduced rate **between** the credit and its void are not
-  retroactively re-recognized — the re-inflated remaining months restore the
-  lifetime total, but that specific timing is not (a bounded residual).
+  Remaining gaps: an **FX-bearing** deferred draw-down (the schedule's settlement
+  currency differs from the credit's currency) is refused rather than approximated;
+  voiding a deferred credit whose schedule has **no remaining pending rows** (the
+  draw-down cancelled the whole tail, or every remaining month posted before a
+  late-arriving void) is **refused** — there are no future months to re-spread the
+  restored deferred amount onto, so rather than strand it in 2100 the receiver
+  errors and an operator posts the correction; and when a deferred credit is voided
+  while pending rows remain, any months that recognized at the reduced rate
+  **between** the credit and its void are not retroactively re-recognized — the
+  re-inflated remaining months restore the lifetime total, but that specific timing
+  is not (a bounded residual).
 - **Multi-period FX revaluation** — exposed via `fxContext`, not auto-posted (see
   above).
 - **Cross-currency payouts** — rejected with a clear error (see above).

@@ -256,6 +256,10 @@ export function buildCreditVoidReconcileInput(event: Stripe.Event): CreditVoidRe
     ): { reversal: JournalEntry; reissuedSchedule: RecognitionSchedule | null } | null {
       if (drawDown.length === 0) return null; // nothing booked → voiding is a no-op
 
+      // No FX re-check is needed here: the create-side reconciler refuses (throws,
+      // never persists) any FX-bearing draw-down, so a draw-down entry can only
+      // exist for a same-currency invoice. We invert that stored entry as-is.
+      //
       // Invert the draw-down entry (or entries) line-for-line: a debit becomes a
       // credit and vice versa, restoring every account the draw-down touched.
       const invertedLines: JournalLine[] = drawDown
@@ -289,6 +293,27 @@ export function buildCreditVoidReconcileInput(event: Stripe.Event): CreditVoidRe
         }
       }
       const pendingSum = pending.reduce((sum, e) => sum + recognitionAmount(e), 0);
+
+      // The draw-down removed `deferredReduction` from the schedule, and voiding
+      // it must put that back onto the remaining months. If there are no pending
+      // rows left to re-spread onto — the draw-down cancelled the whole tail, or
+      // the remaining months all posted before this (late-arriving) void — the
+      // future dates are gone, so re-inflating would silently strand the restored
+      // revenue in 2100 with no schedule to recognize it. Refuse loudly instead
+      // (Decision 8's fallback), so an operator posts the correction rather than
+      // the ledger quietly losing a recognition path. `deferredReduction === 0`
+      // (a pure-clawback credit) has nothing to restore and is unaffected.
+      if (deferredReduction > 0 && pending.length === 0) {
+        throw new Error(
+          `Cannot reconcile the void of credit note ${creditNote.id} against ` +
+            `invoice ${invoice.id}: the draw-down deferred ${String(deferredReduction)} ` +
+            `but the recognition schedule has no remaining pending rows to re-spread ` +
+            `onto (all recognized or cancelled). Re-inflating would strand that ` +
+            `amount in 2100 with no schedule to drain it. Refusing rather than ` +
+            `mis-recognizing — post the correction manually.`,
+        );
+      }
+
       const reissuedSchedule = buildReducedSchedule(pending, pendingSum + deferredReduction, {
         subscriptionId,
         sourceEventId: event.id,

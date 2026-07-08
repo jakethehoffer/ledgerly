@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.9.1] — 2026-07-08
+
+### Fixed
+
+- **Voiding a deferred-credit draw-down no longer silently strands deferred
+  revenue.** When a `credit_note.voided` reconciliation found no remaining pending
+  schedule rows to re-spread the restored deferred amount onto (the draw-down had
+  cancelled the whole tail, or every remaining month posted before a late-arriving
+  void), it restored `Cr 2100` but reissued no schedule — leaving that amount in
+  2100 with no way to ever recognize it, with no error. The receiver now **refuses**
+  this case with a clear error (so an operator posts the correction) instead of
+  mis-recognizing or stranding it. Regression tests added for this and for
+  crediting a fully-recognized deferred invoice (zero pending rows).
+
 ## [0.9.0] — 2026-07-08
 
 ### Added

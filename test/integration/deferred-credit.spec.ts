@@ -250,6 +250,57 @@ describe('integration: deferred-schedule credit reconciliation (draw-down)', () 
     expect(balances['2100']).toBeUndefined(); // deferred drained, none stranded
   });
 
+  it('crediting a fully-recognized deferred invoice claws back recognized revenue (zero pending rows)', () => {
+    const storage = inMemoryStorage();
+    const finalized = loadEvent('invoice_finalized_send_invoice_annual');
+    storage.persistMapResult(finalized.id, mapEvent(finalized));
+    // Post ALL 12 months — the invoice is fully recognized, nothing deferred left.
+    for (const row of scheduleRows(storage)) storage.entries.markScheduledPosted(row.id);
+
+    const credit = creditNoteAgainstAnnual({
+      eventId: 'evt_credit_fully_recognized',
+      type: 'pre_payment',
+      subtotal: 30000,
+      tax: 0,
+    });
+    storage.persistCreditReversal(credit.id, buildCreditReconcileInput(credit));
+
+    // With no deferred balance to reduce, the whole credit claws back recognized
+    // revenue — the same shape a non-deferred credit produces.
+    const rev = computeBalances(storage.entries.findByEventId(credit.id).map((r) => r.entry));
+    expect(rev['4000']).toBe(30000);
+    expect(rev['1100']).toBe(-30000);
+    expect(rev['2100']).toBeUndefined();
+    expect(scheduleRows(storage).filter((r) => r.status === 'pending')).toHaveLength(0);
+  });
+
+  it('refuses to void a deferred draw-down when no pending rows remain to re-spread onto (never silently strands deferred revenue)', () => {
+    const storage = inMemoryStorage();
+    const finalized = loadEvent('invoice_finalized_send_invoice_annual');
+    storage.persistMapResult(finalized.id, mapEvent(finalized));
+    for (const row of scheduleRows(storage).slice(0, 3)) storage.entries.markScheduledPosted(row.id);
+
+    // Credit the FULL remaining $900 — cancels all 9 pending rows, reissues none.
+    const credit = creditNoteAgainstAnnual({
+      eventId: 'evt_full_credit',
+      type: 'pre_payment',
+      subtotal: 90000,
+      tax: 0,
+    });
+    storage.persistCreditReversal(credit.id, buildCreditReconcileInput(credit));
+    expect(scheduleRows(storage).filter((r) => r.status === 'pending')).toHaveLength(0);
+
+    // Voiding it would restore $900 to 2100 but there are no months left to
+    // re-spread onto — refuse loudly rather than strand the revenue in 2100.
+    const voidEvent = JSON.parse(JSON.stringify(credit)) as Stripe.Event;
+    (voidEvent as { id: string }).id = 'evt_full_credit_void';
+    (voidEvent as { type: string }).type = 'credit_note.voided';
+    (voidEvent.data.object as unknown as { status: string }).status = 'void';
+    expect(() =>
+      storage.persistCreditVoidReversal(voidEvent.id, buildCreditVoidReconcileInput(voidEvent)),
+    ).toThrow(/pending|re-spread|strand/i);
+  });
+
   it('pure engine refuses (throws) voiding a credit note against a deferred invoice', () => {
     const credit = creditNoteAgainstAnnual({
       eventId: 'evt_credit_void_throw',
