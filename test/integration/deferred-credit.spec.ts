@@ -12,6 +12,7 @@ import {
   creditNoteVoidNeedsReconcile,
 } from '../../src/server/creditReconciler.js';
 import { creditNoteHasDeferredSchedule } from '../../src/events/creditNotes/shared.js';
+import type { SavedScheduledEntry } from '../../src/server/storage/types.js';
 import { computeBalances } from '../helpers/balances.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -68,7 +69,7 @@ function creditNoteAgainstAnnual(opts: {
   } as unknown as Stripe.Event;
 }
 
-function scheduleRows(storage: ReturnType<typeof inMemoryStorage>) {
+function scheduleRows(storage: ReturnType<typeof inMemoryStorage>): SavedScheduledEntry[] {
   return storage.entries
     .findScheduledBySubscription(SUB_ID)
     .filter((row) => row.entry.sourceObjectId === INVOICE_ID);
