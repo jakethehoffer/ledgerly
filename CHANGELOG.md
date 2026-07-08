@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [Unreleased]
+
+### Added
+
+- **Credit notes on open B2B invoices** (`credit_note.created`). A *pre-payment*
+  credit note against a net-terms (`send_invoice`) invoice reduces the receivable
+  and reverses the credited revenue and tax — Dr 4000 (credit note subtotal),
+  Dr 2000 (credit note tax), Cr 1100 (credit note total). The credit note carries
+  its own subtotal/total, so partial credits are booked exactly with no
+  proportioning. Other shapes are acknowledged with no entry rather than
+  mis-posted or 500-looped: *post-payment* credit notes (any refund is booked by
+  `charge.refunded`; customer-balance credits need a liability account that
+  doesn't exist yet), `charge_automatically` invoices (never booked a
+  receivable), and pre-payment credits against a deferred-schedule invoice (a
+  partial credit must draw the recognition schedule down proportionally — not yet
+  modeled). No new accounts. The webhook receiver expands the credit note's
+  `invoice` so the engine can read its collection method and line periods.
+
 ## [0.5.0] — 2026-07-08
 
 ### Added

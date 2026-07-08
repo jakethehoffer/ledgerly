@@ -250,6 +250,25 @@ balance (Dr 2100), reversing the receivable (Cr 1100), and cancelling the
 still-pending schedule rows — so every account the invoice touched returns to
 zero no matter when the void arrives.
 
+**If you credit part of an open invoice** (`credit_note.created`, a *pre-payment*
+credit note), the customer owes less. Unlike a void, a credit note is usually
+*partial* — the credit note carries its own `subtotal` and `total`, so ledgerly
+reverses exactly that slice against the receivable:
+
+```
+Dr  4000 Subscription Revenue      $100.00     (credit note subtotal)
+Dr  2000 Sales Tax Payable           $8.00     (credit note tax)
+Cr  1100 Accounts Receivable               $108.00      (credit note total)
+```
+
+The receivable drops by the credited total and the rest of the invoice stands.
+*(`credit_note_created_send_invoice_prepayment`)* Only pre-payment credits on
+`send_invoice` invoices with no deferred schedule are booked; a *post-payment*
+credit note (the invoice was already paid) is a no-op here because any cash
+returned is booked by `charge.refunded`, and a credit note against a deferred
+invoice is a no-op until a proportional schedule draw-down is modeled — see
+[Known limitations](#known-limitations).
+
 ## A refund: `charge.refunded`
 
 You refund a $100 sale. The money leaves your Stripe balance, and the sale is
@@ -442,6 +461,15 @@ These are deliberate gaps, documented rather than approximated:
   charge (`charge` is `null`) is acknowledged with no entry rather than booked.
   Modeling it would need a customer-credit liability account and handling of the
   credit-note events that create the balance, neither of which exists yet.
+- **Credit notes beyond the pre-payment / no-deferred case** (`credit_note.created`).
+  A pre-payment credit note against a `send_invoice` invoice with no deferred
+  schedule reduces the receivable and reverses the credited revenue and tax. The
+  other shapes are acknowledged with no entry: a *post-payment* credit note (any
+  refund is booked by `charge.refunded`; a customer-balance credit needs the
+  liability account above), and a *pre-payment* credit against a deferred invoice
+  (a partial credit must draw the recognition schedule down proportionally — the
+  stateful problem `invoice.voided` solves in the server, not yet generalized to
+  credit notes).
 - **Multi-period FX revaluation** — exposed via `fxContext`, not auto-posted (see
   above).
 - **Cross-currency payouts** — rejected with a clear error (see above).

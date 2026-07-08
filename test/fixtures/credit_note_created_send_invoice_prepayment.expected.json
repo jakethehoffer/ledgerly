@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-03-01",
+      "currency": "USD",
+      "memo": "Stripe credit note cn_test_prepayment_001 (invoice in_test_finalized_b2b_monthly_001)",
+      "sourceEventId": "evt_test_credit_note_prepayment_001",
+      "sourceEventType": "credit_note.created",
+      "sourceObjectId": "cn_test_prepayment_001",
+      "lines": [
+        { "accountCode": "2000", "side": "debit", "amount": 800, "memo": "Sales tax reversed — credit note" },
+        { "accountCode": "4000", "side": "debit", "amount": 10000, "memo": "Revenue reversed — credit note" },
+        { "accountCode": "1100", "side": "credit", "amount": 10800, "memo": "Receivable reduced — credit note" }
+      ]
+    }
+  ],
+  "schedule": null
+}

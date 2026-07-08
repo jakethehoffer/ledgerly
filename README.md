@@ -221,6 +221,7 @@ If `charge.invoice` is not expanded, meaning a string ID or null, refunds are bo
 | `invoice.marked_uncollectible` | B2B net-terms write-off to bad debt; charge_automatically no-op |
 | `invoice.voided` | B2B net-terms reversal; charge_automatically no-op; deferred-schedule voids reconciled statefully by the server (pure engine refuses them) |
 | `invoice.payment_succeeded` | monthly, annual-deferred, with-tax, annual-with-tax, with-app-fee, prorated-upgrade, prorated-downgrade, one-time-only, credit-balance, B2B send_invoice (clears AR) |
+| `credit_note.created` | B2B net-terms pre-payment credit reduces AR + reverses revenue/tax; post-payment / deferred-schedule / charge_automatically acknowledged as no-op |
 | `invoice.payment_failed` | informational |
 | `customer.subscription.updated` | informational |
 | `customer.subscription.deleted` | informational |

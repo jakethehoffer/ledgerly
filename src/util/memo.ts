@@ -26,6 +26,12 @@ export function invoiceMemo(invoice: Stripe.Invoice): string {
   return `Stripe invoice ${invoice.id} (customer ${customerLabel(invoice.customer)})`;
 }
 
+export function creditNoteMemo(creditNote: Stripe.CreditNote): string {
+  const invoice = creditNote.invoice;
+  const invoiceId = typeof invoice === 'string' ? invoice : invoice.id;
+  return `Stripe credit note ${creditNote.id} (invoice ${invoiceId})`;
+}
+
 export function payoutMemo(payout: Stripe.Payout, kind: 'paid' | 'failed' = 'paid'): string {
   const destLabel = destinationLabel(payout.destination);
   if (kind === 'failed') {
