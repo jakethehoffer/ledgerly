@@ -2,6 +2,7 @@ import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal
 import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
 import type {
   CreditReconcileInput,
+  CreditVoidReconcileInput,
   Deduplicator,
   JournalEntryStore,
   OAuthTokenStore,
@@ -94,6 +95,10 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
 
     findByEventId(eventId: string): SavedImmediateEntry[] {
       return immediate.filter((row) => row.eventId === eventId);
+    },
+
+    findImmediateBySourceObject(objectId: string): SavedImmediateEntry[] {
+      return immediate.filter((row) => row.entry.sourceObjectId === objectId);
     },
 
     findPendingScheduled(asOfDate: string, now: number = Date.now()): SavedScheduledEntry[] {
@@ -376,6 +381,49 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       if (reducedSchedule) {
         for (const entry of reducedSchedule.entries) {
           entries.saveScheduled(entry, reducedSchedule);
+        }
+      }
+      dedup.record(eventId, now);
+      return { duplicate: false };
+    },
+    persistCreditVoidReversal(
+      eventId: string,
+      input: CreditVoidReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      // Read the draw-down's immediate entry (by credit-note id) and the invoice's
+      // current recognition rows, build the inverse + re-inflated schedule, then —
+      // only if a draw-down was found — cancel the current pending rows, post the
+      // reversal, and enqueue the re-inflated schedule.
+      if (dedup.has(eventId)) return { duplicate: true };
+      const drawDown = entries
+        .findImmediateBySourceObject(input.creditNoteId)
+        .map((row) => row.entry);
+      const rows = entries
+        .findScheduledBySubscription(input.subscriptionId)
+        .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+      const pending = rows
+        .filter((row) => row.status === 'pending' || row.status === 'failed')
+        .map((row) => row.entry);
+      const result = input.build(drawDown, pending);
+      if (result === null) {
+        // The credit note was never booked as a draw-down; voiding is a no-op.
+        dedup.record(eventId, now);
+        return { duplicate: false };
+      }
+      for (const row of rows) {
+        if (row.status === 'pending' || row.status === 'failed') {
+          entries.cancelScheduled(row.id);
+        }
+      }
+      entries.saveImmediate(result.reversal, eventId);
+      entries.saveScheduled(result.reversal, {
+        subscriptionId: `immediate:${result.reversal.sourceEventId}`,
+        sourceEventId: result.reversal.sourceEventId,
+      });
+      if (result.reissuedSchedule) {
+        for (const entry of result.reissuedSchedule.entries) {
+          entries.saveScheduled(entry, result.reissuedSchedule);
         }
       }
       dedup.record(eventId, now);

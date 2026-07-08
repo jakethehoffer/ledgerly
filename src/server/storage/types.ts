@@ -100,6 +100,14 @@ export interface JournalEntryStore {
   findByEventId(eventId: string): SavedImmediateEntry[];
 
   /**
+   * Query: immediate entries whose `sourceObjectId` matches, oldest-first. Used by
+   * the credit-void reconciler to find the draw-down entry a deferred
+   * `credit_note.created` posted (keyed by the credit-note id) so a later
+   * `credit_note.voided` can invert it exactly.
+   */
+  findImmediateBySourceObject(objectId: string): SavedImmediateEntry[];
+
+  /**
    * Query: pending scheduled entries due for dispatch. Filter:
    * `status='pending'` AND `scheduled_date <= asOfDate` AND
    * (`next_attempt_at IS NULL` OR `next_attempt_at <= now`).
@@ -286,6 +294,28 @@ export interface CreditReconcileInput {
 }
 
 /**
+ * Input to {@link Storage.persistCreditVoidReversal}. Describes voiding a credit
+ * note that was booked as a deferred draw-down: the invoice's schedule to
+ * re-inflate, and the credit note whose draw-down entry must be inverted.
+ *
+ * The storage layer reads the draw-down's immediate entry (by `creditNoteId`) and
+ * the invoice's current recognition rows, hands both to `build`, then — if `build`
+ * returns a reversal (i.e. a draw-down was found) — cancels the current pending
+ * rows, posts the `reversal`, and enqueues the `reissuedSchedule`. `build` returns
+ * `null` when no draw-down entry exists (the credit note was never booked this
+ * way), in which case voiding is a no-op and the schedule is left untouched.
+ */
+export interface CreditVoidReconcileInput {
+  readonly subscriptionId: string;
+  readonly invoiceId: string;
+  readonly creditNoteId: string;
+  readonly build: (
+    drawDown: ReadonlyArray<JournalEntry>,
+    pendingRecognition: ReadonlyArray<JournalEntry>,
+  ) => { reversal: JournalEntry; reissuedSchedule: RecognitionSchedule | null } | null;
+}
+
+/**
  * Aggregate persistence handle bundling a deduplicator and journal entry store.
  *
  * `persistMapResult` is the single-call entry point the server uses after a
@@ -372,6 +402,23 @@ export interface Storage {
   persistCreditReversal(
     eventId: string,
     input: CreditReconcileInput,
+    now?: number,
+  ): PersistResult;
+
+  /**
+   * Persist the reversal of a voided deferred-credit draw-down, and record
+   * `eventId` as processed. Idempotent like {@link persistVoidReversal}.
+   *
+   * In one transaction: claim `eventId`; read the draw-down's immediate entry
+   * (by `input.creditNoteId`) and the invoice's recognition rows; call
+   * `input.build`. If it returns `null` (nothing was booked for this credit note),
+   * record and return without touching the schedule. Otherwise cancel the current
+   * pending rows, persist the returned `reversal` as an immediate posting, and
+   * enqueue the returned `reissuedSchedule` (the re-inflated remaining recognition).
+   */
+  persistCreditVoidReversal(
+    eventId: string,
+    input: CreditVoidReconcileInput,
     now?: number,
   ): PersistResult;
 }

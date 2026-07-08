@@ -6,7 +6,12 @@ import { voidHasDeferredSchedule } from '../events/invoices/invoiceVoided.js';
 import { adminAuthMiddleware } from './admin.js';
 import { expandEvent } from './expand.js';
 import { buildVoidReconcileInput } from './voidReconciler.js';
-import { buildCreditReconcileInput, creditNoteNeedsReconcile } from './creditReconciler.js';
+import {
+  buildCreditReconcileInput,
+  buildCreditVoidReconcileInput,
+  creditNoteNeedsReconcile,
+  creditNoteVoidNeedsReconcile,
+} from './creditReconciler.js';
 import { consoleLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import { inMemoryMetrics } from './metrics.js';
@@ -190,6 +195,43 @@ function resolveStorage(config: ServerConfig): Storage {
         if (reducedSchedule) {
           for (const entry of reducedSchedule.entries) {
             base.entries.saveScheduled(entry, reducedSchedule);
+          }
+        }
+        customDedup.record(eventId, now);
+        return { duplicate: false };
+      },
+      persistCreditVoidReversal(eventId, input, now = Date.now()): PersistResult {
+        // Mirrors the first-class backends' credit-void reconciliation against the
+        // caller's deduplicator: invert the draw-down entry and re-inflate the
+        // schedule, or no-op if the credit note was never booked as a draw-down.
+        if (customDedup.has(eventId)) return { duplicate: true };
+        const drawDown = base.entries
+          .findImmediateBySourceObject(input.creditNoteId)
+          .map((row) => row.entry);
+        const rows = base.entries
+          .findScheduledBySubscription(input.subscriptionId)
+          .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+        const pending = rows
+          .filter((row) => row.status === 'pending' || row.status === 'failed')
+          .map((row) => row.entry);
+        const result = input.build(drawDown, pending);
+        if (result === null) {
+          customDedup.record(eventId, now);
+          return { duplicate: false };
+        }
+        for (const row of rows) {
+          if (row.status === 'pending' || row.status === 'failed') {
+            base.entries.cancelScheduled(row.id);
+          }
+        }
+        base.entries.saveImmediate(result.reversal, eventId);
+        base.entries.saveScheduled(result.reversal, {
+          subscriptionId: `immediate:${result.reversal.sourceEventId}`,
+          sourceEventId: result.reversal.sourceEventId,
+        });
+        if (result.reissuedSchedule) {
+          for (const entry of result.reissuedSchedule.entries) {
+            base.entries.saveScheduled(entry, result.reissuedSchedule);
           }
         }
         customDedup.record(eventId, now);
@@ -380,6 +422,29 @@ export function createServer(config: ServerConfig): ServerInstance {
           metrics.inc('webhook_error', { type: event.type });
           log.error('Credit reconciliation failed', { eventId: event.id, err });
           res.status(500).json({ error: 'Credit reconciliation failed' });
+          return;
+        }
+        entryCount = 1;
+        scheduleEntryCount = 0;
+        hasSchedule = false;
+      } else if (
+        expanded.type === 'credit_note.voided' &&
+        creditNoteVoidNeedsReconcile(expanded)
+      ) {
+        // Voiding a credit note that was booked as a deferred draw-down can't be
+        // un-booked by the stateless engine (mapEvent would throw): it must invert
+        // the draw-down entry and re-inflate the schedule. Reconcile against the
+        // ledger — the read + inverse + reissue happen atomically inside
+        // persistCreditVoidReversal (a no-op if this credit note was never booked).
+        try {
+          persistResult = storage.persistCreditVoidReversal(
+            event.id,
+            buildCreditVoidReconcileInput(expanded),
+          );
+        } catch (err) {
+          metrics.inc('webhook_error', { type: event.type });
+          log.error('Credit-void reconciliation failed', { eventId: event.id, err });
+          res.status(500).json({ error: 'Credit-void reconciliation failed' });
           return;
         }
         entryCount = 1;

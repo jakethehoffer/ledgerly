@@ -360,8 +360,16 @@ pre-payment note restores the receivable (Dr 1100, Cr 4000, Cr 2000); a
 post-payment-to-balance note claws the credit back (Dr 2200, Cr 4000, Cr 2000).
 Both events gate on the same conditions, so a void un-books exactly what creation
 booked, and voiding a credit note ledgerly never booked (refund-backed
-post-payment, deferred, a `charge_automatically` pre-payment) is itself a no-op.
+post-payment, a `charge_automatically` pre-payment) is itself a no-op.
 *(`credit_note_voided_send_invoice_prepayment`, `credit_note_voided_post_payment_to_balance`)*
+
+Voiding a credit note that was a **deferred draw-down** is likewise stateful and
+handled by the bundled receiver: it inverts the draw-down's own journal entry
+(restoring 1100/2200, 4000, 2100 and the tax) and re-inflates the recognition
+schedule over the remaining months, so the invoice returns to its pre-credit
+trajectory. Months that recognized at the reduced rate between the credit and its
+void leave a small bounded timing residual (see
+[Known limitations](#known-limitations)).
 
 ## A refund: `charge.refunded`
 
@@ -569,14 +577,16 @@ These are deliberate gaps, documented rather than approximated:
   reversal must draw that schedule down (reduce the still-deferred balance first,
   claw back recognized revenue only if the credit exceeds it, and re-spread the
   remaining months) — stateful, so the pure engine *refuses* it and the bundled
-  receiver reconciles it against the ledger, exactly like a deferred void. See
+  receiver reconciles it against the ledger, exactly like a deferred void — and
+  `credit_note.voided` undoes it symmetrically (invert the draw-down entry,
+  re-inflate the schedule). See
   [Crediting a deferred-schedule invoice](#crediting-a-deferred-schedule-invoice).
-  Two gaps remain: an **FX-bearing** deferred draw-down (the schedule's settlement
-  currency differs from the credit's currency) is refused rather than approximated;
-  and **voiding** a deferred credit note (`credit_note.voided`) is not yet
-  reconciled — the create-side draw-down books, but its symmetric un-draw-down (to
-  restore the schedule if the credit is later voided) stays a no-op for now, so a
-  voided deferred credit note does not undo its draw-down.
+  One gap and one residual remain: an **FX-bearing** deferred draw-down (the
+  schedule's settlement currency differs from the credit's currency) is refused
+  rather than approximated; and when a deferred credit is later voided, any months
+  that recognized at the reduced rate **between** the credit and its void are not
+  retroactively re-recognized — the re-inflated remaining months restore the
+  lifetime total, but that specific timing is not (a bounded residual).
 - **Multi-period FX revaluation** — exposed via `fxContext`, not auto-posted (see
   above).
 - **Cross-currency payouts** — rejected with a clear error (see above).

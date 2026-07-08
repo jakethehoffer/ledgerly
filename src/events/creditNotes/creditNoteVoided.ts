@@ -5,7 +5,11 @@ import { requireExpanded } from '../../errors.js';
 import { epochToUtcDate } from '../../util/dates.js';
 import { sortLines } from '../../util/lines.js';
 import { creditNoteMemo } from '../../util/memo.js';
-import { balanceCreditAmounts, prepaymentCreditAmounts } from './shared.js';
+import {
+  balanceCreditAmounts,
+  creditNoteHasDeferredSchedule,
+  prepaymentCreditAmounts,
+} from './shared.js';
 
 /**
  * `credit_note.voided` — a credit note issued in error is voided. Whatever
@@ -27,11 +31,14 @@ import { balanceCreditAmounts, prepaymentCreditAmounts } from './shared.js';
  *   Cr 2000 Sales Tax Payable        (credit note tax)
  *
  * Cases `credit_note.created` acknowledged with no entry (refund-backed
- * post-payment, a `charge_automatically` pre-payment, a deferred-schedule
- * invoice, zero total) posted nothing, so voiding them is a no-op too. Both
- * handlers gate on the same {@link prepaymentCreditAmounts} /
- * {@link balanceCreditAmounts}, so the void un-books exactly what creation
- * booked — no more, no less.
+ * post-payment, a `charge_automatically` pre-payment, zero total) posted nothing,
+ * so voiding them is a no-op too. Both handlers gate on the same
+ * {@link prepaymentCreditAmounts} / {@link balanceCreditAmounts}, so the void
+ * un-books exactly what creation booked — no more, no less.
+ *
+ * A credit note against a **deferred** invoice is refused here (as its creation
+ * is): undoing the draw-down needs the stateful inverse the bundled receiver
+ * performs against the ledger.
  */
 export function handleCreditNoteVoided(event: Stripe.Event): MapResult {
   if (event.type !== 'credit_note.voided') {
@@ -44,6 +51,20 @@ export function handleCreditNoteVoided(event: Stripe.Event): MapResult {
     'credit_note.invoice',
     event.id,
   );
+
+  // Voiding a credit note that was a deferred draw-down is refused here for the
+  // same reason its creation is: undoing it needs the stateful inverse (restore
+  // the recognized/deferred split and re-inflate the schedule) only the ledger
+  // holds. The bundled receiver routes this to the credit-void reconciler before
+  // mapEvent; this throw is only reached by a direct-engine caller.
+  if (creditNoteHasDeferredSchedule(creditNote, invoice)) {
+    throw new Error(
+      `Voiding a credit note against deferred invoice ${invoice.id} is not ` +
+        `supported by the pure engine: undoing the draw-down needs the stateful ` +
+        `inverse (restore the recognized/deferred split and re-inflate the ` +
+        `schedule) that the bundled receiver performs against the ledger.`,
+    );
+  }
 
   const prepayment = prepaymentCreditAmounts(creditNote, invoice);
   if (prepayment !== null) {

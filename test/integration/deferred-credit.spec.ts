@@ -6,7 +6,11 @@ import type Stripe from 'stripe';
 import type { JournalEntry } from '../../src/journal.js';
 import { mapEvent } from '../../src/engine.js';
 import { inMemoryStorage } from '../../src/server/storage/inMemory.js';
-import { buildCreditReconcileInput } from '../../src/server/creditReconciler.js';
+import {
+  buildCreditReconcileInput,
+  buildCreditVoidReconcileInput,
+  creditNoteVoidNeedsReconcile,
+} from '../../src/server/creditReconciler.js';
 import { creditNoteHasDeferredSchedule } from '../../src/events/creditNotes/shared.js';
 import { computeBalances } from '../helpers/balances.js';
 
@@ -194,6 +198,67 @@ describe('integration: deferred-schedule credit reconciliation (draw-down)', () 
     expect(rev['2100']).toBe(30000); // deferred reduced
     expect(rev['2200']).toBe(-30000); // customer credit balance booked (not 1100)
     expect(rev['1100']).toBeUndefined();
+  });
+
+  it('voiding a deferred draw-down restores the schedule and P&L exactly (create-then-void symmetry)', () => {
+    const storage = inMemoryStorage();
+    const finalized = loadEvent('invoice_finalized_send_invoice_annual');
+    storage.persistMapResult(finalized.id, mapEvent(finalized));
+    for (const row of scheduleRows(storage).slice(0, 3)) storage.entries.markScheduledPosted(row.id);
+
+    // Create a $300 pre-payment draw-down (reduces 2100 by $300, re-spreads $600).
+    const credit = creditNoteAgainstAnnual({
+      eventId: 'evt_credit_drawdown',
+      type: 'pre_payment',
+      subtotal: 30000,
+      tax: 0,
+    });
+    storage.persistCreditReversal(credit.id, buildCreditReconcileInput(credit));
+
+    // Void that same credit note (same credit-note id, new event id).
+    const voidEvent = JSON.parse(JSON.stringify(credit)) as Stripe.Event;
+    (voidEvent as { id: string }).id = 'evt_credit_drawdown_void';
+    (voidEvent as { type: string }).type = 'credit_note.voided';
+    (voidEvent.data.object as unknown as { status: string }).status = 'void';
+
+    expect(creditNoteVoidNeedsReconcile(voidEvent)).toBe(true);
+    storage.persistCreditVoidReversal(voidEvent.id, buildCreditVoidReconcileInput(voidEvent));
+
+    // The schedule is re-inflated to the pre-credit remaining ($900 across 9 rows,
+    // back to $100/mo), and the old reduced rows are cancelled.
+    const pendingAfter = scheduleRows(storage).filter((r) => r.status === 'pending');
+    expect(pendingAfter).toHaveLength(9);
+    const pendingSum = pendingAfter.reduce(
+      (s, r) => s + r.entry.lines.filter((l) => l.accountCode === '4000').reduce((a, l) => a + l.amount, 0),
+      0,
+    );
+    expect(pendingSum).toBe(90000);
+
+    // Post the re-inflated schedule; the invoice's lifetime numbers are exactly as
+    // if the credit had never happened: full contract recognized, full receivable.
+    for (const row of pendingAfter) storage.entries.markScheduledPosted(row.id);
+    const ledger: JournalEntry[] = [
+      ...storage.entries.findByEventId(finalized.id).map((r) => r.entry),
+      ...storage.entries.findByEventId(credit.id).map((r) => r.entry),
+      ...storage.entries.findByEventId(voidEvent.id).map((r) => r.entry),
+      ...storage.entries.listScheduledByStatus('posted').map((r) => r.entry),
+    ];
+    const balances = computeBalances(ledger);
+    expect(balances['1100']).toBe(120000); // receivable fully restored
+    expect(balances['4000']).toBe(-120000); // full contract recognized (credit undone)
+    expect(balances['2100']).toBeUndefined(); // deferred drained, none stranded
+  });
+
+  it('pure engine refuses (throws) voiding a credit note against a deferred invoice', () => {
+    const credit = creditNoteAgainstAnnual({
+      eventId: 'evt_credit_void_throw',
+      type: 'pre_payment',
+      subtotal: 30000,
+      tax: 0,
+    });
+    (credit as { type: string }).type = 'credit_note.voided';
+    (credit.data.object as unknown as { status: string }).status = 'void';
+    expect(() => mapEvent(credit)).toThrow(/deferred/i);
   });
 
   it('pure engine refuses (throws) a post-payment-to-balance credit against a deferred invoice', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { cents } from '../../../src/money.js';
-import type { JournalEntry, MapResult } from '../../../src/journal.js';
+import type { JournalEntry, MapResult, RecognitionSchedule } from '../../../src/journal.js';
 import type { ConnectedTokens } from '../../../src/server/oauth/types.js';
 import type { Storage } from '../../../src/server/storage/types.js';
 
@@ -758,6 +758,238 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(second).toEqual({ duplicate: true });
         expect(storage.entries.findByEventId('evt_void_dup')).toHaveLength(1);
         expect(storage.entries.getScheduledById(m1.id)?.status).toBe('cancelled');
+      });
+    });
+
+    describe('findImmediateBySourceObject', () => {
+      it('returns immediate entries matching sourceObjectId across event ids', () => {
+        const storage = factory();
+        const drawDown: JournalEntry = {
+          date: '2026-04-01',
+          currency: 'USD',
+          memo: 'draw-down',
+          sourceEventId: 'evt_cn_create',
+          sourceEventType: 'credit_note.created',
+          sourceObjectId: 'cn_1',
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(100) },
+            { accountCode: '1100', side: 'credit', amount: cents(100) },
+          ],
+        };
+        storage.entries.saveImmediate(drawDown, 'evt_cn_create');
+        storage.entries.saveImmediate({ ...drawDown, sourceObjectId: 'cn_2' }, 'evt_other');
+        const found = storage.entries.findImmediateBySourceObject('cn_1');
+        expect(found).toHaveLength(1);
+        expect(found[0]?.entry.sourceObjectId).toBe('cn_1');
+      });
+    });
+
+    describe('persistCreditReversal', () => {
+      function recognitionEntry(date: string, memo: string): JournalEntry {
+        return {
+          date,
+          currency: 'USD',
+          memo,
+          sourceEventId: 'evt_fin_credit',
+          sourceEventType: 'invoice.finalized',
+          sourceObjectId: 'in_credit',
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(10000) },
+            { accountCode: '4000', side: 'credit', amount: cents(10000) },
+          ],
+        };
+      }
+
+      it('hands posted+pending to build, cancels pending, posts the reversal, enqueues the reduced schedule', () => {
+        const storage = factory();
+        const m1 = storage.entries.saveScheduled(recognitionEntry('2026-06-01', 'm1'), {
+          subscriptionId: 'sub_credit',
+          sourceEventId: 'evt_fin_credit',
+        });
+        const m2 = storage.entries.saveScheduled(recognitionEntry('2026-07-01', 'm2'), {
+          subscriptionId: 'sub_credit',
+          sourceEventId: 'evt_fin_credit',
+        });
+        storage.entries.markScheduledPosted(m1.id);
+
+        let sawPosted: ReadonlyArray<JournalEntry> = [];
+        let sawPending: ReadonlyArray<JournalEntry> = [];
+        const reversal: JournalEntry = {
+          date: '2026-07-15',
+          currency: 'USD',
+          memo: 'credit reversal',
+          sourceEventId: 'evt_credit',
+          sourceEventType: 'credit_note.created',
+          sourceObjectId: 'cn_credit',
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(5000) },
+            { accountCode: '1100', side: 'credit', amount: cents(5000) },
+          ],
+        };
+        const reducedSchedule: RecognitionSchedule = {
+          subscriptionId: 'sub_credit',
+          sourceEventId: 'evt_credit',
+          entries: [
+            {
+              date: '2026-07-01',
+              currency: 'USD',
+              memo: 'reissued m2',
+              sourceEventId: 'evt_credit',
+              sourceEventType: 'credit_note.created',
+              sourceObjectId: 'in_credit',
+              lines: [
+                { accountCode: '2100', side: 'debit', amount: cents(5000) },
+                { accountCode: '4000', side: 'credit', amount: cents(5000) },
+              ],
+            },
+          ],
+        };
+
+        const result = storage.persistCreditReversal('evt_credit', {
+          subscriptionId: 'sub_credit',
+          invoiceId: 'in_credit',
+          build(posted, pending) {
+            sawPosted = posted;
+            sawPending = pending;
+            return { reversal, reducedSchedule };
+          },
+        });
+
+        expect(result).toEqual({ duplicate: false });
+        expect(sawPosted.map((e) => e.memo)).toEqual(['m1']);
+        expect(sawPending.map((e) => e.memo)).toEqual(['m2']);
+        // Old pending cancelled; the reversal is an immediate audit entry.
+        expect(storage.entries.getScheduledById(m2.id)?.status).toBe('cancelled');
+        expect(storage.entries.getScheduledById(m1.id)?.status).toBe('posted');
+        expect(storage.entries.findByEventId('evt_credit')[0]?.entry.memo).toBe('credit reversal');
+        // The reduced schedule was enqueued as a fresh pending row.
+        const reissued = storage.entries
+          .findScheduledBySubscription('sub_credit')
+          .filter((r) => r.entry.memo === 'reissued m2');
+        expect(reissued).toHaveLength(1);
+        expect(reissued[0]?.status).toBe('pending');
+        expect(storage.dedup.has('evt_credit')).toBe(true);
+      });
+
+      it('is idempotent — a duplicate credit delivery writes nothing more', () => {
+        const storage = factory();
+        const reversal: JournalEntry = {
+          date: '2026-07-15',
+          currency: 'USD',
+          memo: 'credit reversal',
+          sourceEventId: 'evt_credit_dup',
+          sourceEventType: 'credit_note.created',
+          sourceObjectId: 'cn_credit',
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(5000) },
+            { accountCode: '1100', side: 'credit', amount: cents(5000) },
+          ],
+        };
+        const input = {
+          subscriptionId: 'sub_credit',
+          invoiceId: 'in_credit',
+          build: () => ({ reversal, reducedSchedule: null }),
+        };
+        expect(storage.persistCreditReversal('evt_credit_dup', input)).toEqual({ duplicate: false });
+        expect(storage.persistCreditReversal('evt_credit_dup', input)).toEqual({ duplicate: true });
+        expect(storage.entries.findByEventId('evt_credit_dup')).toHaveLength(1);
+      });
+    });
+
+    describe('persistCreditVoidReversal', () => {
+      it('inverts the draw-down, re-inflates the schedule, records dedup', () => {
+        const storage = factory();
+        // The draw-down's immediate entry (keyed by credit-note id) and one
+        // current pending (reduced) recognition row.
+        storage.entries.saveImmediate(
+          {
+            date: '2026-04-01',
+            currency: 'USD',
+            memo: 'draw-down',
+            sourceEventId: 'evt_credit',
+            sourceEventType: 'credit_note.created',
+            sourceObjectId: 'cn_void',
+            lines: [
+              { accountCode: '2100', side: 'debit', amount: cents(5000) },
+              { accountCode: '1100', side: 'credit', amount: cents(5000) },
+            ],
+          },
+          'evt_credit',
+        );
+        const p = storage.entries.saveScheduled(
+          {
+            date: '2026-07-01',
+            currency: 'USD',
+            memo: 'reduced m2',
+            sourceEventId: 'evt_credit',
+            sourceEventType: 'credit_note.created',
+            sourceObjectId: 'in_void',
+            lines: [
+              { accountCode: '2100', side: 'debit', amount: cents(5000) },
+              { accountCode: '4000', side: 'credit', amount: cents(5000) },
+            ],
+          },
+          { subscriptionId: 'sub_void', sourceEventId: 'evt_credit' },
+        );
+
+        let sawDrawDown: ReadonlyArray<JournalEntry> = [];
+        const reversal: JournalEntry = {
+          date: '2026-08-01',
+          currency: 'USD',
+          memo: 'credit void reversal',
+          sourceEventId: 'evt_void',
+          sourceEventType: 'credit_note.voided',
+          sourceObjectId: 'cn_void',
+          lines: [
+            { accountCode: '1100', side: 'debit', amount: cents(5000) },
+            { accountCode: '2100', side: 'credit', amount: cents(5000) },
+          ],
+        };
+        const result = storage.persistCreditVoidReversal('evt_void', {
+          subscriptionId: 'sub_void',
+          invoiceId: 'in_void',
+          creditNoteId: 'cn_void',
+          build(drawDown) {
+            sawDrawDown = drawDown;
+            return { reversal, reissuedSchedule: null };
+          },
+        });
+
+        expect(result).toEqual({ duplicate: false });
+        expect(sawDrawDown.map((e) => e.memo)).toEqual(['draw-down']);
+        expect(storage.entries.getScheduledById(p.id)?.status).toBe('cancelled');
+        expect(storage.entries.findByEventId('evt_void')[0]?.entry.memo).toBe('credit void reversal');
+        expect(storage.dedup.has('evt_void')).toBe(true);
+      });
+
+      it('no-ops (records dedup, leaves the schedule untouched) when build returns null', () => {
+        const storage = factory();
+        const p = storage.entries.saveScheduled(
+          {
+            date: '2026-07-01',
+            currency: 'USD',
+            memo: 'untouched',
+            sourceEventId: 'evt_fin',
+            sourceEventType: 'invoice.finalized',
+            sourceObjectId: 'in_void',
+            lines: [
+              { accountCode: '2100', side: 'debit', amount: cents(5000) },
+              { accountCode: '4000', side: 'credit', amount: cents(5000) },
+            ],
+          },
+          { subscriptionId: 'sub_void', sourceEventId: 'evt_fin' },
+        );
+        const result = storage.persistCreditVoidReversal('evt_void_noop', {
+          subscriptionId: 'sub_void',
+          invoiceId: 'in_void',
+          creditNoteId: 'cn_absent',
+          build: (drawDown) => (drawDown.length === 0 ? null : { reversal: makeEntry(), reissuedSchedule: null }),
+        });
+        expect(result).toEqual({ duplicate: false });
+        // No draw-down existed, so the schedule is left pending and nothing posts.
+        expect(storage.entries.getScheduledById(p.id)?.status).toBe('pending');
+        expect(storage.entries.findByEventId('evt_void_noop')).toHaveLength(0);
+        expect(storage.dedup.has('evt_void_noop')).toBe(true);
       });
     });
 

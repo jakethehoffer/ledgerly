@@ -20,8 +20,17 @@ Pre-1.0 means breaking changes can happen in any minor release.
   re-spreads what remains deferred over the unposted months and cancels the old
   schedule rows. New `Storage.persistCreditReversal` (both backends) and
   `src/server/creditReconciler.ts`. Previously a no-op. FX-bearing draw-downs are
-  refused (same-currency only); voiding a deferred credit note is not yet
-  reconciled (a documented follow-up).
+  refused (same-currency only).
+
+- **Voiding a deferred-credit draw-down** (`credit_note.voided`). A
+  `credit_note.voided` for a credit note that was booked as a deferred draw-down is
+  now reconciled symmetrically by the receiver: it inverts the draw-down's own
+  journal entry (looked up by credit-note id via the new
+  `JournalEntryStore.findImmediateBySourceObject`) and re-inflates the recognition
+  schedule over the remaining months, so the invoice returns to its pre-credit
+  trajectory. New `Storage.persistCreditVoidReversal` (both backends). Months that
+  recognized at the reduced rate between the credit and its void leave a small
+  bounded timing residual (documented).
 
 - **Consuming credit balance for a deferred invoice**
   (`invoice.payment_succeeded`). An invoice paid **entirely** from the customer's
@@ -35,12 +44,13 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ### Changed
 
-- **The pure engine now refuses (throws on) a credit note against a
-  deferred-schedule invoice**, instead of silently no-op'ing it — matching how a
-  deferred `invoice.voided` already throws. A correct reversal needs the stateful
-  schedule draw-down only the bundled receiver can do, which now routes these
-  before `mapEvent`. A consumer calling `mapEvent` directly (no ledger) sees the
-  refusal; full deployments using the receiver are unaffected.
+- **The pure engine now refuses (throws on) a `credit_note.created` or
+  `credit_note.voided` against a deferred-schedule invoice**, instead of silently
+  no-op'ing it — matching how a deferred `invoice.voided` already throws. A correct
+  reversal needs the stateful schedule draw-down only the bundled receiver can do,
+  which now routes both events before `mapEvent`. A consumer calling `mapEvent`
+  directly (no ledger) sees the refusal; full deployments using the receiver are
+  unaffected.
 
 ## [0.8.0] — 2026-07-08
 

@@ -4,6 +4,7 @@ import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
 import { applyMigrations } from './migrations.js';
 import type {
   CreditReconcileInput,
+  CreditVoidReconcileInput,
   Deduplicator,
   JournalEntryStore,
   OAuthTokenStore,
@@ -124,6 +125,13 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
     `SELECT id, event_id, posted_at, payload
        FROM journal_entries
       WHERE event_id = ?
+      ORDER BY id ASC`,
+  );
+
+  const selectBySourceObject = db.prepare<[string], JournalEntryRow>(
+    `SELECT id, event_id, posted_at, payload
+       FROM journal_entries
+      WHERE source_object_id = ?
       ORDER BY id ASC`,
   );
 
@@ -287,6 +295,15 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
     findByEventId(eventId: string): SavedImmediateEntry[] {
       const rows = selectByEventId.all(eventId);
       return rows.map((row) => ({
+        id: row.id,
+        eventId: row.event_id,
+        entry: JSON.parse(row.payload) as JournalEntry,
+        postedAt: row.posted_at,
+      }));
+    },
+
+    findImmediateBySourceObject(objectId: string): SavedImmediateEntry[] {
+      return selectBySourceObject.all(objectId).map((row) => ({
         id: row.id,
         eventId: row.event_id,
         entry: JSON.parse(row.payload) as JournalEntry,
@@ -595,6 +612,13 @@ export function sqliteStorage(db: Database.Database): Storage {
       WHERE id = ? AND status IN ('pending', 'failed')`,
   );
 
+  const selectImmediateBySourceObjectForVoid = db.prepare<[string], JournalEntryRow>(
+    `SELECT id, event_id, posted_at, payload
+       FROM journal_entries
+      WHERE source_object_id = ?
+      ORDER BY id ASC`,
+  );
+
   const persistVoidTxn = db.transaction(
     (eventId: string, input: VoidReconcileInput, now: number): PersistResult => {
       // Claim first (same compare-and-set as persistMapResult), so a duplicate
@@ -697,6 +721,65 @@ export function sqliteStorage(db: Database.Database): Storage {
     },
   );
 
+  const persistCreditVoidTxn = db.transaction(
+    (eventId: string, input: CreditVoidReconcileInput, now: number): PersistResult => {
+      const claim = recordEvent.run(eventId, now);
+      if (claim.changes === 0) {
+        return { duplicate: true };
+      }
+      // Read the draw-down's immediate entry (by credit-note id) and the invoice's
+      // recognition rows, build the inverse + re-inflated schedule, then — only if
+      // a draw-down was found — cancel the current pending rows and post.
+      const drawDown = selectImmediateBySourceObjectForVoid
+        .all(input.creditNoteId)
+        .map((row) => JSON.parse(row.payload) as JournalEntry);
+      const rows = selectBySubscriptionForVoid
+        .all(input.subscriptionId)
+        .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
+        .filter(({ entry }) => entry.sourceObjectId === input.invoiceId);
+      const pending = rows
+        .filter(({ row }) => row.status === 'pending' || row.status === 'failed')
+        .map(({ entry }) => entry);
+      const result = input.build(drawDown, pending);
+      if (result === null) {
+        // The credit note was never booked as a draw-down; voiding is a no-op.
+        return { duplicate: false };
+      }
+      for (const { row } of rows) {
+        if (row.status === 'pending' || row.status === 'failed') {
+          cancelForVoid.run(row.id);
+        }
+      }
+      insertImmediate.run(
+        eventId,
+        now,
+        result.reversal.date,
+        result.reversal.currency,
+        result.reversal.memo,
+        result.reversal.sourceEventType,
+        result.reversal.sourceObjectId ?? null,
+        JSON.stringify(result.reversal),
+      );
+      insertScheduled.run(
+        result.reversal.sourceEventId,
+        `immediate:${result.reversal.sourceEventId}`,
+        result.reversal.date,
+        JSON.stringify(result.reversal),
+      );
+      if (result.reissuedSchedule) {
+        for (const entry of result.reissuedSchedule.entries) {
+          insertScheduled.run(
+            result.reissuedSchedule.sourceEventId,
+            result.reissuedSchedule.subscriptionId,
+            entry.date,
+            JSON.stringify(entry),
+          );
+        }
+      }
+      return { duplicate: false };
+    },
+  );
+
   // Prepared once for the lifetime of this Storage instance; readiness
   // probes call this on every request and the prepare cost should not
   // be in the hot path.
@@ -732,6 +815,13 @@ export function sqliteStorage(db: Database.Database): Storage {
       now: number = Date.now(),
     ): PersistResult {
       return persistCreditTxn(eventId, input, now);
+    },
+    persistCreditVoidReversal(
+      eventId: string,
+      input: CreditVoidReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      return persistCreditVoidTxn(eventId, input, now);
     },
   };
 }
