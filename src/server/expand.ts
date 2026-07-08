@@ -69,6 +69,10 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
     }
 
     // No expansion needed for these — handler reads only inline scalars.
+    // `invoice.finalized` books a B2B receivable from the unpaid invoice: there
+    // is no charge or balance transaction to expand yet (the cash arrives later
+    // on invoice.payment_succeeded).
+    case 'invoice.finalized':
     case 'charge.failed':
     case 'charge.dispute.created':
     case 'invoice.payment_failed':

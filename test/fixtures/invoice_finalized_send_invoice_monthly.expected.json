@@ -1,0 +1,33 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-15",
+      "currency": "USD",
+      "memo": "Stripe invoice in_test_finalized_b2b_monthly_001 (customer cus_test_finalized_b2b_monthly_001)",
+      "sourceEventId": "evt_test_invoice_finalized_b2b_monthly_001",
+      "sourceEventType": "invoice.finalized",
+      "sourceObjectId": "in_test_finalized_b2b_monthly_001",
+      "lines": [
+        {
+          "accountCode": "1100",
+          "side": "debit",
+          "amount": 54000,
+          "memo": "Accounts receivable on finalized invoice"
+        },
+        {
+          "accountCode": "2000",
+          "side": "credit",
+          "amount": 4000,
+          "memo": "Sales tax collected"
+        },
+        {
+          "accountCode": "4000",
+          "side": "credit",
+          "amount": 50000,
+          "memo": "Subscription revenue (recognized now)"
+        }
+      ]
+    }
+  ],
+  "schedule": null
+}

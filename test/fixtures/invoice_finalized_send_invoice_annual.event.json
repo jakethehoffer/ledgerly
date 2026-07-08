@@ -1,0 +1,49 @@
+{
+  "id": "evt_test_invoice_finalized_b2b_annual_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "invoice.finalized",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "in_test_finalized_b2b_annual_001",
+      "object": "invoice",
+      "collection_method": "send_invoice",
+      "amount_due": 120000,
+      "amount_paid": 0,
+      "amount_remaining": 120000,
+      "billing_reason": "subscription_create",
+      "charge": null,
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_finalized_b2b_annual_001",
+      "due_date": 1739534400,
+      "tax": null,
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_test_finalized_b2b_annual_001",
+            "object": "line_item",
+            "amount": 120000,
+            "currency": "usd",
+            "description": "Enterprise plan (annual)",
+            "period": { "start": 1736942400, "end": 1768478400 },
+            "proration": false,
+            "subscription": "sub_test_finalized_b2b_annual_001",
+            "type": "subscription"
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/invoices/in_test_finalized_b2b_annual_001/lines"
+      },
+      "status": "open",
+      "subscription": "sub_test_finalized_b2b_annual_001",
+      "total": 120000
+    }
+  }
+}

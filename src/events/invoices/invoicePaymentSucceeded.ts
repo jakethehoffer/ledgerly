@@ -5,62 +5,17 @@ import type {
   JournalEntry,
   JournalLine,
   MapResult,
-  RecognitionSchedule,
 } from '../../journal.js';
 import { requireExpanded } from '../../errors.js';
-import { epochToUtcDate, addMonths } from '../../util/dates.js';
+import { epochToUtcDate } from '../../util/dates.js';
 import { buildFxContext, withFx } from '../../util/fxContext.js';
 import { sortLines } from '../../util/lines.js';
 import { invoiceMemo } from '../../util/memo.js';
-
-const SECONDS_PER_DAY = 86400;
-const MONTHLY_THRESHOLD_DAYS = 32;
-
-function periodSpanDays(invoice: Stripe.Invoice): number {
-  let maxSpan = 0;
-  for (const line of invoice.lines.data) {
-    const span = (line.period.end - line.period.start) / SECONDS_PER_DAY;
-    if (span > maxSpan) maxSpan = span;
-  }
-  if (maxSpan === 0) {
-    throw new Error(
-      `Invoice ${invoice.id} has no line-item periods; cannot classify subscription term`,
-    );
-  }
-  return maxSpan;
-}
-
-function periodMonths(invoice: Stripe.Invoice): number {
-  // Approximate months by dividing the longest period span. 12 for annual, 1 for monthly.
-  const days = periodSpanDays(invoice);
-  return Math.max(1, Math.round(days / 30));
-}
-
-/**
- * Sum the invoice's line-item amounts (customer currency, pre-tax) into the
- * portion earned immediately vs. the portion deferred, classifying each line by
- * its OWN billing span. A line spanning a month or less (including a one-time
- * item with an instant period) is immediate; a longer line is deferred over its
- * term. Line amounts are pre-tax, so the two sums add up to the invoice's
- * pre-tax subtotal — the basis for splitting settlement-currency pre-tax
- * revenue between recognize-now (4000) and defer (2100).
- */
-function partitionLineAmounts(invoice: Stripe.Invoice): {
-  immediateCustomer: number;
-  deferredCustomer: number;
-} {
-  let immediateCustomer = 0;
-  let deferredCustomer = 0;
-  for (const line of invoice.lines.data) {
-    const span = (line.period.end - line.period.start) / SECONDS_PER_DAY;
-    if (span > MONTHLY_THRESHOLD_DAYS) {
-      deferredCustomer += line.amount;
-    } else {
-      immediateCustomer += line.amount;
-    }
-  }
-  return { immediateCustomer, deferredCustomer };
-}
+import {
+  buildRecognitionSchedule,
+  partitionLineAmounts,
+  periodMonths,
+} from './recognition.js';
 
 function getCharge(invoice: Stripe.Invoice, eventId: string): Stripe.Charge {
   return requireExpanded<Stripe.Charge>(invoice.charge, 'invoice.charge', eventId);
@@ -72,16 +27,6 @@ function getBalanceTxn(charge: Stripe.Charge, eventId: string): Stripe.BalanceTr
     'invoice.charge.balance_transaction',
     eventId,
   );
-}
-
-function resolveSubscriptionId(invoice: Stripe.Invoice): string {
-  if (typeof invoice.subscription === 'string') {
-    return invoice.subscription;
-  }
-  if (invoice.subscription && typeof invoice.subscription === 'object') {
-    return invoice.subscription.id;
-  }
-  return `invoice:${invoice.id}`;
 }
 
 function buildMonthlyEntry(
@@ -220,78 +165,6 @@ function buildMixedCashEntry(
   );
 }
 
-function buildRecognitionSchedule(
-  event: Stripe.Event,
-  invoice: Stripe.Invoice,
-  gross: Cents,
-  months: number,
-  btCurrency: string,
-  /**
-   * Pro-rated fxContext anchor. When the invoice involved FX, the
-   * schedule pro-rates both `customerAmount` and `settlementAmount` per
-   * month, with month 12 absorbing the remainder so the per-month
-   * customer-side sum equals `customerPreTax` and the settlement-side
-   * sum equals `gross` exactly. When `undefined` (same-currency case),
-   * the per-month entries get no fxContext.
-   */
-  scheduleFxAnchor: { customerCurrency: string; customerPreTax: number; settlementCurrency: string } | undefined,
-): RecognitionSchedule {
-  const subscriptionId = resolveSubscriptionId(invoice);
-
-  const cashDate = epochToUtcDate(event.created);
-  const baseAmount = Math.floor(gross / months);
-  const remainder = gross - baseAmount * months;
-
-  // Pro-rate the customer-side preTax with the same floor + remainder
-  // pattern so per-month customer/settlement amounts line up at the
-  // same indices and the schedule sums match both sides exactly.
-  const customerBase = scheduleFxAnchor
-    ? Math.floor(scheduleFxAnchor.customerPreTax / months)
-    : 0;
-  const customerRemainder = scheduleFxAnchor
-    ? scheduleFxAnchor.customerPreTax - customerBase * months
-    : 0;
-
-  const entries: JournalEntry[] = [];
-  for (let m = 1; m <= months; m++) {
-    // Last entry absorbs the remainder so the schedule's sum equals gross exactly.
-    const monthAmount = cents(m === months ? baseAmount + remainder : baseAmount);
-    const monthCustomerAmount =
-      m === months ? customerBase + customerRemainder : customerBase;
-    const monthlyFxContext: FxContext | undefined = scheduleFxAnchor
-      ? {
-          customerCurrency: scheduleFxAnchor.customerCurrency.toUpperCase(),
-          customerAmount: cents(monthCustomerAmount),
-          settlementCurrency: scheduleFxAnchor.settlementCurrency.toUpperCase(),
-          settlementAmount: monthAmount,
-        }
-      : undefined;
-    entries.push(
-      withFx(
-        {
-          date: addMonths(cashDate, m),
-          currency: btCurrency,
-          memo: `${invoiceMemo(invoice)} — month ${String(m)}/${String(months)} recognition`,
-          sourceEventId: event.id,
-          sourceEventType: event.type,
-          sourceObjectId: invoice.id,
-          lines: sortLines([
-            { accountCode: '2100', side: 'debit',  amount: monthAmount, memo: 'Recognize from deferred' },
-            { accountCode: '4000', side: 'credit', amount: monthAmount, memo: 'Subscription revenue' },
-          ]),
-        },
-        monthlyFxContext,
-      ),
-    );
-  }
-
-  return {
-    subscriptionId,
-    sourceEventId: event.id,
-    entries,
-  };
-}
-
 export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   if (event.type !== 'invoice.payment_succeeded') {
     throw new Error(`handleInvoicePaymentSucceeded received wrong event type: ${event.type}`);
@@ -359,6 +232,40 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
 
   const fee = cents(bt.fee);
   const net = cents(bt.net);
+
+  // Net-terms (B2B) invoice: revenue and the receivable were already booked at
+  // invoice.finalized against 1100 Accounts Receivable. This payment just brings
+  // in the cash (net of fee) and clears the receivable — no revenue is
+  // recognized again, or it would be double-counted.
+  //
+  // FX on this path (settlement currency ≠ invoice currency) isn't modeled yet:
+  // the receivable was parked in the invoice currency at finalization, so
+  // clearing it in a different settlement currency would mix currencies within
+  // 1100 and needs a 7000 rate delta. Refuse loudly rather than mis-post.
+  if (invoice.collection_method === 'send_invoice') {
+    if (bt.currency.toUpperCase() !== invoice.currency.toUpperCase()) {
+      throw new Error(
+        `B2B (send_invoice) invoice ${invoice.id} settled in ${bt.currency.toUpperCase()} ` +
+          `but was billed in ${invoice.currency.toUpperCase()}; cross-currency B2B settlement ` +
+          `is not yet supported (the 1100 receivable was booked in the invoice currency).`,
+      );
+    }
+    const lines: ReadonlyArray<JournalLine> = sortLines([
+      { accountCode: '1010', side: 'debit',  amount: net,              memo: 'Net to Stripe balance' },
+      { accountCode: '6000', side: 'debit',  amount: fee,              memo: 'Stripe processing fee' },
+      { accountCode: '1100', side: 'credit', amount: cents(bt.amount), memo: 'Accounts receivable cleared on payment' },
+    ]);
+    const entry: JournalEntry = {
+      date: epochToUtcDate(event.created),
+      currency: btCurrency,
+      memo: invoiceMemo(invoice),
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+      sourceObjectId: invoice.id,
+      lines,
+    };
+    return { entries: [entry], schedule: null };
+  }
 
   if (isPlatformInvoice) {
     // Connect destination charge on the platform's side: revenue = app fee,

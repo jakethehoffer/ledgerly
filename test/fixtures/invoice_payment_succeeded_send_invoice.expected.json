@@ -1,0 +1,33 @@
+{
+  "entries": [
+    {
+      "date": "2025-01-30",
+      "currency": "USD",
+      "memo": "Stripe invoice in_test_finalized_b2b_monthly_001 (customer cus_test_finalized_b2b_monthly_001)",
+      "sourceEventId": "evt_test_invoice_payment_b2b_001",
+      "sourceEventType": "invoice.payment_succeeded",
+      "sourceObjectId": "in_test_finalized_b2b_monthly_001",
+      "lines": [
+        {
+          "accountCode": "1010",
+          "side": "debit",
+          "amount": 52400,
+          "memo": "Net to Stripe balance"
+        },
+        {
+          "accountCode": "6000",
+          "side": "debit",
+          "amount": 1600,
+          "memo": "Stripe processing fee"
+        },
+        {
+          "accountCode": "1100",
+          "side": "credit",
+          "amount": 54000,
+          "memo": "Accounts receivable cleared on payment"
+        }
+      ]
+    }
+  ],
+  "schedule": null
+}

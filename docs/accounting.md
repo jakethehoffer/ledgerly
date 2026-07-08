@@ -41,8 +41,8 @@ Account codes referenced below:
 | 6100 | Payment Disputes | Expense |
 | 7000 | FX Gain/Loss | Other income |
 
-(1100 Accounts Receivable is reserved for a future B2B invoice-then-pay flow and
-is not posted to today.)
+(1100 Accounts Receivable is posted by the B2B net-terms flow — see
+[Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later) below.)
 
 ## A payment: `charge.succeeded`
 
@@ -159,6 +159,51 @@ entry. No cash moved through the Stripe balance on this event, and ledgerly
 doesn't model customer credit balances (see [Known limitations](#known-limitations)),
 so it acknowledges the event rather than booking a leg it can't balance.
 *(`invoice_payment_succeeded_paid_from_credit_balance`)*
+
+### Net-terms invoices (B2B: invoice now, pay later)
+
+Everything above assumes the card is charged when the invoice is issued
+(`collection_method = charge_automatically`). B2B customers are often billed on
+terms instead — an invoice is issued now (net-30, say) and paid later
+(`collection_method = send_invoice`). Here revenue is earned when you issue the
+invoice, and you hold a **receivable** until the customer pays.
+
+**When the invoice is issued** (`invoice.finalized`), recognize the revenue
+against Accounts Receivable — there's no cash and no Stripe fee yet:
+
+```
+Dr  1100 Accounts Receivable       $540.00
+Cr  4000 Subscription Revenue              $500.00
+Cr  2000 Sales Tax Payable                  $40.00
+```
+*(`invoice_finalized_send_invoice_monthly`)*
+
+Recognition still works per line item, so an **annual** net-terms invoice defers
+to 2100 and draws down monthly, all sitting against the receivable:
+
+```
+Dr  1100 Accounts Receivable     $1,200.00
+Cr  2100 Deferred Revenue                $1,200.00      (then recognized monthly)
+```
+*(`invoice_finalized_send_invoice_annual`)*
+
+**When the customer pays** (`invoice.payment_succeeded`), the cash arrives net of
+the Stripe fee and clears the receivable — no revenue is booked again (it was
+recognized at finalization):
+
+```
+Dr  1010 Stripe Clearing           $524.00
+Dr  6000 Stripe Processing Fees     $16.00
+Cr  1100 Accounts Receivable               $540.00
+```
+*(`invoice_payment_succeeded_send_invoice`)*
+
+Across the two events, 1100 nets to zero and the revenue is recognized exactly
+once. A `charge_automatically` invoice does no accounting at `invoice.finalized`
+(its revenue is booked at payment, as above), so finalization produces no entry
+for it. Net-terms invoices billed in one currency but settled in another are
+**not modeled yet** — the payment handler rejects them rather than mixing
+currencies in 1100 (see [Known limitations](#known-limitations)).
 
 ## A refund: `charge.refunded`
 
@@ -332,9 +377,13 @@ isn't handled yet.
 
 These are deliberate gaps, documented rather than approximated:
 
-- **B2B accounts-receivable** (invoice issued now, paid later) — account 1100 is
-  reserved but the flow isn't implemented; today's handlers assume
-  charge-at-invoice.
+- **Cross-currency B2B (net-terms) settlement** — a `send_invoice` invoice billed
+  in one currency but paid in another. The 1100 receivable is booked in the
+  invoice currency at finalization, so clearing it in a different settlement
+  currency would mix currencies in one account and needs a realized FX delta;
+  the payment handler rejects this case with a clear error rather than
+  mis-posting. Same-currency net-terms invoicing is fully modeled (see
+  [Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later)).
 - **Customer credit balances / out-of-band payments** — an invoice paid with no
   charge (`charge` is `null`) is acknowledged with no entry rather than booked.
   Modeling it would need a customer-credit liability account and handling of the
