@@ -106,4 +106,47 @@ describe('integration: B2B void with a partially-recognized deferred schedule', 
     expect(storage.entries.listScheduledByStatus('cancelled')).toHaveLength(12);
     expect(storage.entries.listScheduledByStatus('posted')).toHaveLength(0);
   });
+
+  it('voiding one invoice leaves a sibling invoice on the same subscription untouched', () => {
+    const storage = inMemoryStorage();
+
+    // Re-key the annual fixture onto a specific invoice + a shared subscription.
+    function finalizeAs(invoiceId: string, eventId: string): void {
+      const ev = JSON.parse(
+        JSON.stringify(loadEvent('invoice_finalized_send_invoice_annual')),
+      ) as Stripe.Event;
+      (ev as { id: string }).id = eventId;
+      const inv = ev.data.object as { id: string; subscription: string };
+      inv.id = invoiceId;
+      inv.subscription = 'sub_shared';
+      storage.persistMapResult(ev.id, mapEvent(ev));
+    }
+
+    // Two invoices bill the same subscription; both build a 12-month schedule.
+    finalizeAs('in_keep', 'evt_fin_keep');
+    finalizeAs('in_void', 'evt_fin_void');
+    expect(storage.entries.findScheduledBySubscription('sub_shared')).toHaveLength(24);
+
+    // Void only in_void.
+    const voided = JSON.parse(
+      JSON.stringify(loadEvent('invoice_finalized_send_invoice_annual')),
+    ) as Stripe.Event;
+    (voided as { type: string }).type = 'invoice.voided';
+    (voided as { id: string }).id = 'evt_void_sibling';
+    const vinv = voided.data.object as { id: string; subscription: string };
+    vinv.id = 'in_void';
+    vinv.subscription = 'sub_shared';
+    storage.persistVoidReversal(voided.id, buildVoidReconcileInput(voided));
+
+    const shared = storage.entries.findScheduledBySubscription('sub_shared');
+    const kept = shared.filter((r) => r.entry.sourceObjectId === 'in_keep');
+    const voidedRows = shared.filter((r) => r.entry.sourceObjectId === 'in_void');
+
+    // The kept invoice's schedule is entirely intact; only the voided invoice's
+    // rows were cancelled.
+    expect(kept).toHaveLength(12);
+    expect(kept.every((r) => r.status === 'pending')).toBe(true);
+    expect(voidedRows).toHaveLength(12);
+    expect(voidedRows.every((r) => r.status === 'cancelled')).toBe(true);
+  });
 });
