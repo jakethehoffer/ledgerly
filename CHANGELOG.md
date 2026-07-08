@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
-## [Unreleased]
+## [0.5.0] — 2026-07-08
 
 ### Added
 
@@ -36,6 +36,17 @@ Pre-1.0 means breaking changes can happen in any minor release.
   finalization's own `deferredPreTax > 0` test, so it triggers on exactly the
   invoices for which a schedule was built. A full server deployment never hits
   the refusal — the webhook routes those voids to the reconciler.
+
+### Changed
+
+- **The `JournalEntryStore` / `Storage` interfaces gained three methods** —
+  `findScheduledBySubscription`, `cancelScheduled` (on `JournalEntryStore`), and
+  `persistVoidReversal` (on `Storage`). The bundled in-memory and SQLite backends
+  implement them, so deployments using either are unaffected. This is a
+  compile-time requirement only for TypeScript consumers who implement their own
+  `Storage`; at runtime the new methods are exercised only on the deferred-void
+  path. The SQLite `scheduled_entries.status` gains a `cancelled` value (no
+  migration — the column has no CHECK constraint).
 
 ## [0.4.0] — 2026-07-08
 
