@@ -3,6 +3,7 @@ import type { MapResult } from '../journal.js';
 import { handleChargeSucceeded } from './charges/chargeSucceeded.js';
 import { handleChargeRefunded } from './charges/chargeRefunded.js';
 import { handleCreditNoteCreated } from './creditNotes/creditNoteCreated.js';
+import { handleCreditNoteVoided } from './creditNotes/creditNoteVoided.js';
 import { handleDisputeClosed } from './disputes/disputeClosed.js';
 import { handleDisputeFundsReinstated } from './disputes/disputeFundsReinstated.js';
 import { handleDisputeFundsWithdrawn } from './disputes/disputeFundsWithdrawn.js';
@@ -27,6 +28,7 @@ export const HANDLERS: Readonly<Record<string, Handler>> = {
   'invoice.payment_succeeded': handleInvoicePaymentSucceeded,
   'invoice.voided': handleInvoiceVoided,
   'credit_note.created': handleCreditNoteCreated,
+  'credit_note.voided': handleCreditNoteVoided,
   'payout.failed': handlePayoutFailed,
   'payout.paid': handlePayoutPaid,
   'charge.failed': handleInformational,

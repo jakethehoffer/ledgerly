@@ -121,6 +121,23 @@ describe('integration: B2B net-terms (send_invoice) accounts-receivable lifecycl
     expect(total).toBe(0);
   });
 
+  it('credit note then void: voiding the credit note restores the receivable, revenue, and tax', () => {
+    const balances = replayAll([
+      'invoice_finalized_send_invoice_monthly',
+      'credit_note_created_send_invoice_prepayment',
+      'credit_note_voided_send_invoice_prepayment',
+    ]);
+
+    // The credit note reduced 1100/4000/2000; voiding it puts them back exactly
+    // where finalization left them.
+    expect(balances['1100']).toBe(54000);
+    expect(balances['4000']).toBe(-50000);
+    expect(balances['2000']).toBe(-4000);
+
+    const total = Object.values(balances).reduce<number>((a, v) => a + (v ?? 0), 0);
+    expect(total).toBe(0);
+  });
+
   it('credit note on a deferred-schedule invoice is a no-op (proportional draw-down not modeled)', () => {
     // Same pre-payment credit note, but the invoice defers (an annual line).
     const ev = loadEvent('credit_note_created_send_invoice_prepayment');

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [Unreleased]
+
+### Added
+
+- **Voiding a credit note** (`credit_note.voided`). When a credit note issued in
+  error is voided, ledgerly undoes whatever `credit_note.created` posted, with the
+  sides flipped: a pre-payment credit note restored to the invoice books Dr 1100,
+  Cr 4000, Cr 2000. Both events gate on the same shared condition, so a void
+  un-books exactly what creation booked — and voiding a credit note that was never
+  booked (post-payment, deferred-schedule, `charge_automatically`) is a no-op.
+
+### Fixed
+
+- The `pnpm demo` quickstart no longer prints a hardcoded fixture count that drifts
+  as fixtures are added.
+
 ## [0.6.0] — 2026-07-08
 
 ### Added

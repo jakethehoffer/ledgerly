@@ -114,18 +114,21 @@ describe('expandEvent', () => {
     expect(out.data.object).toBe(expanded);
   });
 
-  it('expands credit_note.created with invoice', async () => {
-    const expanded = { id: 'cn_1', invoice: { id: 'in_1' } };
-    const mock = makeMockStripe({ creditNote: expanded });
-    const event = makeEvent('credit_note.created', { id: 'cn_1' });
+  it.each(['credit_note.created', 'credit_note.voided'])(
+    'expands %s with invoice',
+    async (type) => {
+      const expanded = { id: 'cn_1', invoice: { id: 'in_1' } };
+      const mock = makeMockStripe({ creditNote: expanded });
+      const event = makeEvent(type, { id: 'cn_1' });
 
-    const out = await expandEvent(mock as unknown as Stripe, event);
+      const out = await expandEvent(mock as unknown as Stripe, event);
 
-    expect(mock.creditNotes.retrieve).toHaveBeenCalledWith('cn_1', {
-      expand: ['invoice'],
-    });
-    expect(out.data.object).toBe(expanded);
-  });
+      expect(mock.creditNotes.retrieve).toHaveBeenCalledWith('cn_1', {
+        expand: ['invoice'],
+      });
+      expect(out.data.object).toBe(expanded);
+    },
+  );
 
   it.each([
     'charge.failed',

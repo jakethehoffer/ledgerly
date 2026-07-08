@@ -5,7 +5,7 @@ import { requireExpanded } from '../../errors.js';
 import { epochToUtcDate } from '../../util/dates.js';
 import { sortLines } from '../../util/lines.js';
 import { creditNoteMemo } from '../../util/memo.js';
-import { partitionLineAmounts } from '../invoices/recognition.js';
+import { prepaymentCreditAmounts } from './shared.js';
 
 /**
  * `credit_note.created` — a credit note adjusts an invoice after it was issued.
@@ -54,30 +54,11 @@ export function handleCreditNoteCreated(event: Stripe.Event): MapResult {
     'credit_note.invoice',
     event.id,
   );
-  if (invoice.collection_method !== 'send_invoice') {
+  const amounts = prepaymentCreditAmounts(creditNote, invoice);
+  if (amounts === null) {
     return { entries: [], schedule: null };
   }
-  if (creditNote.type === 'post_payment') {
-    return { entries: [], schedule: null };
-  }
-  if (invoice.lines.has_more) {
-    throw new Error(
-      `Invoice ${invoice.id} has paginated line items (lines.has_more=true); ` +
-        `caller must expand all pages before invoking the engine`,
-    );
-  }
-  // A deferred invoice's credit needs a proportional draw-down of its
-  // recognition schedule (stateful) — not modeled here yet; see the doc comment.
-  if (partitionLineAmounts(invoice).deferredCustomer > 0) {
-    return { entries: [], schedule: null };
-  }
-
-  const total = creditNote.total;
-  if (total === 0) {
-    return { entries: [], schedule: null };
-  }
-  const subtotal = creditNote.subtotal;
-  const tax = total - subtotal;
+  const { total, subtotal, tax } = amounts;
 
   const draft: JournalLine[] = [
     {

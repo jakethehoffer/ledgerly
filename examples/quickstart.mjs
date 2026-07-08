@@ -204,6 +204,6 @@ console.log(
 console.log(
   '\nThat is the whole engine in two events. Refunds (with proportional sales-tax\n' +
     'drains and realized FX gain/loss), disputes, payouts, and multi-currency charges\n' +
-    'are all in test/fixtures/, feed any of the 37 fixtures through mapEvent the\n' +
+    'are all in test/fixtures/, feed any of those fixtures through mapEvent the\n' +
     'same way to see its entry shape.\n',
 );

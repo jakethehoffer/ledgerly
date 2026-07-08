@@ -40,7 +40,8 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
       return cloneEventWithObject(event, expanded);
     }
 
-    case 'credit_note.created': {
+    case 'credit_note.created':
+    case 'credit_note.voided': {
       // `invoice` is expanded so the handler can read the invoice's
       // collection_method (only net-terms invoices booked a receivable) and
       // classify its line periods (a deferred invoice's credit isn't modeled

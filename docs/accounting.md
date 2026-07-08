@@ -269,6 +269,13 @@ returned is booked by `charge.refunded`, and a credit note against a deferred
 invoice is a no-op until a proportional schedule draw-down is modeled — see
 [Known limitations](#known-limitations).
 
+**If that credit note was a mistake** (`credit_note.voided`), the entry above is
+undone with the sides flipped — Dr 1100, Cr 4000, Cr 2000 — restoring the
+receivable, revenue, and tax. Both events gate on the same conditions, so a void
+un-books exactly what creation booked, and voiding a credit note ledgerly never
+booked (post-payment, deferred, `charge_automatically`) is itself a no-op.
+*(`credit_note_voided_send_invoice_prepayment`)*
+
 ## A refund: `charge.refunded`
 
 You refund a $100 sale. The money leaves your Stripe balance, and the sale is

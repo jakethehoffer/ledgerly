@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-03-08",
+      "currency": "USD",
+      "memo": "Stripe credit note cn_test_prepayment_001 (invoice in_test_finalized_b2b_monthly_001)",
+      "sourceEventId": "evt_test_credit_note_voided_001",
+      "sourceEventType": "credit_note.voided",
+      "sourceObjectId": "cn_test_prepayment_001",
+      "lines": [
+        { "accountCode": "1100", "side": "debit", "amount": 10800, "memo": "Receivable restored — credit note voided" },
+        { "accountCode": "2000", "side": "credit", "amount": 800, "memo": "Sales tax restored — credit note voided" },
+        { "accountCode": "4000", "side": "credit", "amount": 10000, "memo": "Revenue restored — credit note voided" }
+      ]
+    }
+  ],
+  "schedule": null
+}
