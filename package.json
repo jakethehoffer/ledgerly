@@ -1,6 +1,6 @@
 {
   "name": "ledgerly",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Stripe-to-double-entry mapping engine for indie SaaS",
   "keywords": [
     "stripe",
