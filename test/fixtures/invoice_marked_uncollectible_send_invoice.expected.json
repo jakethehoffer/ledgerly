@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "date": "2025-03-01",
+      "currency": "USD",
+      "memo": "Stripe invoice in_test_finalized_b2b_monthly_001 (customer cus_test_finalized_b2b_monthly_001)",
+      "sourceEventId": "evt_test_invoice_uncollectible_b2b_001",
+      "sourceEventType": "invoice.marked_uncollectible",
+      "sourceObjectId": "in_test_finalized_b2b_monthly_001",
+      "lines": [
+        { "accountCode": "6200", "side": "debit", "amount": 54000, "memo": "Bad debt — receivable written off" },
+        { "accountCode": "1100", "side": "credit", "amount": 54000, "memo": "Uncollectible receivable" }
+      ]
+    }
+  ],
+  "schedule": null
+}

@@ -73,6 +73,7 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
     // is no charge or balance transaction to expand yet (the cash arrives later
     // on invoice.payment_succeeded).
     case 'invoice.finalized':
+    case 'invoice.marked_uncollectible':
     case 'charge.failed':
     case 'charge.dispute.created':
     case 'invoice.payment_failed':

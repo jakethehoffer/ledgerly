@@ -7,6 +7,7 @@ import { handleDisputeFundsReinstated } from './disputes/disputeFundsReinstated.
 import { handleDisputeFundsWithdrawn } from './disputes/disputeFundsWithdrawn.js';
 import { handleInformational } from './informational.js';
 import { handleInvoiceFinalized } from './invoices/invoiceFinalized.js';
+import { handleInvoiceMarkedUncollectible } from './invoices/invoiceMarkedUncollectible.js';
 import { handleInvoicePaymentSucceeded } from './invoices/invoicePaymentSucceeded.js';
 import { handlePayoutFailed } from './payouts/payoutFailed.js';
 import { handlePayoutPaid } from './payouts/payoutPaid.js';
@@ -20,6 +21,7 @@ export const HANDLERS: Readonly<Record<string, Handler>> = {
   'charge.dispute.funds_reinstated': handleDisputeFundsReinstated,
   'charge.dispute.funds_withdrawn': handleDisputeFundsWithdrawn,
   'invoice.finalized': handleInvoiceFinalized,
+  'invoice.marked_uncollectible': handleInvoiceMarkedUncollectible,
   'invoice.payment_succeeded': handleInvoicePaymentSucceeded,
   'payout.failed': handlePayoutFailed,
   'payout.paid': handlePayoutPaid,

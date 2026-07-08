@@ -17,6 +17,7 @@ const accountMap: QboAccountMap = {
   '4900': { qboId: 'qbo-4900', name: 'Refunds' },
   '6000': { qboId: 'qbo-6000', name: 'Stripe Fees' },
   '6100': { qboId: 'qbo-6100', name: 'Payment Disputes' },
+  '6200': { qboId: 'qbo-6200', name: 'Bad Debt Expense' },
   '7000': { qboId: 'qbo-7000', name: 'FX' },
 };
 

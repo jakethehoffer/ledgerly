@@ -18,6 +18,7 @@ const accountMap: XeroAccountMap = {
   '4900': { accountCode: '4900' },
   '6000': { accountCode: '6000' },
   '6100': { accountCode: '6100' },
+  '6200': { accountCode: '6200' },
   '7000': { accountCode: '7000' },
 };
 

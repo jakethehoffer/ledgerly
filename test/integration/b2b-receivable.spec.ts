@@ -55,6 +55,31 @@ describe('integration: B2B net-terms (send_invoice) accounts-receivable lifecycl
     expect(balances['4000']).toBe(-120000);
   });
 
+  it('uncollectible: finalize then write-off clears 1100 to bad debt; revenue stays recognized', () => {
+    const balances = replayAll([
+      'invoice_finalized_send_invoice_monthly',
+      'invoice_marked_uncollectible_send_invoice',
+    ]);
+
+    // Receivable written off → zero.
+    expect(balances['1100']).toBeUndefined();
+    // The shortfall lands in bad-debt expense (the full gross, $540).
+    expect(balances['6200']).toBe(54000);
+    // Revenue stays recognized — you earned it; the customer just didn't pay.
+    expect(balances['4000']).toBe(-50000);
+    // Tax stays as booked at invoicing.
+    expect(balances['2000']).toBe(-4000);
+
+    const total = Object.values(balances).reduce<number>((a, v) => a + (v ?? 0), 0);
+    expect(total).toBe(0);
+  });
+
+  it('uncollectible on a charge_automatically invoice is a no-op (no receivable was booked)', () => {
+    const result = mapEvent(loadEvent('invoice_marked_uncollectible_charge_automatically'));
+    expect(result.entries).toHaveLength(0);
+    expect(result.schedule).toBeNull();
+  });
+
   it('charge_automatically finalized is a no-op (revenue books at payment instead)', () => {
     const result = mapEvent(loadEvent('invoice_finalized_charge_automatically'));
     expect(result.entries).toHaveLength(0);

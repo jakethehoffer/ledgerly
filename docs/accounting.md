@@ -21,7 +21,7 @@ Every claim here is enforced by a fixture test under
   `balance_transaction` (`bt.amount` / `bt.fee` / `bt.net`) — the currency your
   Stripe balance actually moved in — not the customer-facing charge currency.
   For same-currency businesses these are identical. See [Foreign exchange](#foreign-exchange).
-- **The caller maps account codes.** ledgerly emits 12 stable account *codes*;
+- **The caller maps account codes.** ledgerly emits 13 stable account *codes*;
   you map each to your real QuickBooks/Xero account once. Codes and names are in
   the README's [Chart of accounts](../README.md#chart-of-accounts).
 
@@ -31,6 +31,7 @@ Account codes referenced below:
 |------|------|------|
 | 1000 | Operating Bank | Asset |
 | 1010 | Stripe Clearing | Asset |
+| 1100 | Accounts Receivable | Asset |
 | 1200 | Disputes Receivable | Asset |
 | 2000 | Sales Tax Payable | Liability |
 | 2100 | Deferred Revenue | Liability |
@@ -39,9 +40,11 @@ Account codes referenced below:
 | 4900 | Refunds Issued | Contra-revenue |
 | 6000 | Stripe Processing Fees | Expense |
 | 6100 | Payment Disputes | Expense |
+| 6200 | Bad Debt Expense | Expense |
 | 7000 | FX Gain/Loss | Other income |
 
-(1100 Accounts Receivable is posted by the B2B net-terms flow — see
+(1100 Accounts Receivable and 6200 Bad Debt Expense are posted by the B2B
+net-terms flow — see
 [Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later) below.)
 
 ## A payment: `charge.succeeded`
@@ -204,6 +207,25 @@ once. A `charge_automatically` invoice does no accounting at `invoice.finalized`
 for it. Net-terms invoices billed in one currency but settled in another are
 **not modeled yet** — the payment handler rejects them rather than mixing
 currencies in 1100 (see [Known limitations](#known-limitations)).
+
+**If the customer never pays** (`invoice.marked_uncollectible`), the receivable
+is written off to bad debt:
+
+```
+Dr  6200 Bad Debt Expense          $540.00
+Cr  1100 Accounts Receivable               $540.00
+```
+
+The revenue stays recognized — under accrual accounting you earned it when you
+delivered the service; the customer simply didn't pay, and that shortfall is an
+expense, not a revenue reversal. Because 1100 carries the full gross from
+finalization until the invoice is paid or written off (recognition moves 2100 →
+4000 and never touches 1100), the write-off clears the receivable exactly no
+matter how much has been recognized. *(`invoice_marked_uncollectible_send_invoice`)*
+
+(Voiding an invoice — `invoice.voided` — instead *reverses* the revenue, which
+interacts with the recognition schedule and isn't modeled yet; see
+[Known limitations](#known-limitations).)
 
 ## A refund: `charge.refunded`
 
@@ -377,6 +399,12 @@ isn't handled yet.
 
 These are deliberate gaps, documented rather than approximated:
 
+- **Voiding a net-terms invoice** (`invoice.voided`) — unlike an uncollectible
+  write-off (which only touches the 1100 receivable), a void *reverses* the
+  recognized revenue, which interacts with the deferred-revenue schedule: a
+  stateless per-event engine can't know how much of a deferred invoice has
+  already been recognized when the void arrives. Not modeled yet; the
+  uncollectible path (`invoice.marked_uncollectible`) is.
 - **Cross-currency B2B (net-terms) settlement** — a `send_invoice` invoice billed
   in one currency but paid in another. The 1100 receivable is booked in the
   invoice currency at finalization, so clearing it in a different settlement

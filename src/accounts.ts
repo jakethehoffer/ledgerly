@@ -2,7 +2,7 @@ export type AccountCode =
   | '1000' | '1010' | '1100' | '1200'
   | '2000' | '2100'
   | '4000' | '4100' | '4900'
-  | '6000' | '6100'
+  | '6000' | '6100' | '6200'
   | '7000';
 
 export type AccountType =
@@ -40,5 +40,6 @@ export const ACCOUNTS: Readonly<Record<AccountCode, AccountDef>> = {
   '4900': { code: '4900', name: 'Refunds Issued',          type: 'ContraRevenue', normalBalance: 'debit'  },
   '6000': { code: '6000', name: 'Stripe Processing Fees',  type: 'Expense',       normalBalance: 'debit'  },
   '6100': { code: '6100', name: 'Payment Disputes',        type: 'Expense',       normalBalance: 'debit'  },
+  '6200': { code: '6200', name: 'Bad Debt Expense',        type: 'Expense',       normalBalance: 'debit'  },
   '7000': { code: '7000', name: 'FX Gain/Loss',            type: 'OtherIncome',   normalBalance: 'credit' },
 } as const;

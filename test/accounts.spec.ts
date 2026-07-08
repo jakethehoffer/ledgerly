@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { ACCOUNTS } from '../src/accounts.js';
 
 describe('ACCOUNTS table', () => {
-  it('has 12 accounts', () => {
-    expect(Object.keys(ACCOUNTS)).toHaveLength(12);
+  it('has 13 accounts', () => {
+    expect(Object.keys(ACCOUNTS)).toHaveLength(13);
   });
 
   it('every entry has code matching its key', () => {
@@ -97,6 +97,12 @@ describe('ACCOUNTS table', () => {
         "6100": {
           "code": "6100",
           "name": "Payment Disputes",
+          "normalBalance": "debit",
+          "type": "Expense",
+        },
+        "6200": {
+          "code": "6200",
+          "name": "Bad Debt Expense",
           "normalBalance": "debit",
           "type": "Expense",
         },
