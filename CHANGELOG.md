@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.3.0] — 2026-07-07
+
+### Added
+
+- **B2B net-terms invoicing (accounts receivable).** Invoices with
+  `collection_method = send_invoice` — issued now, paid later on terms — are now
+  modeled on the accrual basis, using the previously-reserved `1100` account. At
+  `invoice.finalized` the revenue is recognized against **1100 Accounts
+  Receivable** (immediately-earned lines to 4000, longer-term lines deferred to
+  2100 with a recognition schedule, sales tax to 2000); there is no cash or
+  Stripe fee yet. At `invoice.payment_succeeded` the cash arrives net of the fee
+  and clears 1100, with no second revenue recognition — so across the two events
+  1100 nets to zero and revenue is recognized exactly once.
+  `charge_automatically` invoices are unchanged: `invoice.finalized` is a no-op
+  for them and revenue is still booked at payment, so every existing fixture is
+  byte-identical. Cross-currency net-terms settlement (an invoice billed in one
+  currency but paid in another) is rejected with a clear error rather than mixing
+  currencies in the receivable; same-currency net-terms invoicing is fully
+  modeled. The shared line-item recognition logic (per-line term classification
+  and the deferred-revenue schedule) is now factored into `recognition.ts` so the
+  finalization and payment handlers can't drift apart.
+
 ## [0.2.1] — 2026-07-04
 
 ### Fixed
@@ -836,6 +858,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.3.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.3.0
 [0.2.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.2.0
 [0.1.16]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.1.16
