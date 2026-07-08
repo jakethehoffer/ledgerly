@@ -13,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-665 tests · 15 event types · 47 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+748 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -82,14 +82,14 @@ each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue
 total recognized                $1200.00
 ```
 
-The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs). It imports the same public API you'd use after `npm i ledgerly`. Refunds, disputes, payouts, and multi-currency charges all live in [`test/fixtures/`](./test/fixtures), and the refund fixtures cover proportional sales-tax drains and realized FX gain/loss. Feed any of the 47 fixtures through `mapEvent` to see its entry shape.
+The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs). It imports the same public API you'd use after `npm i ledgerly`. Refunds, disputes, payouts, and multi-currency charges all live in [`test/fixtures/`](./test/fixtures), and the refund fixtures cover proportional sales-tax drains and realized FX gain/loss. Feed any of the 57 fixtures through `mapEvent` to see its entry shape.
 
 ## Why ledgerly?
 
 Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsheet, with a hosted sync tool like A2X or Synder, with Stripe's own reporting exports, or by paying a bookkeeper $500 to $2,000 a month. ledgerly fills the gap between those.
 
-- **vs. a hosted sync tool.** Those are managed SaaS with a monthly fee, and the mapping from Stripe events to journal entries is a closed box you can't inspect or change. ledgerly is open source and runs on your own infrastructure. The mapping engine is under 2,000 lines of TypeScript, every entry shape is pinned by a fixture test, and you own the chart of accounts. No monthly fee, no third party in your financial data path.
-- **vs. Stripe's native reporting.** Stripe gives you summaries, CSV exports, and a separate paid Revenue Recognition product. ledgerly emits actual balanced double-entry journal entries, ready to POST to the QuickBooks Online or Xero API. Deferred revenue is released month by month, sales tax is drained proportionally on refunds, and realized FX gain/loss is booked when rates move between a charge and its refund.
+- **vs. a hosted sync tool.** Those are managed SaaS with a monthly fee, and the mapping from Stripe events to journal entries is a closed box you can't inspect or change. ledgerly is open source and runs on your own infrastructure. The mapping engine is under 3,000 lines of TypeScript, every entry shape is pinned by a fixture test, and you own the chart of accounts. No monthly fee, no third party in your financial data path.
+- **vs. Stripe's native reporting.** Stripe gives you summaries, CSV exports, and a separate paid Revenue Recognition product. ledgerly emits actual balanced double-entry journal entries, ready to POST to the QuickBooks Online or Xero API. Deferred revenue is released month by month, sales tax is drained proportionally on refunds, and realized FX gain/loss is booked when rates move between a charge and its refund. Credit notes reverse revenue whether the money is refunded to the card or kept as a customer credit balance, and net-terms (B2B) invoices recognize revenue at finalization against a receivable.
 - **vs. doing it by hand.** The mapping from a Stripe event to a journal entry is deterministic, so it shouldn't be manual work. ledgerly makes that mapping a pure function, where the same event always produces the same balanced entry.
 
 **ledgerly is probably not for you if** you want a turnkey hosted product with a dashboard and zero ops. It's a library plus an optional self-hosted webhook receiver, not a SaaS. It assumes you or a developer can run a small service and map 14 account codes to your real QBO/Xero accounts once. It handles B2B net-terms invoicing (invoice now, pay later) in a single currency, but not yet cross-currency payouts or cross-currency net-terms settlement. Those are documented as explicit gaps rather than quietly approximated.
@@ -101,7 +101,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.4.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.9.1
 ```
 
 ### Use the engine as a library
@@ -798,7 +798,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.4.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.9.1
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -828,7 +828,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ghcr.io/jakethehoffer/ledgerly:v0.4.0
+  ghcr.io/jakethehoffer/ledgerly:v0.9.1
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -884,7 +884,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.4.0 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.9.1 \
   --repo jakethehoffer/ledgerly
 ```
 
@@ -970,7 +970,7 @@ pnpm start          # Run the built webhook receiver (requires pnpm build first)
 
 ## Status
 
-Both layers are built and documented above. The pure mapping engine handles 15 event types, multi-currency with realized FX gain/loss, and the QBO and Xero exporters. The optional webhook receiver adds signature verification, idempotent persistence, a recognition scheduler with retry and dead-letter, QBO/Xero OAuth, Prometheus metrics, and admin endpoints. It's published to npm and GHCR with signed build provenance.
+Both layers are built and documented above. The pure mapping engine handles 18 event types, multi-currency with realized FX gain/loss, and the QBO and Xero exporters. The optional webhook receiver adds signature verification, idempotent persistence, a recognition scheduler with retry and dead-letter, QBO/Xero OAuth, Prometheus metrics, and admin endpoints. It's published to npm and GHCR with signed build provenance.
 
 A few things are deferred deliberately, and called out in the code where they'd otherwise have to be guessed at rather than quietly approximated:
 
