@@ -180,10 +180,25 @@ Cr  2000 Sales Tax Payable                    $5.00   (tax)
 The amount applied is read from the invoice's `ending_balance - starting_balance`
 delta — Stripe draws the customer's (negative) credit balance up toward zero to
 cover the invoice, so that delta is populated exactly when balance funded the
-payment. Only a credit that covers the **whole** invoice against a **non-deferred**
-invoice is booked; a partial credit balance or a deferred invoice stays a no-op
-(see [Known limitations](#known-limitations)).
+payment. Only a credit that covers the **whole** invoice is booked; a partial
+credit balance (the rest paid another way) stays a no-op until proportioning is
+modeled (see [Known limitations](#known-limitations)).
 *(`invoice_payment_succeeded_paid_from_credit_balance`)*
+
+When the balance funds a **deferred** (annual or mixed-term) invoice, the revenue
+is deferred over the service term rather than recognized all at once — the same
+2100 Deferred Revenue + monthly recognition schedule a cash-paid annual invoice
+builds, with the whole balance applied as the single debit (no cash, no fee):
+
+```
+Dr  2200 Customer Credit Balance   $1,320.00   (whole balance applied)
+Cr  2100 Deferred Revenue                 $1,200.00   (then recognized monthly)
+Cr  2000 Sales Tax Payable                  $120.00
+```
+
+A wholly-immediate invoice books Cr 4000 instead of 2100 (no schedule); a mixed
+invoice splits between them per line, exactly as the cash path does.
+*(`invoice_payment_succeeded_from_credit_balance_annual`)*
 
 An invoice **marked paid out of band** (`charge` is `null`, but the balance is
 untouched) produces no entry: nothing ledger-visible moved, so booking one would
@@ -512,15 +527,16 @@ These are deliberate gaps, documented rather than approximated:
   the payment handler rejects this case with a clear error rather than
   mis-posting. Same-currency net-terms invoicing is fully modeled (see
   [Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later)).
-- **Customer credit balances — partial and deferred cases** — a post-payment
-  credit note credited **entirely** to the customer's balance, and an invoice paid
-  **entirely** from that balance against a non-deferred invoice, are both modeled
-  (2200 Customer Credit Balance — see
-  [Customer credit balances](#customer-credit-balances)). Still gaps: a credit
-  note **split** across a cash refund and the balance (needs proportioning), and
-  either leg against a **deferred** invoice (the credited/consumed revenue spans
-  2100 and a recognition schedule — the same stateful draw-down `invoice.voided`
-  solves in the server, not yet generalized). Those stay a no-op.
+- **Customer credit balances — partial and deferred-credit cases** — a
+  post-payment credit note credited **entirely** to the customer's balance, and an
+  invoice paid **entirely** from that balance, are modeled (2200 Customer Credit
+  Balance — see [Customer credit balances](#customer-credit-balances)), including
+  when the consumed invoice **defers** its revenue (the balance funds a fresh
+  recognition schedule). Still gaps: a credit note **split** across a cash refund
+  and the balance (needs proportioning), and a **credit note against a deferred
+  invoice** — reversing revenue that partly sits in 2100 needs the stateful
+  schedule draw-down `invoice.voided` solves in the server, not yet generalized to
+  credit notes. Those stay a no-op.
 - **Out-of-band payments** — an invoice marked paid out of band (`charge` `null`,
   the customer's balance untouched) is acknowledged with no entry: no cash moved
   through Stripe and no credit was drawn, so there is nothing ledger-visible to

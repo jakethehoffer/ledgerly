@@ -1,0 +1,51 @@
+{
+  "id": "evt_test_invoice_credit_balance_annual_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1736942400,
+  "type": "invoice.payment_succeeded",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "in_test_credit_balance_annual_001",
+      "object": "invoice",
+      "amount_due": 0,
+      "amount_paid": 132000,
+      "amount_remaining": 0,
+      "billing_reason": "subscription_cycle",
+      "charge": null,
+      "created": 1736942400,
+      "currency": "usd",
+      "customer": "cus_test_credit_balance_annual_001",
+      "starting_balance": -132000,
+      "ending_balance": 0,
+      "paid_out_of_band": false,
+      "tax": 12000,
+      "subtotal": 120000,
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_test_credit_balance_annual_001",
+            "object": "line_item",
+            "amount": 120000,
+            "currency": "usd",
+            "period": { "start": 1736942400, "end": 1768478400 },
+            "proration": false,
+            "subscription": "sub_test_credit_balance_annual_001",
+            "type": "subscription"
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/invoices/in_test_credit_balance_annual_001/lines"
+      },
+      "paid": true,
+      "status": "paid",
+      "subscription": "sub_test_credit_balance_annual_001",
+      "total": 132000
+    }
+  }
+}

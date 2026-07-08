@@ -54,6 +54,28 @@ describe('integration: customer credit balance (2200) issue + consume lifecycle'
     expect(total).toBe(0);
   });
 
+  it('consume leg (deferred): an annual invoice paid from balance defers revenue over its term instead of recognizing it all now', () => {
+    const result = mapEvent(loadEvent('invoice_payment_succeeded_from_credit_balance_annual'));
+
+    // The whole balance applied drains 2200 (debit → positive), but the revenue
+    // is DEFERRED to 2100, not recognized immediately in 4000.
+    const immediate = computeBalances(result.entries);
+    expect(immediate['2200']).toBe(132000);
+    expect(immediate['2100']).toBe(-120000);
+    expect(immediate['2000']).toBe(-12000);
+    expect(immediate['4000']).toBeUndefined(); // pure annual — nothing earned now
+
+    // A 12-month recognition schedule draws the deferred revenue down over the term.
+    expect(result.schedule?.entries).toHaveLength(12);
+
+    // Once the whole schedule has posted: 2100 drains to zero and 4000 is fully
+    // recognized — exactly once, over the service period.
+    const all = computeBalances(flattenMapResult(result));
+    expect(all['2100']).toBeUndefined();
+    expect(all['4000']).toBe(-120000);
+    expect(all['2200']).toBe(132000); // drained separately by the issue leg over its life
+  });
+
   it('full lifecycle: 2200 nets to zero across issue+consume and revenue is recognized exactly once', () => {
     // The economic story, in order:
     //   1. An invoice is paid by card → revenue recognized (Cr 4000).

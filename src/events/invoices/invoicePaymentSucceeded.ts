@@ -41,15 +41,15 @@ function getBalanceTxn(charge: Stripe.Charge, eventId: string): Stripe.BalanceTr
  * engine must not fabricate revenue for a payment it can't account for.
  *
  * Only a credit that covers the WHOLE invoice books: a partial credit (with the
- * rest paid another way) would need proportioning, and a deferred invoice would
- * recognize across 2100 and a schedule — neither is modeled yet (per spec scope).
+ * rest paid another way) would need proportioning, not modeled yet (per spec
+ * scope). A deferred invoice IS handled — the balance funds a fresh recognition
+ * schedule the same way a cash-paid annual invoice does (see the branch below).
  */
 function creditBalanceApplied(invoice: Stripe.Invoice): number | null {
   if (invoice.paid_out_of_band) return null;
   if (invoice.ending_balance === null) return null;
   const applied = invoice.ending_balance - invoice.starting_balance;
   if (applied <= 0 || applied !== invoice.total) return null;
-  if (partitionLineAmounts(invoice).deferredCustomer > 0) return null;
   return applied;
 }
 
@@ -211,12 +211,17 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   //
   // A credit-balance payment DOES have accounting impact: the customer spends
   // credit ledgerly booked as a 2200 liability (at credit_note.created), so the
-  // service is now delivered — recognize revenue and drain the liability. No
-  // cash moves:
+  // service is now being delivered — draw the liability down and recognize the
+  // revenue over the service term, exactly as a cash-paid invoice does. No cash
+  // moves; the whole balance applied is the single debit:
   //
   //   Dr 2200 Customer Credit Balance  amount applied from balance
-  //   Cr 4000 Subscription Revenue      pretax
+  //   Cr 4000 Subscription Revenue      immediate pre-tax (earned-now lines)
+  //   Cr 2100 Deferred Revenue          deferred pre-tax (+ a recognition schedule)
   //   Cr 2000 Sales Tax Payable         tax
+  //
+  // A wholly-immediate invoice omits 2100 and the schedule; a wholly-deferred
+  // (annual) one omits the 4000 line — the same per-line split the cash path uses.
   //
   // A marked-paid-out-of-band invoice has no ledger-visible mechanics, so it
   // stays a no-op — {@link creditBalanceApplied} tells the two apart by the
@@ -234,10 +239,28 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
     }
     const taxAmount = invoice.tax ?? 0;
     const preTax = applied - taxAmount;
+
+    // Recognize per line term, same basis as the cash path: immediate lines are
+    // earned now (4000), longer lines defer to 2100 and draw down over their
+    // term. A balance payment never crosses currencies (there is no balance
+    // transaction), so the schedule anchors on the invoice currency with no FX
+    // pro-rating. The single debit is the whole balance applied — no fee, no net
+    // split — where the cash path debits 1010/6000.
+    const { immediateCustomer, deferredCustomer } = partitionLineAmounts(invoice);
+    const lineTotal = immediateCustomer + deferredCustomer;
+    const immediatePreTax =
+      lineTotal > 0 ? Math.round((preTax * immediateCustomer) / lineTotal) : preTax;
+    const deferredPreTax = preTax - immediatePreTax;
+
     const draft: JournalLine[] = [
-      { accountCode: '2200', side: 'debit',  amount: cents(applied), memo: 'Customer credit balance applied' },
-      { accountCode: '4000', side: 'credit', amount: cents(preTax),  memo: 'Subscription revenue (paid from credit balance)' },
+      { accountCode: '2200', side: 'debit', amount: cents(applied), memo: 'Customer credit balance applied' },
     ];
+    if (immediatePreTax > 0) {
+      draft.push({ accountCode: '4000', side: 'credit', amount: cents(immediatePreTax), memo: 'Subscription revenue (paid from credit balance)' });
+    }
+    if (deferredPreTax > 0) {
+      draft.push({ accountCode: '2100', side: 'credit', amount: cents(deferredPreTax), memo: 'Deferred subscription revenue' });
+    }
     if (taxAmount > 0) {
       draft.push({ accountCode: '2000', side: 'credit', amount: cents(taxAmount), memo: 'Sales tax collected' });
     }
@@ -250,7 +273,18 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
       sourceObjectId: invoice.id,
       lines: sortLines(draft),
     };
-    return { entries: [entry], schedule: null };
+    const schedule =
+      deferredPreTax > 0
+        ? buildRecognitionSchedule(
+            event,
+            invoice,
+            cents(deferredPreTax),
+            periodMonths(invoice),
+            invoice.currency.toUpperCase(),
+            undefined,
+          )
+        : null;
+    return { entries: [entry], schedule };
   }
 
   const charge = getCharge(invoice, event.id);

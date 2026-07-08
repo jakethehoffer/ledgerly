@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [Unreleased]
+
+### Added
+
+- **Consuming credit balance for a deferred invoice**
+  (`invoice.payment_succeeded`). An invoice paid **entirely** from the customer's
+  credit balance whose lines defer revenue (annual or mixed term) now defers that
+  revenue over the service period instead of recognizing it all at once — the
+  whole balance applied is the single debit (Dr 2200), and the revenue splits to
+  Cr 4000 (earned now) / Cr 2100 (deferred) with the usual monthly recognition
+  schedule, exactly as a cash-paid annual invoice does. Previously this case was a
+  no-op. First slice of the deferred-credit-reconciliation work; the credit-note
+  draw-down against a deferred invoice is still a documented no-op (see
+  `docs/superpowers/specs/2026-07-08-deferred-credit-reconciliation.md`).
+
 ## [0.8.0] — 2026-07-08
 
 ### Added
