@@ -6,6 +6,7 @@ import { voidHasDeferredSchedule } from '../events/invoices/invoiceVoided.js';
 import { adminAuthMiddleware } from './admin.js';
 import { expandEvent } from './expand.js';
 import { buildVoidReconcileInput } from './voidReconciler.js';
+import { buildCreditReconcileInput, creditNoteNeedsReconcile } from './creditReconciler.js';
 import { consoleLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import { inMemoryMetrics } from './metrics.js';
@@ -157,6 +158,40 @@ function resolveStorage(config: ServerConfig): Storage {
           subscriptionId: `immediate:${reversal.sourceEventId}`,
           sourceEventId: reversal.sourceEventId,
         });
+        customDedup.record(eventId, now);
+        return { duplicate: false };
+      },
+      persistCreditReversal(eventId, input, now = Date.now()): PersistResult {
+        // Mirrors the first-class backends' credit draw-down against the caller's
+        // deduplicator: read the invoice's recognition rows, build the reversal +
+        // re-spread schedule from the posted/pending split, cancel the old pending
+        // rows, then post the reversal and enqueue the reduced schedule.
+        if (customDedup.has(eventId)) return { duplicate: true };
+        const rows = base.entries
+          .findScheduledBySubscription(input.subscriptionId)
+          .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+        const posted = rows
+          .filter((row) => row.status === 'posted')
+          .map((row) => row.entry);
+        const pending = rows
+          .filter((row) => row.status === 'pending' || row.status === 'failed')
+          .map((row) => row.entry);
+        const { reversal, reducedSchedule } = input.build(posted, pending);
+        for (const row of rows) {
+          if (row.status === 'pending' || row.status === 'failed') {
+            base.entries.cancelScheduled(row.id);
+          }
+        }
+        base.entries.saveImmediate(reversal, eventId);
+        base.entries.saveScheduled(reversal, {
+          subscriptionId: `immediate:${reversal.sourceEventId}`,
+          sourceEventId: reversal.sourceEventId,
+        });
+        if (reducedSchedule) {
+          for (const entry of reducedSchedule.entries) {
+            base.entries.saveScheduled(entry, reducedSchedule);
+          }
+        }
         customDedup.record(eventId, now);
         return { duplicate: false };
       },
@@ -322,6 +357,29 @@ export function createServer(config: ServerConfig): ServerInstance {
           metrics.inc('webhook_error', { type: event.type });
           log.error('Void reconciliation failed', { eventId: event.id, err });
           res.status(500).json({ error: 'Void reconciliation failed' });
+          return;
+        }
+        entryCount = 1;
+        scheduleEntryCount = 0;
+        hasSchedule = false;
+      } else if (
+        expanded.type === 'credit_note.created' &&
+        creditNoteNeedsReconcile(expanded)
+      ) {
+        // A credit note against a deferred-schedule invoice can't be booked by the
+        // stateless engine (mapEvent would throw): the reversal depends on how much
+        // has recognized, and the remaining schedule must be re-spread. Reconcile
+        // against the ledger instead — read + cancel + post + reissue happen
+        // atomically inside persistCreditReversal.
+        try {
+          persistResult = storage.persistCreditReversal(
+            event.id,
+            buildCreditReconcileInput(expanded),
+          );
+        } catch (err) {
+          metrics.inc('webhook_error', { type: event.type });
+          log.error('Credit reconciliation failed', { eventId: event.id, err });
+          res.status(500).json({ error: 'Credit reconciliation failed' });
           return;
         }
         entryCount = 1;

@@ -221,7 +221,7 @@ If `charge.invoice` is not expanded, meaning a string ID or null, refunds are bo
 | `invoice.marked_uncollectible` | B2B net-terms write-off to bad debt; charge_automatically no-op |
 | `invoice.voided` | B2B net-terms reversal; charge_automatically no-op; deferred-schedule voids reconciled statefully by the server (pure engine refuses them) |
 | `invoice.payment_succeeded` | monthly, annual-deferred, with-tax, annual-with-tax, with-app-fee, prorated-upgrade, prorated-downgrade, one-time-only, paid-from-credit-balance (drains 2200; a deferred invoice defers over its term), out-of-band no-op, B2B send_invoice (clears AR) |
-| `credit_note.created` | B2B net-terms pre-payment credit reduces AR + reverses revenue/tax; whole-to-balance post-payment credit books 2200 + reverses revenue/tax; refund-backed post-payment / deferred-schedule / charge_automatically pre-payment acknowledged as no-op |
+| `credit_note.created` | B2B net-terms pre-payment credit reduces AR + reverses revenue/tax; whole-to-balance post-payment credit books 2200 + reverses revenue/tax; deferred-schedule credit drawn down statefully by the server (pure engine refuses); refund-backed post-payment / charge_automatically pre-payment / split acknowledged as no-op |
 | `credit_note.voided` | reverses a voided credit note the engine booked — pre-payment (restores AR) or post-payment-to-balance (claws back 2200) + revenue/tax; no-op for the shapes `credit_note.created` didn't book |
 | `invoice.payment_failed` | informational |
 | `customer.subscription.updated` | informational |

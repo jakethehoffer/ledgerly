@@ -304,10 +304,11 @@ Cr  1100 Accounts Receivable               $108.00      (credit note total)
 ```
 
 The receivable drops by the credited total and the rest of the invoice stands.
-*(`credit_note_created_send_invoice_prepayment`)* Only pre-payment credits on
-`send_invoice` invoices with no deferred schedule are booked this way; a
-pre-payment credit against a deferred invoice is a no-op until a proportional
-schedule draw-down is modeled — see [Known limitations](#known-limitations).
+*(`credit_note_created_send_invoice_prepayment`)* This is the **no-deferred** case,
+booked by the pure engine. When the invoice deferred part of its revenue to a
+recognition schedule, the credit is stateful and the bundled receiver reconciles
+it — see [Crediting a deferred-schedule invoice](#crediting-a-deferred-schedule-invoice)
+below.
 
 **If you credit an already-paid invoice back to the customer's balance**
 (`credit_note.created`, a *post-payment* credit note whose credit goes entirely to
@@ -326,9 +327,32 @@ That liability drains later, when the customer spends the credit on another
 invoice (see [Customer credit balances](#customer-credit-balances)); the two legs
 net 2200 to zero and recognize the revenue exactly once, at consumption. A
 *refund-backed* post-payment credit note stays a no-op here — the cash returned is
-booked by `charge.refunded` — and a post-payment credit against a deferred invoice
-is deferred for the same reason a pre-payment one is.
+booked by `charge.refunded`. This is the **no-deferred** case; a post-payment credit
+against a deferred invoice is reconciled statefully, below.
 *(`credit_note_created_post_payment_to_balance`)*
+
+**Crediting a deferred-schedule invoice** (`credit_note.created`) is stateful,
+exactly like a deferred void. Finalization (pre-payment) or the card payment
+(post-payment) deferred part of the revenue to 2100 and built a recognition
+schedule; by the time the credit arrives, some of that schedule may already have
+recognized. The pure engine refuses this case (it can't see how much has
+recognized); the bundled receiver reconciles it against the ledger. Reading the
+schedule rows, it reduces the **still-deferred** balance first (Dr 2100) and only
+claws back recognized revenue (Dr 4000) when the credit exceeds all remaining
+deferred, reverses the tax (Dr 2000), and credits the receivable (Cr 1100,
+pre-payment) or the customer balance (Cr 2200, post-payment). It then re-spreads
+what remains deferred over the unposted months, cancelling the old schedule rows.
+So revenue already earned for delivered months stays put, and the invoice's
+lifetime revenue equals the original contract minus the credit. A three-months-in
+$300 credit on a $1,200 annual plan:
+
+```
+Dr  2100 Deferred Revenue          $300.00     (still-deferred reduced first)
+Cr  1100 Accounts Receivable               $300.00      (or Cr 2200 if to balance)
+```
+
+Cross-currency (FX) deferred credits are refused rather than approximated (see
+[Known limitations](#known-limitations)).
 
 **If a credit note was a mistake** (`credit_note.voided`), the entry it booked is
 undone with the sides flipped, restoring exactly what was there before: a
@@ -527,28 +551,32 @@ These are deliberate gaps, documented rather than approximated:
   the payment handler rejects this case with a clear error rather than
   mis-posting. Same-currency net-terms invoicing is fully modeled (see
   [Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later)).
-- **Customer credit balances — partial and deferred-credit cases** — a
-  post-payment credit note credited **entirely** to the customer's balance, and an
-  invoice paid **entirely** from that balance, are modeled (2200 Customer Credit
-  Balance — see [Customer credit balances](#customer-credit-balances)), including
-  when the consumed invoice **defers** its revenue (the balance funds a fresh
-  recognition schedule). Still gaps: a credit note **split** across a cash refund
-  and the balance (needs proportioning), and a **credit note against a deferred
-  invoice** — reversing revenue that partly sits in 2100 needs the stateful
-  schedule draw-down `invoice.voided` solves in the server, not yet generalized to
-  credit notes. Those stay a no-op.
+- **Customer credit balances — split case** — a post-payment credit note credited
+  **entirely** to the customer's balance, and an invoice paid **entirely** from that
+  balance, are modeled (2200 Customer Credit Balance — see
+  [Customer credit balances](#customer-credit-balances)), including when the
+  consumed invoice **defers** its revenue (the balance funds a fresh recognition
+  schedule). Still a gap: a credit note **split** across a cash refund and the
+  balance (needs proportioning) stays a no-op.
 - **Out-of-band payments** — an invoice marked paid out of band (`charge` `null`,
   the customer's balance untouched) is acknowledged with no entry: no cash moved
   through Stripe and no credit was drawn, so there is nothing ledger-visible to
   book.
-- **Credit notes against a deferred invoice** (`credit_note.created` /
-  `.voided`) — a pre-payment credit note against a `send_invoice` invoice with no
-  deferred schedule reduces the receivable, and a whole-to-balance post-payment
-  credit note books the 2200 liability; both reverse the credited revenue and tax.
-  A credit (pre- or post-payment) against a **deferred** invoice is acknowledged
-  with no entry, because a partial credit must draw the recognition schedule down
-  proportionally — the stateful problem `invoice.voided` solves in the server, not
-  yet generalized to credit notes.
+- **Crediting a deferred-schedule invoice — pure engine vs. bundled server**
+  (`credit_note.created`). A credit note against an invoice with **no** deferred
+  schedule is booked by the pure engine (pre-payment reduces 1100; post-payment to
+  balance books 2200). When the invoice **deferred** to a schedule, a correct
+  reversal must draw that schedule down (reduce the still-deferred balance first,
+  claw back recognized revenue only if the credit exceeds it, and re-spread the
+  remaining months) — stateful, so the pure engine *refuses* it and the bundled
+  receiver reconciles it against the ledger, exactly like a deferred void. See
+  [Crediting a deferred-schedule invoice](#crediting-a-deferred-schedule-invoice).
+  Two gaps remain: an **FX-bearing** deferred draw-down (the schedule's settlement
+  currency differs from the credit's currency) is refused rather than approximated;
+  and **voiding** a deferred credit note (`credit_note.voided`) is not yet
+  reconciled — the create-side draw-down books, but its symmetric un-draw-down (to
+  restore the schedule if the credit is later voided) stays a no-op for now, so a
+  voided deferred credit note does not undo its draw-down.
 - **Multi-period FX revaluation** — exposed via `fxContext`, not auto-posted (see
   above).
 - **Cross-currency payouts** — rejected with a clear error (see above).

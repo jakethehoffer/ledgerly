@@ -315,6 +315,72 @@ describe('createServer', () => {
       expect(storage.entries.listScheduledByStatus('posted')).toHaveLength(2);
     });
 
+    it('routes a deferred-schedule credit note through stateful reconciliation, not the engine refusal', async () => {
+      const storage = inMemoryStorage();
+      // Seed: finalize the annual net-terms invoice and recognize three months.
+      const finalized = loadFixture('invoice_finalized_send_invoice_annual').parsed;
+      storage.persistMapResult(finalized.id, mapEvent(finalized));
+      const recognition = storage.entries
+        .findScheduledBySubscription('sub_test_finalized_b2b_annual_001')
+        .filter((r) => r.entry.sourceObjectId === 'in_test_finalized_b2b_annual_001');
+      for (const row of recognition.slice(0, 3)) {
+        storage.entries.markScheduledPosted(row.id);
+      }
+
+      // expandEvent re-fetches the credit note (expand: ['invoice']); stub it to
+      // return a pre-payment credit note carrying the annual invoice inline, so no
+      // network I/O is needed. The engine refuses this deferred shape, so a wrong
+      // route through mapEvent would 500.
+      const creditNoteObject = {
+        id: 'cn_web_annual',
+        object: 'credit_note',
+        type: 'pre_payment',
+        status: 'issued',
+        currency: 'usd',
+        amount: 30000,
+        subtotal: 30000,
+        total: 30000,
+        out_of_band_amount: null,
+        refund: null,
+        customer_balance_transaction: null,
+        customer: 'cus_test_finalized_b2b_annual_001',
+        created: 1745000000,
+        invoice: finalized.data.object,
+      };
+      type CnRetrieveFn = typeof stripe.creditNotes.retrieve;
+      (
+        stripe.creditNotes as unknown as { retrieve: CnRetrieveFn }
+      ).retrieve = vi.fn().mockResolvedValue(creditNoteObject) as unknown as CnRetrieveFn;
+
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+        storage,
+      });
+
+      const creditEvent = {
+        id: 'evt_credit_web_annual',
+        object: 'event',
+        type: 'credit_note.created',
+        created: 1745000000,
+        data: { object: { id: 'cn_web_annual', object: 'credit_note' } },
+      };
+      const raw = JSON.stringify(creditEvent);
+      const res = await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', signPayload(raw))
+        .send(raw);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ok: true, entries: 1, schedule: false });
+      // The reversal posted; the 9 unposted months were cancelled and re-spread.
+      expect(storage.entries.findByEventId('evt_credit_web_annual')).toHaveLength(1);
+      expect(storage.entries.listScheduledByStatus('cancelled')).toHaveLength(9);
+      expect(storage.entries.listScheduledByStatus('posted')).toHaveLength(3);
+    });
+
     it('increments webhook_received + webhook_processed counters on success', async () => {
       const metrics = inMemoryMetrics();
       const { app } = createServer({

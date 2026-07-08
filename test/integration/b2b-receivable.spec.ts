@@ -138,8 +138,11 @@ describe('integration: B2B net-terms (send_invoice) accounts-receivable lifecycl
     expect(total).toBe(0);
   });
 
-  it('credit note on a deferred-schedule invoice is a no-op (proportional draw-down not modeled)', () => {
-    // Same pre-payment credit note, but the invoice defers (an annual line).
+  it('refuses (throws) a pre-payment credit note against a deferred-schedule invoice — the server reconciles it statefully', () => {
+    // Same pre-payment credit note, but the invoice defers (an annual line). The
+    // pure engine can't draw the recognition schedule down (how much has already
+    // recognized, which months to reduce) — refuse loudly, exactly like a
+    // deferred void. The bundled receiver routes this to the credit reconciler.
     const ev = loadEvent('credit_note_created_send_invoice_prepayment');
     const line = (
       ev.data.object as unknown as {
@@ -147,9 +150,7 @@ describe('integration: B2B net-terms (send_invoice) accounts-receivable lifecycl
       }
     ).invoice.lines.data[0];
     if (line) line.period.end = line.period.start + 365 * 24 * 60 * 60; // ~1 year
-    const result = mapEvent(ev);
-    expect(result.entries).toHaveLength(0);
-    expect(result.schedule).toBeNull();
+    expect(() => mapEvent(ev)).toThrow(/deferred/i);
   });
 
   it('refuses to void a net-terms invoice with a deferred-revenue schedule (stateful reversal not modeled)', () => {

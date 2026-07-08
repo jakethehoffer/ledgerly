@@ -262,6 +262,30 @@ export interface VoidReconcileInput {
 }
 
 /**
+ * Input to {@link Storage.persistCreditReversal}. Describes a credit note against
+ * a deferred-schedule invoice: which invoice's schedule to draw down, and how to
+ * build both the immediate reversal and the reduced (re-spread) schedule from the
+ * ledger's current recognition rows.
+ *
+ * Like {@link VoidReconcileInput}, the storage layer holds no accounting
+ * knowledge. It reads the recognition rows for `(subscriptionId, invoiceId)`,
+ * hands the already-**posted** ones (recognized) and the still-**pending** ones
+ * (remaining deferred) to `build`, cancels the pending ones, then posts the
+ * returned `reversal` as an immediate entry and enqueues the returned
+ * `reducedSchedule` (the re-spread of what remains deferred). Doing the read, the
+ * cancellations, the reissue, and the posting in one transaction means the
+ * scheduler cannot recognize another month mid-reconciliation.
+ */
+export interface CreditReconcileInput {
+  readonly subscriptionId: string;
+  readonly invoiceId: string;
+  readonly build: (
+    postedRecognition: ReadonlyArray<JournalEntry>,
+    pendingRecognition: ReadonlyArray<JournalEntry>,
+  ) => { reversal: JournalEntry; reducedSchedule: RecognitionSchedule | null };
+}
+
+/**
  * Aggregate persistence handle bundling a deduplicator and journal entry store.
  *
  * `persistMapResult` is the single-call entry point the server uses after a
@@ -328,6 +352,26 @@ export interface Storage {
   persistVoidReversal(
     eventId: string,
     input: VoidReconcileInput,
+    now?: number,
+  ): PersistResult;
+
+  /**
+   * Persist a credit-note draw-down against a deferred-schedule invoice, and
+   * record `eventId` as processed. Idempotent the same way as
+   * {@link persistVoidReversal}: a duplicate `eventId` writes nothing and returns
+   * `{ duplicate: true }`.
+   *
+   * In one transaction: claim `eventId`; read the recognition rows for
+   * `(subscriptionId, invoiceId)`; pass the `'posted'` and `'pending'`/`'failed'`
+   * ones to `input.build`; transition the pending/failed ones to `'cancelled'` so
+   * the scheduler never posts the pre-credit schedule; persist the returned
+   * `reversal` as an immediate posting (audit log + dispatch queue); and enqueue
+   * the returned `reducedSchedule` rows (the re-spread of what remains deferred),
+   * exactly as {@link persistMapResult} does for a schedule.
+   */
+  persistCreditReversal(
+    eventId: string,
+    input: CreditReconcileInput,
     now?: number,
   ): PersistResult;
 }

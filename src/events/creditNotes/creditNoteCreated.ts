@@ -5,7 +5,11 @@ import { requireExpanded } from '../../errors.js';
 import { epochToUtcDate } from '../../util/dates.js';
 import { sortLines } from '../../util/lines.js';
 import { creditNoteMemo } from '../../util/memo.js';
-import { balanceCreditAmounts, prepaymentCreditAmounts } from './shared.js';
+import {
+  balanceCreditAmounts,
+  creditNoteHasDeferredSchedule,
+  prepaymentCreditAmounts,
+} from './shared.js';
 
 /**
  * `credit_note.created` — a credit note adjusts an invoice after it was issued.
@@ -40,13 +44,15 @@ import { balanceCreditAmounts, prepaymentCreditAmounts } from './shared.js';
  *     by `charge.refunded`, not here.
  *   - a **`charge_automatically`** invoice's *pre-payment* credit note: it never
  *     debited 1100, so there is no receivable to reduce.
- *   - a `pre_payment` (or post-payment-to-balance) credit note against an
- *     invoice that **deferred** revenue to a recognition schedule: reversing it
- *     correctly needs to draw down the schedule proportionally (how much has
- *     recognized, which future months to reduce) — the stateful problem
- *     `invoice.voided` solves in the server. Until a credit-note reconciler
- *     exists, booking only the immediate slice would be wrong, so this no-ops.
  *   - a voided credit note (`status !== 'issued'`) or a zero-total one.
+ *
+ * One bookable shape is **refused** rather than no-op'd: a pre-payment or
+ * post-payment-to-balance credit note against an invoice that **deferred**
+ * revenue to a recognition schedule. Reversing it correctly needs to draw the
+ * schedule down proportionally (how much has recognized, which future months to
+ * reduce) — the stateful problem `invoice.voided` solves in the server. The pure
+ * engine throws (like a deferred void); the bundled receiver routes it to the
+ * credit reconciler before mapEvent.
  */
 export function handleCreditNoteCreated(event: Stripe.Event): MapResult {
   if (event.type !== 'credit_note.created') {
@@ -62,6 +68,22 @@ export function handleCreditNoteCreated(event: Stripe.Event): MapResult {
     'credit_note.invoice',
     event.id,
   );
+
+  // A bookable credit note against a deferred-schedule invoice is refused here,
+  // exactly as a deferred invoice.voided is: reversing revenue that partly sits
+  // in 2100 needs the stateful schedule draw-down a per-event engine can't do.
+  // The bundled receiver routes this to the credit reconciler before mapEvent,
+  // so this throw is only reached by a direct-engine caller (no ledger).
+  if (creditNoteHasDeferredSchedule(creditNote, invoice)) {
+    throw new Error(
+      `Crediting deferred invoice ${invoice.id} is not supported by the pure ` +
+        `engine: reversing revenue that partly sits in 2100 on a recognition ` +
+        `schedule needs a proportional draw-down (how much has recognized, which ` +
+        `months to reduce) — stateful facts a per-event engine doesn't track. The ` +
+        `bundled receiver reconciles it against the ledger, like a deferred ` +
+        `invoice.voided.`,
+    );
+  }
 
   const prepayment = prepaymentCreditAmounts(creditNote, invoice);
   if (prepayment !== null) {

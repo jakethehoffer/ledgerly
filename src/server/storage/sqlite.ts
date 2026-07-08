@@ -3,6 +3,7 @@ import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal
 import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
 import { applyMigrations } from './migrations.js';
 import type {
+  CreditReconcileInput,
   Deduplicator,
   JournalEntryStore,
   OAuthTokenStore,
@@ -638,6 +639,64 @@ export function sqliteStorage(db: Database.Database): Storage {
     },
   );
 
+  const persistCreditTxn = db.transaction(
+    (eventId: string, input: CreditReconcileInput, now: number): PersistResult => {
+      // Claim first (same compare-and-set as persistMapResult), so a duplicate
+      // credit delivery writes nothing and rolls back cleanly on any later throw.
+      const claim = recordEvent.run(eventId, now);
+      if (claim.changes === 0) {
+        return { duplicate: true };
+      }
+      // Read this invoice's recognition rows, split posted (recognized) from
+      // pending (still deferred), build the reversal + re-spread schedule, then
+      // cancel the old pending rows — all in one transaction, so the scheduler
+      // cannot recognize another month mid-reconciliation.
+      const rows = selectBySubscriptionForVoid
+        .all(input.subscriptionId)
+        .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
+        .filter(({ entry }) => entry.sourceObjectId === input.invoiceId);
+      const posted = rows
+        .filter(({ row }) => row.status === 'posted')
+        .map(({ entry }) => entry);
+      const pending = rows
+        .filter(({ row }) => row.status === 'pending' || row.status === 'failed')
+        .map(({ entry }) => entry);
+      const { reversal, reducedSchedule } = input.build(posted, pending);
+      for (const { row } of rows) {
+        if (row.status === 'pending' || row.status === 'failed') {
+          cancelForVoid.run(row.id);
+        }
+      }
+      insertImmediate.run(
+        eventId,
+        now,
+        reversal.date,
+        reversal.currency,
+        reversal.memo,
+        reversal.sourceEventType,
+        reversal.sourceObjectId ?? null,
+        JSON.stringify(reversal),
+      );
+      insertScheduled.run(
+        reversal.sourceEventId,
+        `immediate:${reversal.sourceEventId}`,
+        reversal.date,
+        JSON.stringify(reversal),
+      );
+      if (reducedSchedule) {
+        for (const entry of reducedSchedule.entries) {
+          insertScheduled.run(
+            reducedSchedule.sourceEventId,
+            reducedSchedule.subscriptionId,
+            entry.date,
+            JSON.stringify(entry),
+          );
+        }
+      }
+      return { duplicate: false };
+    },
+  );
+
   // Prepared once for the lifetime of this Storage instance; readiness
   // probes call this on every request and the prepare cost should not
   // be in the hot path.
@@ -666,6 +725,13 @@ export function sqliteStorage(db: Database.Database): Storage {
       now: number = Date.now(),
     ): PersistResult {
       return persistVoidTxn(eventId, input, now);
+    },
+    persistCreditReversal(
+      eventId: string,
+      input: CreditReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      return persistCreditTxn(eventId, input, now);
     },
   };
 }

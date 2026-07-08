@@ -10,6 +10,19 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ### Added
 
+- **Crediting a deferred-schedule invoice** (`credit_note.created`). A credit note
+  against an invoice that deferred revenue to a recognition schedule is now
+  reconciled statefully by the bundled receiver, exactly like a deferred
+  `invoice.voided`. It reduces the still-deferred balance first (Dr 2100), claws
+  back recognized revenue (Dr 4000) only when the credit exceeds all remaining
+  deferred, reverses the tax (Dr 2000), and credits the receivable (Cr 1100,
+  pre-payment) or the customer balance (Cr 2200, post-payment-to-balance) — then
+  re-spreads what remains deferred over the unposted months and cancels the old
+  schedule rows. New `Storage.persistCreditReversal` (both backends) and
+  `src/server/creditReconciler.ts`. Previously a no-op. FX-bearing draw-downs are
+  refused (same-currency only); voiding a deferred credit note is not yet
+  reconciled (a documented follow-up).
+
 - **Consuming credit balance for a deferred invoice**
   (`invoice.payment_succeeded`). An invoice paid **entirely** from the customer's
   credit balance whose lines defer revenue (annual or mixed term) now defers that
@@ -17,9 +30,17 @@ Pre-1.0 means breaking changes can happen in any minor release.
   whole balance applied is the single debit (Dr 2200), and the revenue splits to
   Cr 4000 (earned now) / Cr 2100 (deferred) with the usual monthly recognition
   schedule, exactly as a cash-paid annual invoice does. Previously this case was a
-  no-op. First slice of the deferred-credit-reconciliation work; the credit-note
-  draw-down against a deferred invoice is still a documented no-op (see
+  no-op. First slice of the deferred-credit-reconciliation work (see
   `docs/superpowers/specs/2026-07-08-deferred-credit-reconciliation.md`).
+
+### Changed
+
+- **The pure engine now refuses (throws on) a credit note against a
+  deferred-schedule invoice**, instead of silently no-op'ing it — matching how a
+  deferred `invoice.voided` already throws. A correct reversal needs the stateful
+  schedule draw-down only the bundled receiver can do, which now routes these
+  before `mapEvent`. A consumer calling `mapEvent` directly (no ledger) sees the
+  refusal; full deployments using the receiver are unaffected.
 
 ## [0.8.0] — 2026-07-08
 

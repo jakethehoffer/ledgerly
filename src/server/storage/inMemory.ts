@@ -1,6 +1,7 @@
 import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal.js';
 import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
 import type {
+  CreditReconcileInput,
   Deduplicator,
   JournalEntryStore,
   OAuthTokenStore,
@@ -340,6 +341,43 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         subscriptionId: `immediate:${reversal.sourceEventId}`,
         sourceEventId: reversal.sourceEventId,
       });
+      dedup.record(eventId, now);
+      return { duplicate: false };
+    },
+    persistCreditReversal(
+      eventId: string,
+      input: CreditReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      // Same idempotency boundary as persistVoidReversal. Read the invoice's
+      // recognition rows, hand the posted (recognized) and pending (still
+      // deferred) ones to build(), cancel the pending ones, post the reversal,
+      // and enqueue the re-spread schedule — atomic under JS single-threaded
+      // semantics (no await between has() and record()).
+      if (dedup.has(eventId)) return { duplicate: true };
+      const rows = entries
+        .findScheduledBySubscription(input.subscriptionId)
+        .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+      const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
+      const pending = rows
+        .filter((row) => row.status === 'pending' || row.status === 'failed')
+        .map((row) => row.entry);
+      const { reversal, reducedSchedule } = input.build(posted, pending);
+      for (const row of rows) {
+        if (row.status === 'pending' || row.status === 'failed') {
+          entries.cancelScheduled(row.id);
+        }
+      }
+      entries.saveImmediate(reversal, eventId);
+      entries.saveScheduled(reversal, {
+        subscriptionId: `immediate:${reversal.sourceEventId}`,
+        sourceEventId: reversal.sourceEventId,
+      });
+      if (reducedSchedule) {
+        for (const entry of reducedSchedule.entries) {
+          entries.saveScheduled(entry, reducedSchedule);
+        }
+      }
       dedup.record(eventId, now);
       return { duplicate: false };
     },
