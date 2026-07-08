@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.8.0] — 2026-07-08
+
+### Added
+
+- **Customer credit balances** — a new account `2200 Customer Credit Balance`
+  (Liability) and both legs of the credit's life.
+  - **Issue leg** (`credit_note.created`). A *post-payment* credit note whose
+    credit goes **entirely** to the customer's balance
+    (`customer_balance_transaction` present, no refund, no out-of-band amount),
+    against a non-deferred invoice, reverses the already-recognized revenue and
+    books the credit owed: Dr 4000 (subtotal), Dr 2000 (tax), Cr 2200 (total).
+    The cash already collected stays put. Refund-backed post-payment credits
+    remain a no-op (booked by `charge.refunded`). `credit_note.voided` un-books
+    this symmetrically (Dr 2200, Cr 4000, Cr 2000).
+  - **Consume leg** (`invoice.payment_succeeded`). An invoice paid **entirely**
+    from the customer's credit balance (`charge` `null`) recognizes the revenue
+    now — the service is delivered — and drains the liability: Dr 2200 (amount
+    applied), Cr 4000 (pre-tax), Cr 2000 (tax). The amount applied is read from
+    the invoice's `ending_balance - starting_balance` delta, populated exactly
+    when Stripe drew down the balance; an invoice **marked paid out of band**
+    (balance untouched) stays a no-op, so out-of-band invoices never fabricate
+    revenue. Over a credit's life the two legs net 2200 to zero and recognize the
+    revenue exactly once, at consumption.
+  - Still deferred (documented): a credit note **split** across a cash refund and
+    the balance (needs proportioning), and either leg against a **deferred**
+    invoice (revenue spans 2100 and a recognition schedule).
+
+### Changed
+
+- **Account maps must now include `2200`.** Like `6200 Bad Debt Expense` in
+  v0.4.0, adding `2200` to `AccountCode` is a compile-time break for TypeScript
+  consumers: every `QboAccountMap` / `XeroAccountMap` must map the new code. Add a
+  `2200` entry to your account map before upgrading.
+
 ## [0.7.0] — 2026-07-08
 
 ### Added

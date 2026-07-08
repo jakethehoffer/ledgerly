@@ -21,7 +21,7 @@ Every claim here is enforced by a fixture test under
   `balance_transaction` (`bt.amount` / `bt.fee` / `bt.net`) — the currency your
   Stripe balance actually moved in — not the customer-facing charge currency.
   For same-currency businesses these are identical. See [Foreign exchange](#foreign-exchange).
-- **The caller maps account codes.** ledgerly emits 13 stable account *codes*;
+- **The caller maps account codes.** ledgerly emits 14 stable account *codes*;
   you map each to your real QuickBooks/Xero account once. Codes and names are in
   the README's [Chart of accounts](../README.md#chart-of-accounts).
 
@@ -35,6 +35,7 @@ Account codes referenced below:
 | 1200 | Disputes Receivable | Asset |
 | 2000 | Sales Tax Payable | Liability |
 | 2100 | Deferred Revenue | Liability |
+| 2200 | Customer Credit Balance | Liability |
 | 4000 | Subscription Revenue | Revenue |
 | 4100 | Application Fee Revenue | Revenue |
 | 4900 | Refunds Issued | Contra-revenue |
@@ -156,12 +157,38 @@ Cr  2000 Sales Tax Payable           (tax collected)
 An invoice with `amount_paid` of $0 (e.g. a fully-discounted or $0 trial invoice)
 produces no entry.
 
-An invoice paid **without a charge** — entirely from the customer's credit
-balance, or marked paid out of band (`charge` is `null`) — also produces no
-entry. No cash moved through the Stripe balance on this event, and ledgerly
-doesn't model customer credit balances (see [Known limitations](#known-limitations)),
-so it acknowledges the event rather than booking a leg it can't balance.
+### Customer credit balances
+
+A customer can carry a **credit balance** with Stripe — money the business owes
+them as future account credit rather than cash. Two events touch it, and they net
+to zero over the credit's life:
+
+**Consuming the credit** happens here, on `invoice.payment_succeeded`. An invoice
+paid **from the customer's credit balance** arrives with `charge` `null` — no cash
+moved through the Stripe balance. But it still has accounting impact: the customer
+is spending credit ledgerly booked as a **2200 Customer Credit Balance** liability
+(the issue leg is on `credit_note.created` — see
+[Crediting a paid invoice to balance](#net-terms-invoices-b2b-invoice-now-pay-later)),
+so the service is now delivered. Revenue is recognized and the liability drains:
+
+```
+Dr  2200 Customer Credit Balance    $55.00   (amount applied from balance)
+Cr  4000 Subscription Revenue                $50.00   (pre-tax)
+Cr  2000 Sales Tax Payable                    $5.00   (tax)
+```
+
+The amount applied is read from the invoice's `ending_balance - starting_balance`
+delta — Stripe draws the customer's (negative) credit balance up toward zero to
+cover the invoice, so that delta is populated exactly when balance funded the
+payment. Only a credit that covers the **whole** invoice against a **non-deferred**
+invoice is booked; a partial credit balance or a deferred invoice stays a no-op
+(see [Known limitations](#known-limitations)).
 *(`invoice_payment_succeeded_paid_from_credit_balance`)*
+
+An invoice **marked paid out of band** (`charge` is `null`, but the balance is
+untouched) produces no entry: nothing ledger-visible moved, so booking one would
+fabricate revenue the engine can't balance. The balance delta tells the two apart.
+*(`invoice_payment_succeeded_out_of_band`)*
 
 ### Net-terms invoices (B2B: invoice now, pay later)
 
@@ -263,18 +290,39 @@ Cr  1100 Accounts Receivable               $108.00      (credit note total)
 
 The receivable drops by the credited total and the rest of the invoice stands.
 *(`credit_note_created_send_invoice_prepayment`)* Only pre-payment credits on
-`send_invoice` invoices with no deferred schedule are booked; a *post-payment*
-credit note (the invoice was already paid) is a no-op here because any cash
-returned is booked by `charge.refunded`, and a credit note against a deferred
-invoice is a no-op until a proportional schedule draw-down is modeled — see
-[Known limitations](#known-limitations).
+`send_invoice` invoices with no deferred schedule are booked this way; a
+pre-payment credit against a deferred invoice is a no-op until a proportional
+schedule draw-down is modeled — see [Known limitations](#known-limitations).
 
-**If that credit note was a mistake** (`credit_note.voided`), the entry above is
-undone with the sides flipped — Dr 1100, Cr 4000, Cr 2000 — restoring the
-receivable, revenue, and tax. Both events gate on the same conditions, so a void
-un-books exactly what creation booked, and voiding a credit note ledgerly never
-booked (post-payment, deferred, `charge_automatically`) is itself a no-op.
-*(`credit_note_voided_send_invoice_prepayment`)*
+**If you credit an already-paid invoice back to the customer's balance**
+(`credit_note.created`, a *post-payment* credit note whose credit goes entirely to
+`customer_balance_transaction` rather than a cash refund), the customer keeps the
+money as account credit. The invoice's revenue was recognized when it was paid, so
+returning it reverses that revenue and books the credit owed as a **2200 Customer
+Credit Balance** liability; the cash already collected stays put:
+
+```
+Dr  4000 Subscription Revenue      $50.00     (credit note subtotal)
+Dr  2000 Sales Tax Payable          $5.00     (credit note tax)
+Cr  2200 Customer Credit Balance           $55.00      (credit note total)
+```
+
+That liability drains later, when the customer spends the credit on another
+invoice (see [Customer credit balances](#customer-credit-balances)); the two legs
+net 2200 to zero and recognize the revenue exactly once, at consumption. A
+*refund-backed* post-payment credit note stays a no-op here — the cash returned is
+booked by `charge.refunded` — and a post-payment credit against a deferred invoice
+is deferred for the same reason a pre-payment one is.
+*(`credit_note_created_post_payment_to_balance`)*
+
+**If a credit note was a mistake** (`credit_note.voided`), the entry it booked is
+undone with the sides flipped, restoring exactly what was there before: a
+pre-payment note restores the receivable (Dr 1100, Cr 4000, Cr 2000); a
+post-payment-to-balance note claws the credit back (Dr 2200, Cr 4000, Cr 2000).
+Both events gate on the same conditions, so a void un-books exactly what creation
+booked, and voiding a credit note ledgerly never booked (refund-backed
+post-payment, deferred, a `charge_automatically` pre-payment) is itself a no-op.
+*(`credit_note_voided_send_invoice_prepayment`, `credit_note_voided_post_payment_to_balance`)*
 
 ## A refund: `charge.refunded`
 
@@ -464,19 +512,27 @@ These are deliberate gaps, documented rather than approximated:
   the payment handler rejects this case with a clear error rather than
   mis-posting. Same-currency net-terms invoicing is fully modeled (see
   [Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later)).
-- **Customer credit balances / out-of-band payments** — an invoice paid with no
-  charge (`charge` is `null`) is acknowledged with no entry rather than booked.
-  Modeling it would need a customer-credit liability account and handling of the
-  credit-note events that create the balance, neither of which exists yet.
-- **Credit notes beyond the pre-payment / no-deferred case** (`credit_note.created`).
-  A pre-payment credit note against a `send_invoice` invoice with no deferred
-  schedule reduces the receivable and reverses the credited revenue and tax. The
-  other shapes are acknowledged with no entry: a *post-payment* credit note (any
-  refund is booked by `charge.refunded`; a customer-balance credit needs the
-  liability account above), and a *pre-payment* credit against a deferred invoice
-  (a partial credit must draw the recognition schedule down proportionally — the
-  stateful problem `invoice.voided` solves in the server, not yet generalized to
-  credit notes).
+- **Customer credit balances — partial and deferred cases** — a post-payment
+  credit note credited **entirely** to the customer's balance, and an invoice paid
+  **entirely** from that balance against a non-deferred invoice, are both modeled
+  (2200 Customer Credit Balance — see
+  [Customer credit balances](#customer-credit-balances)). Still gaps: a credit
+  note **split** across a cash refund and the balance (needs proportioning), and
+  either leg against a **deferred** invoice (the credited/consumed revenue spans
+  2100 and a recognition schedule — the same stateful draw-down `invoice.voided`
+  solves in the server, not yet generalized). Those stay a no-op.
+- **Out-of-band payments** — an invoice marked paid out of band (`charge` `null`,
+  the customer's balance untouched) is acknowledged with no entry: no cash moved
+  through Stripe and no credit was drawn, so there is nothing ledger-visible to
+  book.
+- **Credit notes against a deferred invoice** (`credit_note.created` /
+  `.voided`) — a pre-payment credit note against a `send_invoice` invoice with no
+  deferred schedule reduces the receivable, and a whole-to-balance post-payment
+  credit note books the 2200 liability; both reverse the credited revenue and tax.
+  A credit (pre- or post-payment) against a **deferred** invoice is acknowledged
+  with no entry, because a partial credit must draw the recognition schedule down
+  proportionally — the stateful problem `invoice.voided` solves in the server, not
+  yet generalized to credit notes.
 - **Multi-period FX revaluation** — exposed via `fxContext`, not auto-posted (see
   above).
 - **Cross-currency payouts** — rejected with a clear error (see above).

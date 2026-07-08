@@ -29,6 +29,30 @@ function getBalanceTxn(charge: Stripe.Charge, eventId: string): Stripe.BalanceTr
   );
 }
 
+/**
+ * The amount of customer credit balance applied to a chargeless invoice, or
+ * `null` when the invoice is not a whole-invoice, non-deferred credit-balance
+ * payment ledgerly books.
+ *
+ * Stripe applies customer credit by drawing the customer's (negative) balance up
+ * toward zero, so the amount applied is `ending_balance - starting_balance`,
+ * positive exactly when the balance funded the invoice. An invoice marked paid
+ * out of band leaves the balance untouched (delta 0), so it stays a no-op — the
+ * engine must not fabricate revenue for a payment it can't account for.
+ *
+ * Only a credit that covers the WHOLE invoice books: a partial credit (with the
+ * rest paid another way) would need proportioning, and a deferred invoice would
+ * recognize across 2100 and a schedule — neither is modeled yet (per spec scope).
+ */
+function creditBalanceApplied(invoice: Stripe.Invoice): number | null {
+  if (invoice.paid_out_of_band) return null;
+  if (invoice.ending_balance === null) return null;
+  const applied = invoice.ending_balance - invoice.starting_balance;
+  if (applied <= 0 || applied !== invoice.total) return null;
+  if (partitionLineAmounts(invoice).deferredCustomer > 0) return null;
+  return applied;
+}
+
 function buildMonthlyEntry(
   event: Stripe.Event,
   invoice: Stripe.Invoice,
@@ -183,19 +207,50 @@ export function handleInvoicePaymentSucceeded(event: Stripe.Event): MapResult {
   // An invoice can be paid without a charge: entirely from the customer's
   // credit balance, or marked paid out of band. There's no charge and no
   // balance transaction, so no cash moved through the Stripe balance on this
-  // event. ledgerly doesn't model the customer-credit-balance / out-of-band
-  // mechanics (there's no customer-credit liability account, and the credit
-  // itself is created by events — credit notes — the engine doesn't handle),
-  // so a fabricated entry would be wrong and can't be balanced. Acknowledge
-  // with no entry, like the other no-accounting-impact events, rather than
-  // throwing and forcing Stripe into a perpetual webhook-retry loop.
+  // event.
+  //
+  // A credit-balance payment DOES have accounting impact: the customer spends
+  // credit ledgerly booked as a 2200 liability (at credit_note.created), so the
+  // service is now delivered — recognize revenue and drain the liability. No
+  // cash moves:
+  //
+  //   Dr 2200 Customer Credit Balance  amount applied from balance
+  //   Cr 4000 Subscription Revenue      pretax
+  //   Cr 2000 Sales Tax Payable         tax
+  //
+  // A marked-paid-out-of-band invoice has no ledger-visible mechanics, so it
+  // stays a no-op — {@link creditBalanceApplied} tells the two apart by the
+  // balance delta and returns null for the out-of-band case, rather than
+  // fabricating an entry the engine can't balance.
   //
   // This is specifically `charge` being ABSENT (null — Stripe always sends the
   // field, set to null, for these invoices). A charge present as an unexpanded
   // string id still throws below via getCharge — that is a caller error (forgot
   // to expand), not a credit-balance invoice.
   if (invoice.charge === null) {
-    return { entries: [], schedule: null };
+    const applied = creditBalanceApplied(invoice);
+    if (applied === null) {
+      return { entries: [], schedule: null };
+    }
+    const taxAmount = invoice.tax ?? 0;
+    const preTax = applied - taxAmount;
+    const draft: JournalLine[] = [
+      { accountCode: '2200', side: 'debit',  amount: cents(applied), memo: 'Customer credit balance applied' },
+      { accountCode: '4000', side: 'credit', amount: cents(preTax),  memo: 'Subscription revenue (paid from credit balance)' },
+    ];
+    if (taxAmount > 0) {
+      draft.push({ accountCode: '2000', side: 'credit', amount: cents(taxAmount), memo: 'Sales tax collected' });
+    }
+    const entry: JournalEntry = {
+      date: epochToUtcDate(event.created),
+      currency: invoice.currency.toUpperCase(),
+      memo: invoiceMemo(invoice),
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+      sourceObjectId: invoice.id,
+      lines: sortLines(draft),
+    };
+    return { entries: [entry], schedule: null };
   }
 
   const charge = getCharge(invoice, event.id);

@@ -1,4 +1,18 @@
 {
-  "entries": [],
+  "entries": [
+    {
+      "date": "2025-01-15",
+      "currency": "USD",
+      "memo": "Stripe invoice in_test_credit_balance_001 (customer cus_test_credit_balance_001)",
+      "sourceEventId": "evt_test_invoice_credit_balance_001",
+      "sourceEventType": "invoice.payment_succeeded",
+      "sourceObjectId": "in_test_credit_balance_001",
+      "lines": [
+        { "accountCode": "2200", "side": "debit", "amount": 5500, "memo": "Customer credit balance applied" },
+        { "accountCode": "2000", "side": "credit", "amount": 500, "memo": "Sales tax collected" },
+        { "accountCode": "4000", "side": "credit", "amount": 5000, "memo": "Subscription revenue (paid from credit balance)" }
+      ]
+    }
+  ],
   "schedule": null
 }

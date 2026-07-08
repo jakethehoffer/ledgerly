@@ -13,6 +13,7 @@ const accountMap: QboAccountMap = {
   '1200': { qboId: 'qbo-1200', name: 'Disputes Receivable' },
   '2000': { qboId: 'qbo-2000', name: 'Sales Tax Payable' },
   '2100': { qboId: 'qbo-2100', name: 'Deferred Revenue' },
+  '2200': { qboId: 'qbo-2200', name: 'Customer Credit Balance' },
   '4000': { qboId: 'qbo-4000', name: 'Subscription Revenue' },
   '4100': { qboId: 'qbo-4100', name: 'App Fee Revenue' },
   '4900': { qboId: 'qbo-4900', name: 'Refunds' },

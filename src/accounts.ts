@@ -1,6 +1,6 @@
 export type AccountCode =
   | '1000' | '1010' | '1100' | '1200'
-  | '2000' | '2100'
+  | '2000' | '2100' | '2200'
   | '4000' | '4100' | '4900'
   | '6000' | '6100' | '6200'
   | '7000';
@@ -35,6 +35,7 @@ export const ACCOUNTS: Readonly<Record<AccountCode, AccountDef>> = {
   '1200': { code: '1200', name: 'Disputes Receivable',     type: 'Asset',         normalBalance: 'debit'  },
   '2000': { code: '2000', name: 'Sales Tax Payable',       type: 'Liability',     normalBalance: 'credit' },
   '2100': { code: '2100', name: 'Deferred Revenue',        type: 'Liability',     normalBalance: 'credit' },
+  '2200': { code: '2200', name: 'Customer Credit Balance', type: 'Liability',     normalBalance: 'credit' },
   '4000': { code: '4000', name: 'Subscription Revenue',    type: 'Revenue',       normalBalance: 'credit' },
   '4100': { code: '4100', name: 'Application Fee Revenue', type: 'Revenue',       normalBalance: 'credit' },
   '4900': { code: '4900', name: 'Refunds Issued',          type: 'ContraRevenue', normalBalance: 'debit'  },

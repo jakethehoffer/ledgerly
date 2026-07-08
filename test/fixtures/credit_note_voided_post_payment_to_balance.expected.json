@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-03-04",
+      "currency": "USD",
+      "memo": "Stripe credit note cn_test_to_balance_001 (invoice in_test_paid_sub_monthly_001)",
+      "sourceEventId": "evt_test_credit_note_to_balance_voided_001",
+      "sourceEventType": "credit_note.voided",
+      "sourceObjectId": "cn_test_to_balance_001",
+      "lines": [
+        { "accountCode": "2200", "side": "debit", "amount": 5500, "memo": "Customer credit balance reversed — credit note voided" },
+        { "accountCode": "2000", "side": "credit", "amount": 500, "memo": "Sales tax restored — credit note voided" },
+        { "accountCode": "4000", "side": "credit", "amount": 5000, "memo": "Revenue restored — credit note voided" }
+      ]
+    }
+  ],
+  "schedule": null
+}

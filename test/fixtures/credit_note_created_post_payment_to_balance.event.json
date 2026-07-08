@@ -1,0 +1,62 @@
+{
+  "id": "evt_test_credit_note_to_balance_001",
+  "object": "event",
+  "api_version": "2024-12-18.acacia",
+  "created": 1740816000,
+  "type": "credit_note.created",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "cn_test_to_balance_001",
+      "object": "credit_note",
+      "amount": 5500,
+      "subtotal": 5000,
+      "total": 5500,
+      "currency": "usd",
+      "type": "post_payment",
+      "status": "issued",
+      "reason": "product_unsatisfactory",
+      "out_of_band_amount": 0,
+      "refund": null,
+      "customer_balance_transaction": "cbtxn_test_to_balance_001",
+      "customer": "cus_test_credit_balance_001",
+      "created": 1740816000,
+      "invoice": {
+        "id": "in_test_paid_sub_monthly_001",
+        "object": "invoice",
+        "collection_method": "charge_automatically",
+        "amount_due": 5500,
+        "amount_paid": 5500,
+        "amount_remaining": 0,
+        "currency": "usd",
+        "customer": "cus_test_credit_balance_001",
+        "tax": 500,
+        "subtotal": 5000,
+        "lines": {
+          "object": "list",
+          "data": [
+            {
+              "id": "il_test_paid_sub_monthly_001",
+              "object": "line_item",
+              "amount": 5000,
+              "currency": "usd",
+              "description": "Team plan (monthly)",
+              "period": { "start": 1736942400, "end": 1739620800 },
+              "proration": false,
+              "subscription": "sub_test_credit_balance_001",
+              "type": "subscription"
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/invoices/in_test_paid_sub_monthly_001/lines"
+        },
+        "status": "paid",
+        "subscription": "sub_test_credit_balance_001",
+        "total": 5500
+      }
+    }
+  }
+}
