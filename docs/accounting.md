@@ -223,9 +223,25 @@ finalization until the invoice is paid or written off (recognition moves 2100 �
 4000 and never touches 1100), the write-off clears the receivable exactly no
 matter how much has been recognized. *(`invoice_marked_uncollectible_send_invoice`)*
 
-(Voiding an invoice — `invoice.voided` — instead *reverses* the revenue, which
-interacts with the recognition schedule and isn't modeled yet; see
-[Known limitations](#known-limitations).)
+**If the invoice was issued in error** (`invoice.voided`), the finalization is
+*reversed* — the invoice is treated as if never issued, the opposite of a
+write-off:
+
+```
+Dr  4000 Subscription Revenue      $500.00
+Dr  2000 Sales Tax Payable          $40.00
+Cr  1100 Accounts Receivable               $540.00
+```
+
+Because a void only applies to an open, unpaid invoice, 1100 still carries the
+full gross from finalization, so reversing it against the same gross zeroes
+every account the invoice touched — no revenue, no receivable, no tax left
+behind. *(`invoice_voided_send_invoice_monthly`)*
+
+This is modeled only for net-terms invoices with **no deferred portion** (every
+line earned now, so finalization built no recognition schedule). Voiding an
+invoice that *did* defer to 2100 is refused rather than approximated — see
+[Known limitations](#known-limitations).
 
 ## A refund: `charge.refunded`
 
@@ -399,12 +415,15 @@ isn't handled yet.
 
 These are deliberate gaps, documented rather than approximated:
 
-- **Voiding a net-terms invoice** (`invoice.voided`) — unlike an uncollectible
-  write-off (which only touches the 1100 receivable), a void *reverses* the
-  recognized revenue, which interacts with the deferred-revenue schedule: a
-  stateless per-event engine can't know how much of a deferred invoice has
-  already been recognized when the void arrives. Not modeled yet; the
-  uncollectible path (`invoice.marked_uncollectible`) is.
+- **Voiding a net-terms invoice with a deferred-revenue schedule**
+  (`invoice.voided`) — a void of a net-terms invoice with **no** deferred portion
+  is modeled (it reverses the finalization entry; see
+  [Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later)). But when
+  part of the invoice deferred to 2100 and recognizes monthly, a correct reversal
+  depends on how much has already been recognized when the void arrives and on
+  cancelling the unposted schedule entries — stateful facts a per-event engine
+  doesn't track. That case is refused with a clear error rather than mis-posted,
+  the same way the cross-currency B2B payment path is.
 - **Cross-currency B2B (net-terms) settlement** — a `send_invoice` invoice billed
   in one currency but paid in another. The 1100 receivable is booked in the
   invoice currency at finalization, so clearing it in a different settlement

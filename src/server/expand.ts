@@ -74,6 +74,7 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
     // on invoice.payment_succeeded).
     case 'invoice.finalized':
     case 'invoice.marked_uncollectible':
+    case 'invoice.voided':
     case 'charge.failed':
     case 'charge.dispute.created':
     case 'invoice.payment_failed':

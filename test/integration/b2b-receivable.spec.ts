@@ -80,6 +80,41 @@ describe('integration: B2B net-terms (send_invoice) accounts-receivable lifecycl
     expect(result.schedule).toBeNull();
   });
 
+  it('voided (monthly): finalize then void reverses the receivable, revenue, and tax to zero', () => {
+    const balances = replayAll([
+      'invoice_finalized_send_invoice_monthly',
+      'invoice_voided_send_invoice_monthly',
+    ]);
+
+    // Unlike an uncollectible write-off, a void reverses everything the
+    // finalization booked — the invoice is treated as if never issued.
+    expect(balances['1100']).toBeUndefined();
+    expect(balances['4000']).toBeUndefined();
+    expect(balances['2000']).toBeUndefined();
+    // No bad-debt expense: a void is not a shortfall, it is a cancellation.
+    expect(balances['6200']).toBeUndefined();
+
+    const total = Object.values(balances).reduce<number>((a, v) => a + (v ?? 0), 0);
+    expect(total).toBe(0);
+  });
+
+  it('voided on a charge_automatically invoice is a no-op (no receivable was booked)', () => {
+    const result = mapEvent(loadEvent('invoice_voided_charge_automatically'));
+    expect(result.entries).toHaveLength(0);
+    expect(result.schedule).toBeNull();
+  });
+
+  it('refuses to void a net-terms invoice with a deferred-revenue schedule (stateful reversal not modeled)', () => {
+    // The annual finalized fixture defers to 2100 and builds a 12-month
+    // recognition schedule. Voiding it would require reversing however much
+    // has already been recognized and cancelling the unposted remainder —
+    // state the stateless engine doesn't have. Refuse loudly rather than
+    // mis-post, exactly as the cross-currency B2B payment path does.
+    const ev = loadEvent('invoice_finalized_send_invoice_annual');
+    (ev as { type: string }).type = 'invoice.voided';
+    expect(() => mapEvent(ev)).toThrow(/deferred-revenue schedule/);
+  });
+
   it('charge_automatically finalized is a no-op (revenue books at payment instead)', () => {
     const result = mapEvent(loadEvent('invoice_finalized_charge_automatically'));
     expect(result.entries).toHaveLength(0);

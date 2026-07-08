@@ -28,8 +28,8 @@ import { invoiceMemo } from '../../util/memo.js';
  * write-off always clears exactly what was parked.
  *
  * (Voiding an invoice — `invoice.voided` — is different: it *reverses* the
- * revenue too, which collides with the recognition schedule, and is not modeled
- * here yet.)
+ * revenue too. That path lives in `invoiceVoided.ts`; it handles the
+ * no-deferred-portion case and refuses one carrying a recognition schedule.)
  */
 export function handleInvoiceMarkedUncollectible(event: Stripe.Event): MapResult {
   if (event.type !== 'invoice.marked_uncollectible') {

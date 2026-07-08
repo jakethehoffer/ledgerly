@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [Unreleased]
+
+### Added
+
+- **Void reversal for B2B invoices issued in error** (`invoice.voided`). A
+  net-terms (`send_invoice`) invoice that is voided is now reversed as if never
+  issued — the opposite of a write-off: Dr 4000 Subscription Revenue, Dr 2000
+  Sales Tax Payable, Cr 1100 Accounts Receivable. Because a void only applies to
+  an open, unpaid invoice, 1100 still holds the full gross from finalization, so
+  reversing against the same gross zeroes every account the invoice touched.
+  `charge_automatically` invoices never booked a receivable, so the event is a
+  no-op for them. No new accounts, no account-map changes.
+- A voided net-terms invoice that carries a **deferred-revenue schedule** (part
+  of the invoice deferred to 2100 and recognizes monthly) is **refused** with a
+  clear error rather than approximated: a correct reversal depends on how much
+  has already recognized and on cancelling the unposted schedule, which the
+  stateless per-event engine can't determine. This mirrors the cross-currency
+  B2B payment refusal. The gate matches finalization's own `deferredPreTax > 0`
+  test, so it refuses exactly the invoices for which a schedule was built.
+
 ## [0.4.0] — 2026-07-08
 
 ### Added

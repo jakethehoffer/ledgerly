@@ -9,6 +9,7 @@ import { handleInformational } from './informational.js';
 import { handleInvoiceFinalized } from './invoices/invoiceFinalized.js';
 import { handleInvoiceMarkedUncollectible } from './invoices/invoiceMarkedUncollectible.js';
 import { handleInvoicePaymentSucceeded } from './invoices/invoicePaymentSucceeded.js';
+import { handleInvoiceVoided } from './invoices/invoiceVoided.js';
 import { handlePayoutFailed } from './payouts/payoutFailed.js';
 import { handlePayoutPaid } from './payouts/payoutPaid.js';
 
@@ -23,6 +24,7 @@ export const HANDLERS: Readonly<Record<string, Handler>> = {
   'invoice.finalized': handleInvoiceFinalized,
   'invoice.marked_uncollectible': handleInvoiceMarkedUncollectible,
   'invoice.payment_succeeded': handleInvoicePaymentSucceeded,
+  'invoice.voided': handleInvoiceVoided,
   'payout.failed': handlePayoutFailed,
   'payout.paid': handlePayoutPaid,
   'charge.failed': handleInformational,

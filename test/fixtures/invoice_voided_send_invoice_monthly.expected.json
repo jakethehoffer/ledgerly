@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "date": "2025-03-01",
+      "currency": "USD",
+      "memo": "Stripe invoice in_test_finalized_b2b_monthly_001 (customer cus_test_finalized_b2b_monthly_001)",
+      "sourceEventId": "evt_test_invoice_voided_b2b_001",
+      "sourceEventType": "invoice.voided",
+      "sourceObjectId": "in_test_finalized_b2b_monthly_001",
+      "lines": [
+        { "accountCode": "2000", "side": "debit", "amount": 4000, "memo": "Sales tax reversed — invoice voided" },
+        { "accountCode": "4000", "side": "debit", "amount": 50000, "memo": "Revenue reversed — invoice voided" },
+        { "accountCode": "1100", "side": "credit", "amount": 54000, "memo": "Receivable reversed — invoice voided" }
+      ]
+    }
+  ],
+  "schedule": null
+}
