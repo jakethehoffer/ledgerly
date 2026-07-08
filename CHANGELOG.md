@@ -18,13 +18,24 @@ Pre-1.0 means breaking changes can happen in any minor release.
   reversing against the same gross zeroes every account the invoice touched.
   `charge_automatically` invoices never booked a receivable, so the event is a
   no-op for them. No new accounts, no account-map changes.
-- A voided net-terms invoice that carries a **deferred-revenue schedule** (part
-  of the invoice deferred to 2100 and recognizes monthly) is **refused** with a
-  clear error rather than approximated: a correct reversal depends on how much
-  has already recognized and on cancelling the unposted schedule, which the
-  stateless per-event engine can't determine. This mirrors the cross-currency
-  B2B payment refusal. The gate matches finalization's own `deferredPreTax > 0`
-  test, so it refuses exactly the invoices for which a schedule was built.
+- **Stateful void reconciliation for deferred-schedule invoices** (bundled
+  server). When a voided net-terms invoice carried a deferred-revenue schedule
+  (part deferred to 2100, recognized monthly), the pure engine can't reverse it —
+  a correct reversal depends on how much has already recognized and on cancelling
+  the unposted schedule. The receiver now reconciles this against the ledger: it
+  reverses recognized revenue (Dr 4000) and the remaining deferred balance (Dr
+  2100), clears the receivable (Cr 1100), and transitions the still-pending
+  schedule rows to a new `cancelled` status so the scheduler never recognizes
+  against the voided invoice again — every account returns to zero regardless of
+  when the void arrives. Read + cancel + post happen in one transaction. New
+  storage methods `findScheduledBySubscription`, `cancelScheduled`, and
+  `persistVoidReversal` (both the in-memory and SQLite backends).
+- The **pure engine** still refuses a deferred-schedule void with a clear error
+  (mirroring the cross-currency B2B refusal): a consumer calling the engine
+  directly has no ledger to reconcile against. The refusal gate matches
+  finalization's own `deferredPreTax > 0` test, so it triggers on exactly the
+  invoices for which a schedule was built. A full server deployment never hits
+  the refusal — the webhook routes those voids to the reconciler.
 
 ## [0.4.0] — 2026-07-08
 

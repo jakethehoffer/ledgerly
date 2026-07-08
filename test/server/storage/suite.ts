@@ -176,6 +176,62 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         }).toThrow();
       });
 
+      it('findScheduledBySubscription returns only that subscription, all statuses', () => {
+        const storage = factory();
+        const a = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_target',
+          sourceEventId: 'evt_fin',
+        });
+        const b = storage.entries.saveScheduled(makeEntry({ date: '2026-06-01' }), {
+          subscriptionId: 'sub_target',
+          sourceEventId: 'evt_fin',
+        });
+        storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_other',
+          sourceEventId: 'evt_other',
+        });
+        // Posted rows are still returned — the void reversal needs them to
+        // measure what has recognized.
+        storage.entries.markScheduledPosted(a.id);
+
+        const rows = storage.entries.findScheduledBySubscription('sub_target');
+        expect(rows.map((r) => r.id).sort((x, y) => x - y)).toEqual([a.id, b.id]);
+        expect(rows.find((r) => r.id === a.id)?.status).toBe('posted');
+        expect(rows.find((r) => r.id === b.id)?.status).toBe('pending');
+      });
+
+      it('cancelScheduled flips a pending row to cancelled and out of the pending queue', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_c',
+          sourceEventId: 'evt_c',
+        });
+        storage.entries.cancelScheduled(saved.id);
+        expect(storage.entries.getScheduledById(saved.id)?.status).toBe('cancelled');
+        expect(storage.entries.findPendingScheduled('2026-05-16')).toHaveLength(0);
+        expect(storage.entries.countPendingScheduled()).toBe(0);
+      });
+
+      it('cancelScheduled leaves a posted row posted (no-op, not an error)', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_c2',
+          sourceEventId: 'evt_c2',
+        });
+        storage.entries.markScheduledPosted(saved.id);
+        expect(() => {
+          storage.entries.cancelScheduled(saved.id);
+        }).not.toThrow();
+        expect(storage.entries.getScheduledById(saved.id)?.status).toBe('posted');
+      });
+
+      it('cancelScheduled throws on unknown ID', () => {
+        const storage = factory();
+        expect(() => {
+          storage.entries.cancelScheduled(99999);
+        }).toThrow();
+      });
+
       it('saveScheduled defaults the retry-tracking fields', () => {
         const storage = factory();
         const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
@@ -591,6 +647,117 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         // 1 immediate dispatch row + 1 recognition row = 2, not 4.
         expect(storage.entries.countPendingScheduled()).toBe(2);
         expect(storage.dedup.has('evt_dup')).toBe(true);
+      });
+    });
+
+    describe('persistVoidReversal', () => {
+      function recognitionEntry(date: string, memo: string): JournalEntry {
+        return {
+          date,
+          currency: 'USD',
+          memo,
+          sourceEventId: 'evt_fin_void',
+          sourceEventType: 'invoice.finalized',
+          sourceObjectId: 'in_void',
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(10000) },
+            { accountCode: '4000', side: 'credit', amount: cents(10000) },
+          ],
+        };
+      }
+
+      it('cancels the unposted schedule, posts the reversal from posted rows, records dedup', () => {
+        const storage = factory();
+        const m1 = storage.entries.saveScheduled(recognitionEntry('2026-06-01', 'm1'), {
+          subscriptionId: 'sub_void',
+          sourceEventId: 'evt_fin_void',
+        });
+        const m2 = storage.entries.saveScheduled(recognitionEntry('2026-07-01', 'm2'), {
+          subscriptionId: 'sub_void',
+          sourceEventId: 'evt_fin_void',
+        });
+        const m3 = storage.entries.saveScheduled(recognitionEntry('2026-08-01', 'm3'), {
+          subscriptionId: 'sub_void',
+          sourceEventId: 'evt_fin_void',
+        });
+        // A different invoice/subscription — must be left untouched.
+        const other = storage.entries.saveScheduled(makeEntry({ date: '2026-06-01' }), {
+          subscriptionId: 'sub_other',
+          sourceEventId: 'evt_other',
+        });
+        // One month already recognized before the void arrives.
+        storage.entries.markScheduledPosted(m1.id);
+
+        let receivedPosted: ReadonlyArray<JournalEntry> = [];
+        const reversalEntry: JournalEntry = {
+          date: '2026-08-15',
+          currency: 'USD',
+          memo: 'void reversal',
+          sourceEventId: 'evt_void',
+          sourceEventType: 'invoice.voided',
+          sourceObjectId: 'in_void',
+          lines: [
+            { accountCode: '1100', side: 'credit', amount: cents(30000) },
+            { accountCode: '4000', side: 'debit', amount: cents(10000) },
+            { accountCode: '2100', side: 'debit', amount: cents(20000) },
+          ],
+        };
+
+        const result = storage.persistVoidReversal('evt_void', {
+          subscriptionId: 'sub_void',
+          invoiceId: 'in_void',
+          buildReversal(posted) {
+            receivedPosted = posted;
+            return reversalEntry;
+          },
+        });
+
+        expect(result).toEqual({ duplicate: false });
+        // buildReversal saw exactly the one posted month, isolated to this invoice.
+        expect(receivedPosted.map((e) => e.memo)).toEqual(['m1']);
+        // Unposted months cancelled; the posted one stays; other invoice untouched.
+        expect(storage.entries.getScheduledById(m2.id)?.status).toBe('cancelled');
+        expect(storage.entries.getScheduledById(m3.id)?.status).toBe('cancelled');
+        expect(storage.entries.getScheduledById(m1.id)?.status).toBe('posted');
+        expect(storage.entries.getScheduledById(other.id)?.status).toBe('pending');
+        // Reversal persisted as an immediate audit entry (+ its dispatch row).
+        const found = storage.entries.findByEventId('evt_void');
+        expect(found).toHaveLength(1);
+        expect(found[0]?.entry.memo).toBe('void reversal');
+        expect(storage.dedup.has('evt_void')).toBe(true);
+      });
+
+      it('is idempotent — a duplicate void delivery writes nothing more', () => {
+        const storage = factory();
+        const m1 = storage.entries.saveScheduled(recognitionEntry('2026-06-01', 'm1'), {
+          subscriptionId: 'sub_void',
+          sourceEventId: 'evt_fin_void',
+        });
+        const reversalEntry: JournalEntry = {
+          date: '2026-08-15',
+          currency: 'USD',
+          memo: 'void reversal',
+          sourceEventId: 'evt_void_dup',
+          sourceEventType: 'invoice.voided',
+          sourceObjectId: 'in_void',
+          lines: [
+            { accountCode: '1100', side: 'credit', amount: cents(10000) },
+            { accountCode: '2100', side: 'debit', amount: cents(10000) },
+          ],
+        };
+        const input = {
+          subscriptionId: 'sub_void',
+          invoiceId: 'in_void',
+          buildReversal: (): JournalEntry => reversalEntry,
+        };
+
+        const first = storage.persistVoidReversal('evt_void_dup', input);
+        const second = storage.persistVoidReversal('evt_void_dup', input);
+
+        expect(first).toEqual({ duplicate: false });
+        expect(second).toEqual({ duplicate: true });
+        expect(storage.entries.findByEventId('evt_void_dup')).toHaveLength(1);
+        expect(storage.entries.getScheduledById(m1.id)?.status).toBe('cancelled');
       });
     });
 

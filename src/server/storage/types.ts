@@ -109,8 +109,27 @@ export interface JournalEntryStore {
    */
   findPendingScheduled(asOfDate: string, now?: number): SavedScheduledEntry[];
 
+  /**
+   * Query: every recognition-schedule row for a subscription, any status.
+   * Filters on `subscription_id`, which recognition entries share, so it
+   * excludes the synthetic `immediate:<eventId>` dispatch rows written for
+   * immediate entries. A caller isolating one invoice filters the result by
+   * `entry.sourceObjectId`. Used by the void reconciler to find the schedule it
+   * must reverse and cancel.
+   */
+  findScheduledBySubscription(subscriptionId: string): SavedScheduledEntry[];
+
   /** Mark a scheduled entry as posted. Throws if the ID does not exist. */
   markScheduledPosted(id: number): void;
+
+  /**
+   * Transition a scheduled entry to `'cancelled'` so the scheduler never posts
+   * it. Only `'pending'` and `'failed'` rows are cancellable; a `'posted'` or
+   * already-`'cancelled'` row is left unchanged (a no-op, not an error, so a
+   * void reconciliation is safe against a row the scheduler posted a moment
+   * earlier). Throws only if no row with `id` exists.
+   */
+  cancelScheduled(id: number): void;
 
   /**
    * Record a failed dispatch attempt. Storage just persists what it's told —
@@ -224,6 +243,25 @@ export interface PersistResult {
 }
 
 /**
+ * Input to {@link Storage.persistVoidReversal}. Describes which invoice's
+ * recognition schedule to reconcile and how to build the reversal entry from
+ * whatever has already recognized.
+ *
+ * The storage layer holds no accounting knowledge: it reads the recognition
+ * rows for `(subscriptionId, invoiceId)`, cancels the still-pending / dead-
+ * lettered ones, and passes the already-**posted** recognition entries to
+ * `buildReversal`, which returns the single balanced reversal entry to post.
+ * Doing the read, the cancellation, and the build in one transaction means the
+ * scheduler cannot recognize another month between "measure what has posted"
+ * and "cancel the rest".
+ */
+export interface VoidReconcileInput {
+  readonly subscriptionId: string;
+  readonly invoiceId: string;
+  readonly buildReversal: (postedRecognition: ReadonlyArray<JournalEntry>) => JournalEntry;
+}
+
+/**
  * Aggregate persistence handle bundling a deduplicator and journal entry store.
  *
  * `persistMapResult` is the single-call entry point the server uses after a
@@ -273,4 +311,23 @@ export interface Storage {
    * the usual way (future-dated, real subscription ID).
    */
   persistMapResult(eventId: string, result: MapResult, now?: number): PersistResult;
+
+  /**
+   * Persist a void reversal and cancel the voided invoice's unposted schedule,
+   * atomically, and record `eventId` as processed. Idempotent the same way as
+   * {@link persistMapResult}: a duplicate `eventId` writes nothing and returns
+   * `{ duplicate: true }`.
+   *
+   * In one transaction: claim `eventId`; read the recognition rows for
+   * `(subscriptionId, invoiceId)`; transition the `'pending'` / `'failed'` ones
+   * to `'cancelled'` so the scheduler never posts them; build the reversal entry
+   * from the already-`'posted'` recognition entries via `input.buildReversal`;
+   * and persist that entry as an immediate posting (audit log + dispatch queue),
+   * exactly as {@link persistMapResult} does for immediate entries.
+   */
+  persistVoidReversal(
+    eventId: string,
+    input: VoidReconcileInput,
+    now?: number,
+  ): PersistResult;
 }

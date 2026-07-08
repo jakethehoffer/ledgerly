@@ -219,7 +219,7 @@ If `charge.invoice` is not expanded, meaning a string ID or null, refunds are bo
 | `charge.dispute.closed` | lost, won, warning_closed |
 | `invoice.finalized` | B2B net-terms (send_invoice): monthly, annual-deferred; charge_automatically no-op |
 | `invoice.marked_uncollectible` | B2B net-terms write-off to bad debt; charge_automatically no-op |
-| `invoice.voided` | B2B net-terms reversal (no-deferred-portion); charge_automatically no-op; refuses a deferred-schedule invoice |
+| `invoice.voided` | B2B net-terms reversal; charge_automatically no-op; deferred-schedule voids reconciled statefully by the server (pure engine refuses them) |
 | `invoice.payment_succeeded` | monthly, annual-deferred, with-tax, annual-with-tax, with-app-fee, prorated-upgrade, prorated-downgrade, one-time-only, credit-balance, B2B send_invoice (clears AR) |
 | `invoice.payment_failed` | informational |
 | `customer.subscription.updated` | informational |

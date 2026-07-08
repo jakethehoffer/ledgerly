@@ -4,7 +4,26 @@ import type { JournalEntry, JournalLine, MapResult } from '../../journal.js';
 import { epochToUtcDate } from '../../util/dates.js';
 import { sortLines } from '../../util/lines.js';
 import { invoiceMemo } from '../../util/memo.js';
-import { partitionLineAmounts } from './recognition.js';
+import { computeFinalizationSplit } from './recognition.js';
+
+/**
+ * True when voiding this invoice would need the stateful reversal the pure
+ * engine can't do: a net-terms invoice whose finalization deferred part of the
+ * revenue to 2100 and built a recognition schedule. The gate is finalization's
+ * own `deferredPreTax > 0` test, so it flags exactly the invoices for which a
+ * schedule exists. A server with ledger access (see `voidReconciler`) handles
+ * this case; the pure `handleInvoiceVoided` below refuses it.
+ *
+ * Invoices the void handler no-ops or throws on for other reasons
+ * (`charge_automatically`, zero amount, paginated lines) are not "deferred
+ * schedule" cases and return `false`.
+ */
+export function voidHasDeferredSchedule(invoice: Stripe.Invoice): boolean {
+  if (invoice.collection_method !== 'send_invoice') return false;
+  if (invoice.amount_due === 0) return false;
+  if (invoice.lines.has_more) return false;
+  return computeFinalizationSplit(invoice).deferredPreTax > 0;
+}
 
 /**
  * `invoice.voided` — a finalized (open) invoice cancelled as if it were never
@@ -60,17 +79,9 @@ export function handleInvoiceVoided(event: Stripe.Event): MapResult {
     );
   }
 
-  const invoiceTax = invoice.tax ?? 0;
-  const taxAmt = invoiceTax > 0 ? invoiceTax : 0;
-  const preTax = gross - taxAmt;
-
-  // Reconstruct finalization's immediate/deferred split (same basis) so the
-  // refusal gate lines up exactly with whether finalization built a schedule.
-  const { immediateCustomer, deferredCustomer } = partitionLineAmounts(invoice);
-  const lineTotal = immediateCustomer + deferredCustomer;
-  const immediatePreTax =
-    lineTotal > 0 ? Math.round((preTax * immediateCustomer) / lineTotal) : preTax;
-  const deferredPreTax = preTax - immediatePreTax;
+  // Reconstruct finalization's immediate/deferred split (same shared helper) so
+  // the refusal gate lines up exactly with whether finalization built a schedule.
+  const { taxAmt, immediatePreTax, deferredPreTax } = computeFinalizationSplit(invoice);
 
   if (deferredPreTax > 0) {
     throw new Error(

@@ -10,6 +10,7 @@ import type {
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
+  VoidReconcileInput,
 } from './types.js';
 
 /**
@@ -139,6 +140,20 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
     `UPDATE scheduled_entries
         SET status = 'posted', posted_at = ?
       WHERE id = ? AND status = 'pending'`,
+  );
+
+  const selectBySubscriptionStmt = db.prepare<[string], ScheduledEntryRow>(
+    `SELECT id, event_id, subscription_id, status, payload,
+            attempts, last_attempted_at, next_attempt_at, last_error
+       FROM scheduled_entries
+      WHERE subscription_id = ?
+      ORDER BY id ASC`,
+  );
+
+  const cancelStmt = db.prepare<[number]>(
+    `UPDATE scheduled_entries
+        SET status = 'cancelled'
+      WHERE id = ? AND status IN ('pending', 'failed')`,
   );
 
   const recordAttemptStmt = db.prepare<
@@ -281,6 +296,22 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
     findPendingScheduled(asOfDate: string, now: number = Date.now()): SavedScheduledEntry[] {
       const rows = selectPendingScheduled.all(asOfDate, now);
       return rows.map(scheduledRowToSaved);
+    },
+
+    findScheduledBySubscription(subscriptionId: string): SavedScheduledEntry[] {
+      return selectBySubscriptionStmt.all(subscriptionId).map(scheduledRowToSaved);
+    },
+
+    cancelScheduled(id: number): void {
+      const info = cancelStmt.run(id);
+      if (info.changes === 0) {
+        // No row changed: either the id doesn't exist (an error) or the row is
+        // already posted/cancelled (a legitimate no-op — the scheduler may have
+        // posted it just before a void reconciliation reached it).
+        if (selectScheduledByIdStmt.get(id) === undefined) {
+          throw new Error(`No scheduled entry with id=${String(id)}`);
+        }
+      }
     },
 
     markScheduledPosted(id: number): void {
@@ -550,6 +581,63 @@ export function sqliteStorage(db: Database.Database): Storage {
     },
   );
 
+  const selectBySubscriptionForVoid = db.prepare<[string], ScheduledEntryRow>(
+    `SELECT id, event_id, subscription_id, status, payload,
+            attempts, last_attempted_at, next_attempt_at, last_error
+       FROM scheduled_entries
+      WHERE subscription_id = ?`,
+  );
+
+  const cancelForVoid = db.prepare<[number]>(
+    `UPDATE scheduled_entries
+        SET status = 'cancelled'
+      WHERE id = ? AND status IN ('pending', 'failed')`,
+  );
+
+  const persistVoidTxn = db.transaction(
+    (eventId: string, input: VoidReconcileInput, now: number): PersistResult => {
+      // Claim first (same compare-and-set as persistMapResult), so a duplicate
+      // void delivery writes nothing and rolls back cleanly on any later throw.
+      const claim = recordEvent.run(eventId, now);
+      if (claim.changes === 0) {
+        return { duplicate: true };
+      }
+      // Read this invoice's recognition rows, cancel the unposted ones, and
+      // build the reversal from the posted ones — all in one transaction, so
+      // the scheduler cannot post another month mid-reconciliation.
+      const rows = selectBySubscriptionForVoid
+        .all(input.subscriptionId)
+        .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
+        .filter(({ entry }) => entry.sourceObjectId === input.invoiceId);
+      const posted = rows
+        .filter(({ row }) => row.status === 'posted')
+        .map(({ entry }) => entry);
+      for (const { row } of rows) {
+        if (row.status === 'pending' || row.status === 'failed') {
+          cancelForVoid.run(row.id);
+        }
+      }
+      const reversal = input.buildReversal(posted);
+      insertImmediate.run(
+        eventId,
+        now,
+        reversal.date,
+        reversal.currency,
+        reversal.memo,
+        reversal.sourceEventType,
+        reversal.sourceObjectId ?? null,
+        JSON.stringify(reversal),
+      );
+      insertScheduled.run(
+        reversal.sourceEventId,
+        `immediate:${reversal.sourceEventId}`,
+        reversal.date,
+        JSON.stringify(reversal),
+      );
+      return { duplicate: false };
+    },
+  );
+
   // Prepared once for the lifetime of this Storage instance; readiness
   // probes call this on every request and the prepare cost should not
   // be in the hot path.
@@ -571,6 +659,13 @@ export function sqliteStorage(db: Database.Database): Storage {
       now: number = Date.now(),
     ): PersistResult {
       return persistTxn(eventId, result, now);
+    },
+    persistVoidReversal(
+      eventId: string,
+      input: VoidReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      return persistVoidTxn(eventId, input, now);
     },
   };
 }

@@ -68,6 +68,44 @@ export function partitionLineAmounts(invoice: Stripe.Invoice): {
   return { immediateCustomer, deferredCustomer };
 }
 
+/**
+ * The finalization revenue split for a net-terms invoice, shared by
+ * `invoice.finalized` (which books it) and `invoice.voided` (which reverses it).
+ *
+ * `gross` is the invoice's `amount_due` — what finalization debited to 1100.
+ * `taxAmt` is held in 2000, and the remaining `preTax` is split between the
+ * portion earned now (`immediatePreTax` → 4000) and the portion deferred
+ * (`deferredPreTax` → 2100, recognized monthly). The split classifies each line
+ * by its own billing span, then apportions `preTax` by the immediate share of
+ * the pre-tax line total so the two sums add back to `preTax` exactly.
+ *
+ * A positive `deferredPreTax` is exactly the condition under which finalization
+ * builds a recognition schedule — so it doubles as the "does a schedule exist?"
+ * test the void path needs.
+ */
+export interface FinalizationSplit {
+  readonly gross: number;
+  readonly taxAmt: number;
+  readonly preTax: number;
+  readonly immediatePreTax: number;
+  readonly deferredPreTax: number;
+}
+
+export function computeFinalizationSplit(invoice: Stripe.Invoice): FinalizationSplit {
+  const gross = invoice.amount_due;
+  const invoiceTax = invoice.tax ?? 0;
+  const taxAmt = invoiceTax > 0 ? invoiceTax : 0;
+  const preTax = gross - taxAmt;
+
+  const { immediateCustomer, deferredCustomer } = partitionLineAmounts(invoice);
+  const lineTotal = immediateCustomer + deferredCustomer;
+  const immediatePreTax =
+    lineTotal > 0 ? Math.round((preTax * immediateCustomer) / lineTotal) : preTax;
+  const deferredPreTax = preTax - immediatePreTax;
+
+  return { gross, taxAmt, preTax, immediatePreTax, deferredPreTax };
+}
+
 export function resolveSubscriptionId(invoice: Stripe.Invoice): string {
   if (typeof invoice.subscription === 'string') {
     return invoice.subscription;

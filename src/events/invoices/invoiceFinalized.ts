@@ -4,7 +4,7 @@ import type { JournalEntry, JournalLine, MapResult, RecognitionSchedule } from '
 import { epochToUtcDate } from '../../util/dates.js';
 import { sortLines } from '../../util/lines.js';
 import { invoiceMemo } from '../../util/memo.js';
-import { buildRecognitionSchedule, partitionLineAmounts, periodMonths } from './recognition.js';
+import { buildRecognitionSchedule, computeFinalizationSplit, periodMonths } from './recognition.js';
 
 /**
  * `invoice.finalized` — the point a draft invoice becomes an open (issued)
@@ -50,20 +50,12 @@ export function handleInvoiceFinalized(event: Stripe.Event): MapResult {
   }
 
   const currency = invoice.currency.toUpperCase();
-  const gross = invoice.amount_due;
-  const invoiceTax = invoice.tax ?? 0;
-  const taxAmt = invoiceTax > 0 ? invoiceTax : 0;
-  const preTax = gross - taxAmt;
-
   // Per-line recognition, identical basis to the payment path: a line spanning a
   // month or less is earned now (4000); a longer line is deferred (2100) and
   // recognized over its term. Split preTax by the immediate share of the pre-tax
-  // line total so the credits sum back to preTax exactly.
-  const { immediateCustomer, deferredCustomer } = partitionLineAmounts(invoice);
-  const lineTotal = immediateCustomer + deferredCustomer;
-  const immediatePreTax =
-    lineTotal > 0 ? Math.round((preTax * immediateCustomer) / lineTotal) : preTax;
-  const deferredPreTax = preTax - immediatePreTax;
+  // line total so the credits sum back to preTax exactly. `invoice.voided`
+  // reverses this same split, so the arithmetic lives in one shared helper.
+  const { gross, taxAmt, immediatePreTax, deferredPreTax } = computeFinalizationSplit(invoice);
 
   const draft: JournalLine[] = [
     {

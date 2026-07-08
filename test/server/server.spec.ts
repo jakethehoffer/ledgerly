@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createServer } from '../../src/server/index.js';
+import { mapEvent } from '../../src/engine.js';
 import { silentLogger } from '../../src/server/logger.js';
 import { inMemoryMetrics } from '../../src/server/metrics.js';
 import { inMemoryStorage } from '../../src/server/storage/inMemory.js';
@@ -274,6 +275,44 @@ describe('createServer', () => {
       const found = storage.entries.findByEventId(parsed.id);
       expect(found.length).toBeGreaterThan(0);
       expect(found[0]?.entry.sourceEventId).toBe(parsed.id);
+    });
+
+    it('routes a deferred-schedule void through stateful reconciliation, not the engine refusal', async () => {
+      const storage = inMemoryStorage();
+      // Seed: finalize the annual net-terms invoice and recognize two months.
+      const finalized = loadFixture('invoice_finalized_send_invoice_annual').parsed;
+      storage.persistMapResult(finalized.id, mapEvent(finalized));
+      const recognition = storage.entries
+        .findScheduledBySubscription('sub_test_finalized_b2b_annual_001')
+        .filter((r) => r.entry.sourceObjectId === 'in_test_finalized_b2b_annual_001');
+      for (const row of recognition.slice(0, 2)) {
+        storage.entries.markScheduledPosted(row.id);
+      }
+
+      const { app } = createServer({
+        stripe,
+        webhookSecret: WEBHOOK_SECRET,
+        log: silentLogger(),
+        storage,
+      });
+
+      // A void of that invoice, built inline: the engine refuses this shape, so
+      // it can't be an auto-run mapEvent fixture. If the server wrongly sent it
+      // through mapEvent, the handler would throw and the response would be 500.
+      const voidEvent = { ...finalized, id: 'evt_void_web_annual', type: 'invoice.voided' };
+      const raw = JSON.stringify(voidEvent);
+      const res = await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', signPayload(raw))
+        .send(raw);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ok: true, entries: 1, schedule: false });
+      // The reversal posted, and the ten unposted months were cancelled.
+      expect(storage.entries.findByEventId('evt_void_web_annual')).toHaveLength(1);
+      expect(storage.entries.listScheduledByStatus('cancelled')).toHaveLength(10);
+      expect(storage.entries.listScheduledByStatus('posted')).toHaveLength(2);
     });
 
     it('increments webhook_received + webhook_processed counters on success', async () => {

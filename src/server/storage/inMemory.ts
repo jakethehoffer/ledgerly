@@ -8,6 +8,7 @@ import type {
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
+  VoidReconcileInput,
 } from './types.js';
 
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -101,6 +102,28 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
           row.entry.date <= asOfDate &&
           (row.nextAttemptAt === null || row.nextAttemptAt <= now),
       );
+    },
+
+    findScheduledBySubscription(subscriptionId: string): SavedScheduledEntry[] {
+      return scheduled.filter((row) => row.subscriptionId === subscriptionId);
+    },
+
+    cancelScheduled(id: number): void {
+      const idx = scheduled.findIndex((row) => row.id === id);
+      if (idx === -1) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      const existing = scheduled[idx];
+      if (!existing) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      // Only an in-flight (pending) or dead-lettered (failed) row can be
+      // cancelled; a row that already posted stays posted, and re-cancelling is
+      // a no-op. This keeps a void reconciliation safe against a row the
+      // scheduler posted a moment earlier.
+      if (existing.status === 'pending' || existing.status === 'failed') {
+        scheduled[idx] = { ...existing, status: 'cancelled' };
+      }
     },
 
     markScheduledPosted(id: number): void {
@@ -288,6 +311,35 @@ export function inMemoryStorage(ttlMs?: number): Storage {
           entries.saveScheduled(entry, result.schedule);
         }
       }
+      dedup.record(eventId, now);
+      return { duplicate: false };
+    },
+    persistVoidReversal(
+      eventId: string,
+      input: VoidReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      // Same idempotency boundary as persistMapResult: has()/writes/record()
+      // run with no await between them, so under JS single-threaded semantics
+      // the read, the cancellations, and the reversal posting are atomic with
+      // respect to other webhook handlers and the scheduler's own callbacks.
+      if (dedup.has(eventId)) return { duplicate: true };
+      const rows = entries
+        .findScheduledBySubscription(input.subscriptionId)
+        .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+      const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
+      for (const row of rows) {
+        if (row.status === 'pending' || row.status === 'failed') {
+          entries.cancelScheduled(row.id);
+        }
+      }
+      const reversal = input.buildReversal(posted);
+      entries.saveImmediate(reversal, eventId);
+      // Enqueue for dispatch to QBO/Xero, exactly like an immediate entry.
+      entries.saveScheduled(reversal, {
+        subscriptionId: `immediate:${reversal.sourceEventId}`,
+        sourceEventId: reversal.sourceEventId,
+      });
       dedup.record(eventId, now);
       return { duplicate: false };
     },

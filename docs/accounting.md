@@ -238,10 +238,17 @@ full gross from finalization, so reversing it against the same gross zeroes
 every account the invoice touched — no revenue, no receivable, no tax left
 behind. *(`invoice_voided_send_invoice_monthly`)*
 
-This is modeled only for net-terms invoices with **no deferred portion** (every
-line earned now, so finalization built no recognition schedule). Voiding an
-invoice that *did* defer to 2100 is refused rather than approximated — see
-[Known limitations](#known-limitations).
+When the invoice **deferred part of its revenue** to 2100 (an annual or mixed
+term, so finalization built a recognition schedule), the reversal is stateful:
+it depends on how much the schedule has already recognized, and the unposted
+months must be cancelled so they never recognize against a voided invoice. The
+pure engine can't see that state, so `handleInvoiceVoided` reverses only the
+no-deferred case and *refuses* a deferred one. The bundled receiver
+([server](../src/server)) closes the gap: it reconciles the void against the
+ledger — reversing recognized revenue (Dr 4000), clearing the remaining deferred
+balance (Dr 2100), reversing the receivable (Cr 1100), and cancelling the
+still-pending schedule rows — so every account the invoice touched returns to
+zero no matter when the void arrives.
 
 ## A refund: `charge.refunded`
 
@@ -415,15 +422,15 @@ isn't handled yet.
 
 These are deliberate gaps, documented rather than approximated:
 
-- **Voiding a net-terms invoice with a deferred-revenue schedule**
-  (`invoice.voided`) — a void of a net-terms invoice with **no** deferred portion
-  is modeled (it reverses the finalization entry; see
-  [Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later)). But when
-  part of the invoice deferred to 2100 and recognizes monthly, a correct reversal
-  depends on how much has already been recognized when the void arrives and on
-  cancelling the unposted schedule entries — stateful facts a per-event engine
-  doesn't track. That case is refused with a clear error rather than mis-posted,
-  the same way the cross-currency B2B payment path is.
+- **Voiding a net-terms invoice — pure engine vs. bundled server**
+  (`invoice.voided`). A void with no deferred portion is fully modeled in the
+  pure engine (it reverses the finalization entry). A void of an invoice that
+  deferred to 2100 needs stateful reversal (how much has recognized) plus
+  schedule cancellation, which a per-event engine can't do — so the pure engine
+  *refuses* that case with a clear error. The bundled receiver reconciles it
+  against the ledger instead, so a full deployment handles both; only a
+  consumer calling the engine directly (no ledger) sees the refusal. See
+  [Net-terms invoices](#net-terms-invoices-b2b-invoice-now-pay-later).
 - **Cross-currency B2B (net-terms) settlement** — a `send_invoice` invoice billed
   in one currency but paid in another. The 1100 receivable is booked in the
   invoice currency at finalization, so clearing it in a different settlement

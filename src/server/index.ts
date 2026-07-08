@@ -2,8 +2,10 @@ import express, { type Express, type Request, type Response } from 'express';
 import type Stripe from 'stripe';
 import { mapEvent } from '../engine.js';
 import { UnhandledEventError } from '../errors.js';
+import { voidHasDeferredSchedule } from '../events/invoices/invoiceVoided.js';
 import { adminAuthMiddleware } from './admin.js';
 import { expandEvent } from './expand.js';
+import { buildVoidReconcileInput } from './voidReconciler.js';
 import { consoleLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import { inMemoryMetrics } from './metrics.js';
@@ -128,6 +130,33 @@ function resolveStorage(config: ServerConfig): Storage {
             base.entries.saveScheduled(entry, result.schedule);
           }
         }
+        customDedup.record(eventId, now);
+        return { duplicate: false };
+      },
+      persistVoidReversal(eventId, input, now = Date.now()): PersistResult {
+        // Mirrors the first-class backends' void reconciliation, but claims the
+        // event against the caller's deduplicator. Read the invoice's
+        // recognition rows, cancel the unposted ones, and post the reversal
+        // built from the posted ones — atomic under JS single-threaded
+        // semantics (no await between has() and record()).
+        if (customDedup.has(eventId)) return { duplicate: true };
+        const rows = base.entries
+          .findScheduledBySubscription(input.subscriptionId)
+          .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+        const posted = rows
+          .filter((row) => row.status === 'posted')
+          .map((row) => row.entry);
+        for (const row of rows) {
+          if (row.status === 'pending' || row.status === 'failed') {
+            base.entries.cancelScheduled(row.id);
+          }
+        }
+        const reversal = input.buildReversal(posted);
+        base.entries.saveImmediate(reversal, eventId);
+        base.entries.saveScheduled(reversal, {
+          subscriptionId: `immediate:${reversal.sourceEventId}`,
+          sourceEventId: reversal.sourceEventId,
+        });
         customDedup.record(eventId, now);
         return { duplicate: false };
       },
@@ -270,21 +299,54 @@ export function createServer(config: ServerConfig): ServerInstance {
     }
 
     try {
-      const result = mapEvent(expanded);
       let persistResult: PersistResult;
-      try {
-        // Atomic + idempotent per backend: persist all entries + record dedup,
-        // or roll back. The persistence layer — not the has() pre-check above —
-        // is the correctness boundary: if a concurrent delivery already claimed
-        // this event during the await-expansion gap, this returns
-        // { duplicate: true } and writes nothing, so entries post exactly once.
-        persistResult = storage.persistMapResult(event.id, result);
-      } catch (err) {
-        metrics.inc('webhook_error', { type: event.type });
-        log.error('Persistence failed', { eventId: event.id, err });
-        res.status(500).json({ error: 'Persistence failed' });
-        return;
+      let entryCount: number;
+      let scheduleEntryCount: number;
+      let hasSchedule: boolean;
+
+      if (
+        expanded.type === 'invoice.voided' &&
+        voidHasDeferredSchedule(expanded.data.object)
+      ) {
+        // A voided net-terms invoice carrying a deferred-revenue schedule can't
+        // be reversed by the stateless engine (mapEvent would throw): the
+        // reversal depends on how much has already recognized and the unposted
+        // schedule must be cancelled. Reconcile against the ledger instead —
+        // read + cancel + post happen atomically inside persistVoidReversal.
+        try {
+          persistResult = storage.persistVoidReversal(
+            event.id,
+            buildVoidReconcileInput(expanded),
+          );
+        } catch (err) {
+          metrics.inc('webhook_error', { type: event.type });
+          log.error('Void reconciliation failed', { eventId: event.id, err });
+          res.status(500).json({ error: 'Void reconciliation failed' });
+          return;
+        }
+        entryCount = 1;
+        scheduleEntryCount = 0;
+        hasSchedule = false;
+      } else {
+        const result = mapEvent(expanded);
+        try {
+          // Atomic + idempotent per backend: persist all entries + record dedup,
+          // or roll back. The persistence layer — not the has() pre-check above —
+          // is the correctness boundary: if a concurrent delivery already claimed
+          // this event during the await-expansion gap, this returns
+          // { duplicate: true } and writes nothing, so entries post exactly once.
+          persistResult = storage.persistMapResult(event.id, result);
+        } catch (err) {
+          metrics.inc('webhook_error', { type: event.type });
+          log.error('Persistence failed', { eventId: event.id, err });
+          res.status(500).json({ error: 'Persistence failed' });
+          return;
+        }
+        entryCount = result.entries.length;
+        scheduleEntryCount = result.schedule?.entries.length ?? 0;
+        hasSchedule = result.schedule !== null;
       }
+
       if (persistResult.duplicate) {
         metrics.inc('webhook_duplicate');
         log.info('Duplicate event ignored at persistence (raced past pre-check)', {
@@ -297,13 +359,13 @@ export function createServer(config: ServerConfig): ServerInstance {
       log.info('Processed event', {
         eventId: event.id,
         eventType: event.type,
-        entryCount: result.entries.length,
-        scheduleEntryCount: result.schedule?.entries.length ?? 0,
+        entryCount,
+        scheduleEntryCount,
       });
       res.status(200).json({
         ok: true,
-        entries: result.entries.length,
-        schedule: result.schedule !== null,
+        entries: entryCount,
+        schedule: hasSchedule,
       });
     } catch (err) {
       if (err instanceof UnhandledEventError) {
