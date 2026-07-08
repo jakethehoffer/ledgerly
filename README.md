@@ -13,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-657 tests · 14 event types · 45 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+665 tests · 15 event types · 47 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -82,7 +82,7 @@ each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue
 total recognized                $1200.00
 ```
 
-The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs). It imports the same public API you'd use after `npm i ledgerly`. Refunds, disputes, payouts, and multi-currency charges all live in [`test/fixtures/`](./test/fixtures), and the refund fixtures cover proportional sales-tax drains and realized FX gain/loss. Feed any of the 45 fixtures through `mapEvent` to see its entry shape.
+The script is [`examples/quickstart.mjs`](./examples/quickstart.mjs). It imports the same public API you'd use after `npm i ledgerly`. Refunds, disputes, payouts, and multi-currency charges all live in [`test/fixtures/`](./test/fixtures), and the refund fixtures cover proportional sales-tax drains and realized FX gain/loss. Feed any of the 47 fixtures through `mapEvent` to see its entry shape.
 
 ## Why ledgerly?
 
@@ -92,7 +92,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 - **vs. Stripe's native reporting.** Stripe gives you summaries, CSV exports, and a separate paid Revenue Recognition product. ledgerly emits actual balanced double-entry journal entries, ready to POST to the QuickBooks Online or Xero API. Deferred revenue is released month by month, sales tax is drained proportionally on refunds, and realized FX gain/loss is booked when rates move between a charge and its refund.
 - **vs. doing it by hand.** The mapping from a Stripe event to a journal entry is deterministic, so it shouldn't be manual work. ledgerly makes that mapping a pure function, where the same event always produces the same balanced entry.
 
-**ledgerly is probably not for you if** you want a turnkey hosted product with a dashboard and zero ops. It's a library plus an optional self-hosted webhook receiver, not a SaaS. It assumes you or a developer can run a small service and map 12 account codes to your real QBO/Xero accounts once. It handles B2B net-terms invoicing (invoice now, pay later) in a single currency, but not yet cross-currency payouts or cross-currency net-terms settlement. Those are documented as explicit gaps rather than quietly approximated.
+**ledgerly is probably not for you if** you want a turnkey hosted product with a dashboard and zero ops. It's a library plus an optional self-hosted webhook receiver, not a SaaS. It assumes you or a developer can run a small service and map 13 account codes to your real QBO/Xero accounts once. It handles B2B net-terms invoicing (invoice now, pay later) in a single currency, but not yet cross-currency payouts or cross-currency net-terms settlement. Those are documented as explicit gaps rather than quietly approximated.
 
 ## Quick start
 
@@ -101,7 +101,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.3.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.4.0
 ```
 
 ### Use the engine as a library
@@ -121,13 +121,13 @@ import {
   type XeroAccountMap,
 } from 'ledgerly';
 
-// Map ledgerly's 12 account codes to your real QBO / Xero accounts.
+// Map ledgerly's 13 account codes to your real QBO / Xero accounts.
 const qboAccountMap: QboAccountMap = {
   '1000': { qboId: '83', name: 'Checking' },
   '1010': { qboId: '84', name: 'Stripe Clearing' },
   '4000': { qboId: '101', name: 'Subscription Revenue' },
   '6000': { qboId: '201', name: 'Merchant Fees' },
-  // ... (all 12 codes, see Chart of Accounts below)
+  // ... (all 13 codes, see Chart of Accounts below)
 };
 
 const xeroAccountMap: XeroAccountMap = {
@@ -135,7 +135,7 @@ const xeroAccountMap: XeroAccountMap = {
   '1010': { accountCode: '611' },
   '4000': { accountCode: '200' },
   '6000': { accountCode: '404' },
-  // ... (all 12 codes)
+  // ... (all 13 codes)
 };
 
 // In your Stripe webhook handler:
@@ -218,6 +218,7 @@ If `charge.invoice` is not expanded, meaning a string ID or null, refunds are bo
 | `charge.dispute.funds_reinstated` | won-path |
 | `charge.dispute.closed` | lost, won, warning_closed |
 | `invoice.finalized` | B2B net-terms (send_invoice): monthly, annual-deferred; charge_automatically no-op |
+| `invoice.marked_uncollectible` | B2B net-terms write-off to bad debt; charge_automatically no-op |
 | `invoice.payment_succeeded` | monthly, annual-deferred, with-tax, annual-with-tax, with-app-fee, prorated-upgrade, prorated-downgrade, one-time-only, credit-balance, B2B send_invoice (clears AR) |
 | `invoice.payment_failed` | informational |
 | `customer.subscription.updated` | informational |
@@ -310,6 +311,7 @@ Caveats:
 | 4900 | Refunds Issued | Contra-Revenue | Refund offsets (separate from 4000 for net-revenue reporting) |
 | 6000 | Stripe Processing Fees | Expense | Per-transaction Stripe fees from `balance_transaction.fee` |
 | 6100 | Payment Disputes | Expense | Closed-lost writeoffs + non-refundable dispute fees |
+| 6200 | Bad Debt Expense | Expense | B2B net-terms receivable written off when marked uncollectible |
 | 7000 | FX Gain/Loss | Other Income | Realized currency gain/loss between a charge and its refund or dispute |
 
 Map these codes to your own QBO and Xero account IDs at integration time via the `accountMap` parameter on each exporter.
@@ -352,7 +354,7 @@ Imported from `ledgerly` (after build, the barrel is at `dist/index.js`):
 | `requireExpanded` | function | Helper for handlers that consume nested objects |
 | `cents`, `ZERO_CENTS` | function/const | Constructor + zero value for the `Cents` type |
 | `Cents` | type | Branded integer minor units |
-| `ACCOUNTS` | const | Canonical chart of accounts (12 entries) |
+| `ACCOUNTS` | const | Canonical chart of accounts (13 entries) |
 | `AccountCode`, `AccountType`, `AccountDef`, `PostingSide` | type | Account types |
 | `checkBalance`, `assertBalanced` | function | Balance validators |
 | `JournalLine`, `JournalEntry`, `RecognitionSchedule`, `MapResult`, `BalanceReport` | type | Core data shapes |
@@ -533,7 +535,7 @@ pnpm start
 
 All three of `LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_QBO_REALM_ID`, and `LEDGERLY_QBO_ACCOUNT_MAP_JSON` must be set to enable the QBO dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_QBO_API_BASE` is optional and defaults to the QBO production base URL. Point it at `https://sandbox-quickbooks.api.intuit.com` for testing.
 
-The `LEDGERLY_QBO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your real QBO account IDs and display names. All 12 codes must be present.
+The `LEDGERLY_QBO_ACCOUNT_MAP_JSON` maps ledgerly's 13 account codes to your real QBO account IDs and display names. All 13 codes must be present.
 
 **OAuth is not handled by ledgerly.** The access token must be obtained out-of-band (via QBO's OAuth 2.0 authorization code flow) and refreshed before expiry (QBO tokens expire hourly). For a real SaaS deployment, you'll need a separate OAuth service that stores refresh tokens per-tenant and rotates access tokens; that's a future iteration.
 
@@ -557,7 +559,7 @@ pnpm start
 
 All three of `LEDGERLY_XERO_ACCESS_TOKEN`, `LEDGERLY_XERO_TENANT_ID`, and `LEDGERLY_XERO_ACCOUNT_MAP_JSON` must be set to enable the Xero dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_XERO_API_BASE` is optional and defaults to `https://api.xero.com`. Xero has no separate sandbox base, since the demo company is a flag on the user's tenant.
 
-The `LEDGERLY_XERO_ACCOUNT_MAP_JSON` maps ledgerly's 12 account codes to your Xero account codes. All 12 codes must be present.
+The `LEDGERLY_XERO_ACCOUNT_MAP_JSON` maps ledgerly's 13 account codes to your Xero account codes. All 13 codes must be present.
 
 `LEDGERLY_XERO_STATUS` is `DRAFT` or `POSTED`. The default `DRAFT` lands entries as drafts for user review, and `POSTED` sends them straight into the ledger. DRAFT is safer for initial integration; switch to POSTED once you trust the mapping.
 
@@ -792,7 +794,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.3.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.4.0
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -822,7 +824,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ghcr.io/jakethehoffer/ledgerly:v0.3.0
+  ghcr.io/jakethehoffer/ledgerly:v0.4.0
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -878,7 +880,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.3.0 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.4.0 \
   --repo jakethehoffer/ledgerly
 ```
 
@@ -964,7 +966,7 @@ pnpm start          # Run the built webhook receiver (requires pnpm build first)
 
 ## Status
 
-Both layers are built and documented above. The pure mapping engine handles 14 event types, multi-currency with realized FX gain/loss, and the QBO and Xero exporters. The optional webhook receiver adds signature verification, idempotent persistence, a recognition scheduler with retry and dead-letter, QBO/Xero OAuth, Prometheus metrics, and admin endpoints. It's published to npm and GHCR with signed build provenance.
+Both layers are built and documented above. The pure mapping engine handles 15 event types, multi-currency with realized FX gain/loss, and the QBO and Xero exporters. The optional webhook receiver adds signature verification, idempotent persistence, a recognition scheduler with retry and dead-letter, QBO/Xero OAuth, Prometheus metrics, and admin endpoints. It's published to npm and GHCR with signed build provenance.
 
 A few things are deferred deliberately, and called out in the code where they'd otherwise have to be guessed at rather than quietly approximated:
 

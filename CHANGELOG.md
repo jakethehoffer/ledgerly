@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.4.0] — 2026-07-08
+
+### Added
+
+- **Bad-debt write-off for uncollectible B2B invoices.** A net-terms
+  (`send_invoice`) invoice marked `invoice.marked_uncollectible` now writes its
+  receivable off to the new **6200 Bad Debt Expense** account (Dr 6200 / Cr
+  1100). Revenue already recognized stays recognized — under accrual accounting
+  you earned it on delivery; the customer's non-payment is an expense, not a
+  revenue reversal. Because 1100 carries the full gross from finalization until
+  the invoice is paid or written off (recognition moves 2100 → 4000 and never
+  touches 1100), the write-off clears the receivable exactly regardless of how
+  much has been recognized. `charge_automatically` invoices never booked a
+  receivable, so the event is a no-op for them. (Voiding an invoice reverses the
+  revenue and interacts with the recognition schedule; it remains unmodeled.)
+
+### Changed
+
+- **New account code `6200` Bad Debt Expense — the canonical chart now has 13
+  accounts.** `QboAccountMap` / `XeroAccountMap` require an entry for every code,
+  so account maps must add `6200`. This is a compile-time requirement for
+  TypeScript consumers; at runtime the exporters only reference `6200` when an
+  uncollectible event is processed, so existing maps keep working until then.
+  Pre-1.0, this ships in a minor per the versioning note at the top of this file.
+
 ## [0.3.0] — 2026-07-07
 
 ### Added
@@ -858,6 +883,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.4.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.3.0
 [0.2.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.2.0
