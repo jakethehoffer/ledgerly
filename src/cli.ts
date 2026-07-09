@@ -14,6 +14,9 @@ import { checkBalance } from './journal.js';
 import type { JournalEntry, MapResult } from './journal.js';
 import { ACCOUNTS } from './accounts.js';
 import { MissingExpansionError, UnhandledEventError } from './errors.js';
+import { toQbo } from './exporters/qbo.js';
+import { toXero } from './exporters/xero.js';
+import type { QboAccountMap, XeroAccountMap } from './exporters/types.js';
 
 const usd = (c: number): string => `$${(c / 100).toFixed(2)}`;
 const rule = (n = 60): string => '-'.repeat(n);
@@ -80,6 +83,43 @@ export function formatMapResult(result: MapResult): string {
   return blocks.join('\n\n');
 }
 
+// Placeholder account maps so `--qbo` / `--xero` can render the export shape
+// without configuration. The IDs/codes are stand-ins — a real deployment maps
+// ledgerly's account codes to its own QBO account IDs / Xero account codes once
+// (see the README). Built off the canonical chart so every code is covered.
+const PLACEHOLDER_QBO: QboAccountMap = Object.fromEntries(
+  Object.values(ACCOUNTS).map((a, i) => [a.code, { qboId: String(80 + i), name: a.name }]),
+) as QboAccountMap;
+const PLACEHOLDER_XERO: XeroAccountMap = Object.fromEntries(
+  Object.values(ACCOUNTS).map((a, i) => [a.code, { accountCode: String(600 + i) }]),
+) as XeroAccountMap;
+
+/**
+ * Render a {@link MapResult}'s immediate entries as QuickBooks Online
+ * `JournalEntry` JSON (an array), using placeholder account IDs. Returns `"[]"`
+ * for an event with no entries.
+ */
+export function formatQbo(result: MapResult): string {
+  return JSON.stringify(
+    result.entries.map((entry) => toQbo(entry, PLACEHOLDER_QBO)),
+    null,
+    2,
+  );
+}
+
+/**
+ * Render a {@link MapResult}'s immediate entries as Xero `ManualJournal` JSON (an
+ * array), using placeholder account codes. Returns `"[]"` for an event with no
+ * entries.
+ */
+export function formatXero(result: MapResult): string {
+  return JSON.stringify(
+    result.entries.map((entry) => toXero(entry, PLACEHOLDER_XERO)),
+    null,
+    2,
+  );
+}
+
 /**
  * Parse a raw Stripe event JSON string and run it through {@link mapEvent}.
  * Throws a clear error when the input is not valid JSON; propagates the engine's
@@ -109,6 +149,8 @@ invoice.charge, credit_note.invoice) before piping — the engine never calls St
 
 Options:
   --json      Print the raw MapResult JSON instead of the readable table.
+  --qbo       Print QuickBooks Online JournalEntry JSON (placeholder account IDs).
+  --xero      Print Xero ManualJournal JSON (placeholder account codes).
   -h, --help  Show this help.
 `;
 
@@ -162,7 +204,30 @@ function main(argv: string[]): number {
     return 1;
   }
 
-  process.stdout.write((jsonOut ? JSON.stringify(result, null, 2) : formatMapResult(result)) + '\n');
+  const qboOut = argv.includes('--qbo');
+  const xeroOut = argv.includes('--xero');
+  let output: string;
+  if (qboOut || xeroOut) {
+    // Placeholder note goes to stderr so stdout stays pipeable JSON.
+    process.stderr.write(
+      `ledgerly: account ${qboOut ? 'IDs' : 'codes'} below are placeholders — ` +
+        `map ledgerly's codes to your real ${qboOut ? 'QuickBooks' : 'Xero'} accounts ` +
+        `(see the README).\n`,
+    );
+    if (result.schedule && result.schedule.entries.length > 0) {
+      process.stderr.write(
+        `ledgerly: ${String(result.schedule.entries.length)} recognition-schedule ` +
+          `entries are not shown — render them with the library's ` +
+          `${qboOut ? 'toQboSchedule' : 'toXeroSchedule'}.\n`,
+      );
+    }
+    output = qboOut ? formatQbo(result) : formatXero(result);
+  } else if (jsonOut) {
+    output = JSON.stringify(result, null, 2);
+  } else {
+    output = formatMapResult(result);
+  }
+  process.stdout.write(output + '\n');
   return 0;
 }
 

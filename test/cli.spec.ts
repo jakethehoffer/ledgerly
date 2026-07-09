@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Stripe from 'stripe';
 import { mapEvent } from '../src/engine.js';
-import { formatMapResult, mapEventJson } from '../src/cli.js';
+import { formatMapResult, formatQbo, formatXero, mapEventJson } from '../src/cli.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = path.join(__dirname, 'fixtures');
@@ -40,6 +40,34 @@ describe('cli: formatMapResult', () => {
     } as unknown as Stripe.Event;
     const out = formatMapResult(mapEvent(noop));
     expect(out).toMatch(/no journal entry/i);
+  });
+});
+
+describe('cli: exporter flags', () => {
+  it('--qbo renders QuickBooks JournalEntry JSON (placeholder account ids)', () => {
+    const result = mapEvent(JSON.parse(rawFixture('charge_succeeded_standard')) as Stripe.Event);
+    const parsed: unknown = JSON.parse(formatQbo(result));
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(1);
+    expect(JSON.stringify(parsed)).toContain('JournalEntryLineDetail');
+  });
+
+  it('--xero renders Xero ManualJournal JSON (placeholder account codes)', () => {
+    const result = mapEvent(JSON.parse(rawFixture('charge_succeeded_standard')) as Stripe.Event);
+    const parsed: unknown = JSON.parse(formatXero(result));
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(JSON.stringify(parsed)).toContain('JournalLines');
+  });
+
+  it('renders empty array JSON for an event with no accounting impact', () => {
+    const noop: Stripe.Event = {
+      id: 'evt_noop',
+      type: 'invoice.payment_failed',
+      created: 1736942400,
+      data: { object: {} },
+    } as unknown as Stripe.Event;
+    expect(formatQbo(mapEvent(noop))).toBe('[]');
+    expect(formatXero(mapEvent(noop))).toBe('[]');
   });
 });
 

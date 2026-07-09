@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.11.0] — 2026-07-08
+
+### Added
+
+- **`ledgerly --qbo` / `--xero`** — the CLI can now render an event's mapped
+  entries as QuickBooks Online `JournalEntry` JSON or Xero `ManualJournal` JSON,
+  not just the readable table or raw `MapResult`. Account IDs/codes are
+  placeholders (a note prints to stderr; stdout stays valid, pipeable JSON) that
+  you swap for your own once. This shows the full pipeline — event → entry → the
+  JSON you POST — on your own event.
+
 ## [0.10.0] — 2026-07-08
 
 ### Added
