@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.12.0] — 2026-07-09
+
+### Added
+
+- **Batch mapping in the CLI.** `ledgerly` now accepts not just a single event but
+  a JSON array of events or a Stripe list response (`{ "data": [...] }`, what
+  `stripe events list` prints), mapping each in one call — handy for backfilling
+  books from Stripe history. The table output separates each event's entries; the
+  raw `--json` output becomes an array of `MapResult`s; `--qbo`/`--xero` flatten to
+  one array of all mapped entries. A single event keeps its original object shape.
+
 ## [0.11.0] — 2026-07-08
 
 ### Added

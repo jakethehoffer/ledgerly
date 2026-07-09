@@ -53,7 +53,7 @@ cat event.json | npx ledgerly --qbo     # QuickBooks JournalEntry JSON
 cat event.json | npx ledgerly --xero    # Xero ManualJournal JSON
 ```
 
-`ledgerly` reads a Stripe event on stdin (or a file argument) and prints the entry it maps to — as a readable table, or the exact JSON you'd POST to QuickBooks or Xero (with placeholder account codes you swap for your own). The engine never calls Stripe, so expand nested objects (`balance_transaction`, `invoice.charge`, `credit_note.invoice`) first. Any of the [57 fixtures](./test/fixtures) is a ready-made input: `cat test/fixtures/charge_succeeded_standard.event.json | npx ledgerly`.
+`ledgerly` reads a Stripe event on stdin (or a file argument) and prints the entry it maps to — as a readable table, or the exact JSON you'd POST to QuickBooks or Xero (with placeholder account codes you swap for your own). Pipe a JSON array of events or a `stripe events list` export (`{ "data": [...] }`) to map a whole batch at once — handy for backfilling books from Stripe history. The engine never calls Stripe, so expand nested objects (`balance_transaction`, `invoice.charge`, `credit_note.invoice`) first. Any of the [57 fixtures](./test/fixtures) is a ready-made input: `cat test/fixtures/charge_succeeded_standard.event.json | npx ledgerly`.
 
 **Or clone and run the demo.** No Stripe account needed. It runs two events through the engine, a one-time charge and an annual subscription with revenue recognition.
 

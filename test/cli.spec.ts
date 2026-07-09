@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Stripe from 'stripe';
 import { mapEvent } from '../src/engine.js';
-import { formatMapResult, formatQbo, formatXero, mapEventJson } from '../src/cli.js';
+import { formatMapResult, formatQbo, formatXero, mapEventJson, mapEventsJson } from '../src/cli.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = path.join(__dirname, 'fixtures');
@@ -80,5 +80,31 @@ describe('cli: mapEventJson', () => {
 
   it('throws a clear error on invalid JSON', () => {
     expect(() => mapEventJson('{ not valid json')).toThrow(/not valid JSON/i);
+  });
+});
+
+describe('cli: mapEventsJson (batch)', () => {
+  it('maps a single event object to a one-element array', () => {
+    const results = mapEventsJson(rawFixture('charge_succeeded_standard'));
+    expect(results).toHaveLength(1);
+    expect(results[0]?.entries).toHaveLength(1);
+  });
+
+  it('maps a bare JSON array of events', () => {
+    const one = JSON.parse(rawFixture('charge_succeeded_standard')) as unknown;
+    const two = JSON.parse(rawFixture('invoice_payment_succeeded_annual')) as unknown;
+    const results = mapEventsJson(JSON.stringify([one, two]));
+    expect(results).toHaveLength(2);
+    expect(results[1]?.schedule?.entries).toHaveLength(12); // annual builds a schedule
+  });
+
+  it('maps a Stripe list response shape ({ data: [...] })', () => {
+    const one = JSON.parse(rawFixture('charge_succeeded_standard')) as unknown;
+    const results = mapEventsJson(JSON.stringify({ object: 'list', data: [one, one] }));
+    expect(results).toHaveLength(2);
+  });
+
+  it('throws a clear error on invalid JSON', () => {
+    expect(() => mapEventsJson('not json')).toThrow(/not valid JSON/i);
   });
 });

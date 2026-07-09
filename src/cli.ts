@@ -137,15 +137,53 @@ export function mapEventJson(input: string): MapResult {
   return mapEvent(parsed as Stripe.Event);
 }
 
+/**
+ * Extract the event list from parsed CLI input, accepting the three shapes a
+ * user is likely to pipe in: a single event object, a bare JSON array of events,
+ * or a Stripe list response (`{ object: 'list', data: [...] }`, what
+ * `stripe events list` prints).
+ */
+function extractEvents(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    Array.isArray((parsed as { data?: unknown }).data)
+  ) {
+    return (parsed as { data: unknown[] }).data;
+  }
+  return [parsed];
+}
+
+/**
+ * Parse raw input and map every event it contains. Accepts a single event, a
+ * JSON array of events, or a Stripe list response — see {@link extractEvents}.
+ * Returns one {@link MapResult} per event, so a batch (e.g. a Stripe history
+ * export) maps in a single call.
+ */
+export function mapEventsJson(input: string): MapResult[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch (err) {
+    throw new Error(
+      `Input is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return extractEvents(parsed).map((event) => mapEvent(event as Stripe.Event));
+}
+
 const HELP = `ledgerly — map a Stripe event to double-entry journal entries
 
 Usage:
-  cat event.json | ledgerly
-  ledgerly event.json [--json]
+  cat event.json | ledgerly [--json|--qbo|--xero]
+  ledgerly events.json
 
-Reads a Stripe event JSON (from stdin or a file argument) and prints the balanced
-journal entry it maps to. Pre-expand nested objects (balance_transaction,
-invoice.charge, credit_note.invoice) before piping — the engine never calls Stripe.
+Reads a Stripe event — or a JSON array of events, or a Stripe list response
+(\`{ "data": [...] }\`, what \`stripe events list\` prints) — from stdin or a file
+argument, and prints the balanced journal entries. Pre-expand nested objects
+(balance_transaction, invoice.charge, credit_note.invoice) — the engine never
+calls Stripe.
 
 Options:
   --json      Print the raw MapResult JSON instead of the readable table.
@@ -181,9 +219,11 @@ function main(argv: string[]): number {
     return 1;
   }
 
-  let result: MapResult;
+  // Accepts a single event, a JSON array, or a Stripe list ({ data: [...] }), so
+  // a whole history export maps in one call.
+  let results: MapResult[];
   try {
-    result = mapEventJson(input);
+    results = mapEventsJson(input);
   } catch (err) {
     if (err instanceof UnhandledEventError) {
       process.stderr.write(
@@ -214,18 +254,26 @@ function main(argv: string[]): number {
         `map ledgerly's codes to your real ${qboOut ? 'QuickBooks' : 'Xero'} accounts ` +
         `(see the README).\n`,
     );
-    if (result.schedule && result.schedule.entries.length > 0) {
+    const scheduleEntries = results.reduce((n, r) => n + (r.schedule?.entries.length ?? 0), 0);
+    if (scheduleEntries > 0) {
       process.stderr.write(
-        `ledgerly: ${String(result.schedule.entries.length)} recognition-schedule ` +
-          `entries are not shown — render them with the library's ` +
-          `${qboOut ? 'toQboSchedule' : 'toXeroSchedule'}.\n`,
+        `ledgerly: ${String(scheduleEntries)} recognition-schedule entries are not shown — ` +
+          `render them with the library's ${qboOut ? 'toQboSchedule' : 'toXeroSchedule'}.\n`,
       );
     }
-    output = qboOut ? formatQbo(result) : formatXero(result);
+    const allEntries = results.flatMap((r) => r.entries);
+    output = JSON.stringify(
+      allEntries.map((entry) =>
+        qboOut ? toQbo(entry, PLACEHOLDER_QBO) : toXero(entry, PLACEHOLDER_XERO),
+      ),
+      null,
+      2,
+    );
   } else if (jsonOut) {
-    output = JSON.stringify(result, null, 2);
+    // A single event keeps its object shape; a batch becomes an array of results.
+    output = JSON.stringify(results.length === 1 ? results[0] : results, null, 2);
   } else {
-    output = formatMapResult(result);
+    output = results.map(formatMapResult).join(`\n\n${'='.repeat(60)}\n\n`);
   }
   process.stdout.write(output + '\n');
   return 0;
