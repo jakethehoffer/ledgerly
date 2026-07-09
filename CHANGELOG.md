@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.10.0] — 2026-07-08
+
+### Added
+
+- **`ledgerly` CLI** — a zero-install way to map a single Stripe event to its
+  journal entry. `cat event.json | npx ledgerly` reads a Stripe event from stdin
+  (or a file argument) and prints the balanced entry as a readable table, or the
+  raw `MapResult` JSON with `--json`. Unhandled event types and missing-expansion
+  errors print a clear message and exit non-zero. This is the pure mapping CLI; the
+  webhook receiver remains the separate `ledgerly-server` bin. New `bin` entry
+  `ledgerly` → `dist/cli.js`.
+
 ## [0.9.1] — 2026-07-08
 
 ### Fixed

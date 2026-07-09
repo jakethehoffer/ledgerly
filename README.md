@@ -44,7 +44,16 @@ Then renders it as QBO JournalEntry JSON or Xero ManualJournal JSON, ready to pu
 
 ## Try it
 
-No Stripe account needed. Clone the repo and run the demo. It runs two events through the engine, a one-time charge and an annual subscription with revenue recognition.
+**Fastest, zero install.** Pipe any (pre-expanded) Stripe event through the CLI and watch it become a balanced journal entry:
+
+```bash
+cat event.json | npx ledgerly          # readable table
+cat event.json | npx ledgerly --json   # raw MapResult JSON
+```
+
+`ledgerly` reads a Stripe event on stdin (or a file argument) and prints the entry it maps to. The engine never calls Stripe, so expand nested objects (`balance_transaction`, `invoice.charge`, `credit_note.invoice`) first. Any of the [57 fixtures](./test/fixtures) is a ready-made input: `cat test/fixtures/charge_succeeded_standard.event.json | npx ledgerly`.
+
+**Or clone and run the demo.** No Stripe account needed. It runs two events through the engine, a one-time charge and an annual subscription with revenue recognition.
 
 ```bash
 git clone https://github.com/jakethehoffer/ledgerly

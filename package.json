@@ -1,6 +1,6 @@
 {
   "name": "ledgerly",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Stripe-to-double-entry mapping engine for indie SaaS",
   "keywords": [
     "stripe",
@@ -43,6 +43,7 @@
     "node": ">=20"
   },
   "bin": {
+    "ledgerly": "dist/cli.js",
     "ledgerly-server": "dist/server/cli.js"
   },
   "scripts": {
