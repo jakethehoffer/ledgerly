@@ -13,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-748 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+760 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -112,7 +112,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.9.1
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.12.0
 ```
 
 ### Use the engine as a library
@@ -809,7 +809,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.9.1
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.12.0
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -839,7 +839,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ghcr.io/jakethehoffer/ledgerly:v0.9.1
+  ghcr.io/jakethehoffer/ledgerly:v0.12.0
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -895,7 +895,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.9.1 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.12.0 \
   --repo jakethehoffer/ledgerly
 ```
 
