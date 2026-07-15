@@ -17,6 +17,10 @@ ledger.db-shm
 LAUNCH.md
 BUILD-STORY.md
 REDDIT-PLAN.md
+CONTENT-DRAFTS.md
+
+# Local read-only Reddit warm-up tooling (never committed, never published).
+reddit-tools/
 
 # Local Claude project guidance (workflow notes, never committed).
 CLAUDE.md
