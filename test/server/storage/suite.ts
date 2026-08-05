@@ -993,6 +993,153 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
       });
     });
 
+    describe('persistSubscriptionChange', () => {
+      function recognitionEntry(date: string, memo: string, eventId: string): JournalEntry {
+        return makeEntry({
+          date,
+          memo,
+          sourceEventId: eventId,
+          sourceEventType: 'invoice.payment_succeeded',
+          sourceObjectId: `in_${eventId}`,
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(10000) },
+            { accountCode: '4000', side: 'credit', amount: cents(10000) },
+          ],
+        });
+      }
+
+      it('cancels old future rows and atomically saves the paid change plus rebuilt schedule', () => {
+        const storage = factory();
+        const old = storage.entries.saveScheduled(
+          recognitionEntry('2026-07-01', 'old future', 'evt_old'),
+          { subscriptionId: 'sub_change', sourceEventId: 'evt_old' },
+        );
+        const nextTerm = storage.entries.saveScheduled(
+          recognitionEntry('2027-01-01', 'next renewal', 'evt_next'),
+          { subscriptionId: 'sub_change', sourceEventId: 'evt_next' },
+        );
+        const immediate = makeEntry({
+          memo: 'upgrade cash',
+          sourceEventId: 'evt_change',
+          sourceEventType: 'invoice.payment_succeeded',
+          sourceObjectId: 'in_change',
+        });
+        const rebuilt: RecognitionSchedule = {
+          subscriptionId: 'sub_change',
+          sourceEventId: 'evt_change',
+          entries: [recognitionEntry('2026-07-01', 'rebuilt future', 'evt_change')],
+        };
+
+        let sawPending: ReadonlyArray<JournalEntry> = [];
+        const input = {
+          subscriptionId: 'sub_change',
+          throughDate: '2026-12-31',
+          immediateEntries: [immediate],
+          build(pending: ReadonlyArray<JournalEntry>) {
+            sawPending = pending;
+            return { cancelExisting: true, schedule: rebuilt };
+          },
+        };
+
+        expect(storage.persistSubscriptionChange('evt_change', input)).toEqual({ duplicate: false });
+        expect(sawPending.map((entry) => entry.memo)).toEqual(['old future']);
+        expect(storage.entries.getScheduledById(old.id)?.status).toBe('cancelled');
+        expect(storage.entries.getScheduledById(nextTerm.id)?.status).toBe('pending');
+        expect(storage.entries.findByEventId('evt_change').map((row) => row.entry.memo))
+          .toEqual(['upgrade cash']);
+        expect(
+          storage.entries
+            .findScheduledBySubscription('sub_change')
+            .filter((row) => row.status === 'pending')
+            .map((row) => row.entry.memo),
+        ).toEqual(['next renewal', 'rebuilt future']);
+        expect(storage.dedup.has('evt_change')).toBe(true);
+
+        // Duplicate Stripe delivery cannot cancel or write a second copy.
+        expect(storage.persistSubscriptionChange('evt_change', input)).toEqual({ duplicate: true });
+        expect(storage.entries.findByEventId('evt_change')).toHaveLength(1);
+      });
+
+      it('keeps the old schedule when the builder chooses the safe separate-schedule fallback', () => {
+        const storage = factory();
+        const old = storage.entries.saveScheduled(
+          recognitionEntry('2026-07-01', 'old FX future', 'evt_old_fx'),
+          { subscriptionId: 'sub_change_fx', sourceEventId: 'evt_old_fx' },
+        );
+        const delta: RecognitionSchedule = {
+          subscriptionId: 'sub_change_fx',
+          sourceEventId: 'evt_change_fx',
+          entries: [recognitionEntry('2026-07-15', 'separate FX delta', 'evt_change_fx')],
+        };
+        storage.persistSubscriptionChange('evt_change_fx', {
+          subscriptionId: 'sub_change_fx',
+          throughDate: '2026-12-31',
+          immediateEntries: [],
+          build: () => ({ cancelExisting: false, schedule: delta }),
+        });
+        expect(storage.entries.getScheduledById(old.id)?.status).toBe('pending');
+        expect(
+          storage.entries
+            .findScheduledBySubscription('sub_change_fx')
+            .filter((row) => row.status === 'pending'),
+        ).toHaveLength(2);
+      });
+
+      it('changes nothing and leaves the event retryable when the builder throws', () => {
+        const storage = factory();
+        const old = storage.entries.saveScheduled(
+          recognitionEntry('2026-07-01', 'must survive', 'evt_old_fail'),
+          { subscriptionId: 'sub_change_fail', sourceEventId: 'evt_old_fail' },
+        );
+        expect(() =>
+          storage.persistSubscriptionChange('evt_change_fail', {
+            subscriptionId: 'sub_change_fail',
+            throughDate: '2026-12-31',
+            immediateEntries: [makeEntry({ sourceEventId: 'evt_change_fail' })],
+            build: () => {
+              throw new Error('refuse unsafe rebuild');
+            },
+          }),
+        ).toThrow(/unsafe rebuild/);
+        expect(storage.entries.getScheduledById(old.id)?.status).toBe('pending');
+        expect(storage.entries.findByEventId('evt_change_fail')).toHaveLength(0);
+        expect(storage.dedup.has('evt_change_fail')).toBe(false);
+      });
+
+      it('refuses to replace a row that already has a dispatch attempt', () => {
+        const storage = factory();
+        const old = storage.entries.saveScheduled(
+          recognitionEntry('2026-07-01', 'possibly sent', 'evt_old_attempted'),
+          { subscriptionId: 'sub_change_attempted', sourceEventId: 'evt_old_attempted' },
+        );
+        storage.entries.recordScheduledAttempt(
+          old.id,
+          1,
+          1000,
+          2000,
+          'reply was lost',
+          'pending',
+        );
+        expect(() =>
+          storage.persistSubscriptionChange('evt_change_attempted', {
+            subscriptionId: 'sub_change_attempted',
+            throughDate: '2026-12-31',
+            immediateEntries: [],
+            build: () => ({
+              cancelExisting: true,
+              schedule: {
+                subscriptionId: 'sub_change_attempted',
+                sourceEventId: 'evt_change_attempted',
+                entries: [],
+              },
+            }),
+          }),
+        ).toThrow(/already has dispatch attempts/);
+        expect(storage.entries.getScheduledById(old.id)?.status).toBe('pending');
+        expect(storage.dedup.has('evt_change_attempted')).toBe(false);
+      });
+    });
+
     describe('ping', () => {
       it('does not throw on a fresh storage', () => {
         const storage = factory();

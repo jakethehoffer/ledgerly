@@ -121,6 +121,30 @@ month absorbs any rounding remainder). Your server persists these and posts each
 on its scheduled date. This is standard ASC 606 / IFRS 15 ratable recognition.
 *(`invoice_payment_succeeded_annual`)*
 
+### Mid-term changes — rebuild only the unposted months
+
+A subscription update notice alone does not change the books. Stripe can send
+`customer.subscription.updated` for metadata or for a plan change configured
+with no proration. Ledgerly waits for the accounting event that moved value: a
+paid `invoice.payment_succeeded` proration or an issued credit note.
+
+For a paid, positive, same-currency change during an annual term, the bundled
+receiver keeps every month already posted, cancels the old unposted rows for that
+term, and combines their deferred amount with the new deferred amount. It spreads
+the total over the original remaining dates, with the last date taking any
+rounding remainder. The saved rows keep each invoice's share separate, so a later
+credit note can only draw down the bill it belongs to. The read, cancellation,
+cash entry, and replacement schedule are saved together, so a retry cannot post
+the change twice.
+
+The pure event mapper has no saved schedule to rebuild, so it only returns the
+change invoice's own entries and delta schedule. The bundled receiver refuses a
+stateful rebuild when the old unposted rows are missing, or when the rows carry
+FX or mixed-currency history. Those cases need an operator correction rather
+than a schedule that could run past the contract end. It also refuses to replace
+an unposted row that already has a send attempt, because that row may have reached
+the accounting system even if its reply was lost.
+
 ### Mixed invoices — recognize each line by its own term
 
 Recognition is decided **per line item**, not once for the whole invoice. When an
@@ -542,6 +566,16 @@ isn't handled yet.
 ## Known limitations
 
 These are deliberate gaps, documented rather than approximated:
+
+- **Mid-term annual subscription changes — pure engine vs. bundled server.** A
+  paid, positive, same-currency proration invoice is merged into the original
+  term's unposted recognition dates by the bundled receiver. Already-posted
+  months and later renewal terms stay untouched. The pure mapper has no saved
+  ledger and therefore returns only a delta schedule. The receiver refuses the
+  rebuild when the old future rows are missing or carry FX/mixed-currency history.
+  Reductions are handled when Stripe issues a supported credit note; a negative
+  proration that only changes customer balance without a credit note is not yet
+  rebuilt automatically.
 
 - **Voiding a net-terms invoice — pure engine vs. bundled server**
   (`invoice.voided`). A void with no deferred portion is fully modeled in the

@@ -10,6 +10,7 @@ import type {
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
+  SubscriptionChangeReconcileInput,
   VoidReconcileInput,
 } from './types.js';
 
@@ -425,6 +426,43 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         for (const entry of result.reissuedSchedule.entries) {
           entries.saveScheduled(entry, result.reissuedSchedule);
         }
+      }
+      dedup.record(eventId, now);
+      return { duplicate: false };
+    },
+    persistSubscriptionChange(
+      eventId: string,
+      input: SubscriptionChangeReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      if (dedup.has(eventId)) return { duplicate: true };
+      const rows = entries.findScheduledBySubscription(input.subscriptionId);
+      const pendingRows = rows.filter(
+        (row) =>
+          (row.status === 'pending' || row.status === 'failed') &&
+          row.entry.date <= input.throughDate,
+      );
+      if (pendingRows.some((row) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot rebuild subscription ${input.subscriptionId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
+      // Build before mutating. If the accounting guard throws, the existing
+      // schedule and dedup state remain untouched for a clean Stripe retry.
+      const plan = input.build(pendingRows.map((row) => row.entry));
+      if (plan.cancelExisting) {
+        for (const row of pendingRows) entries.cancelScheduled(row.id);
+      }
+      for (const entry of input.immediateEntries) {
+        entries.saveImmediate(entry, eventId);
+        entries.saveScheduled(entry, {
+          subscriptionId: `immediate:${entry.sourceEventId}`,
+          sourceEventId: entry.sourceEventId,
+        });
+      }
+      for (const entry of plan.schedule.entries) {
+        entries.saveScheduled(entry, plan.schedule);
       }
       dedup.record(eventId, now);
       return { duplicate: false };

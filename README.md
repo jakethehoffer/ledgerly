@@ -13,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-760 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+774 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -112,7 +112,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.12.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.13.0
 ```
 
 ### Use the engine as a library
@@ -231,12 +231,12 @@ If `charge.invoice` is not expanded, meaning a string ID or null, refunds are bo
 | `invoice.finalized` | B2B net-terms (send_invoice): monthly, annual-deferred; charge_automatically no-op |
 | `invoice.marked_uncollectible` | B2B net-terms write-off to bad debt; charge_automatically no-op |
 | `invoice.voided` | B2B net-terms reversal; charge_automatically no-op; deferred-schedule voids reconciled statefully by the server (pure engine refuses them) |
-| `invoice.payment_succeeded` | monthly, annual-deferred, with-tax, annual-with-tax, with-app-fee, prorated-upgrade, prorated-downgrade, one-time-only, paid-from-credit-balance (drains 2200; a deferred invoice defers over its term), out-of-band no-op, B2B send_invoice (clears AR) |
+| `invoice.payment_succeeded` | monthly, annual-deferred, with-tax, annual-with-tax, with-app-fee, monthly proration invoices, paid same-currency mid-term annual upgrades (the bundled server rebuilds the remaining schedule), one-time-only, paid-from-credit-balance (drains 2200; a deferred invoice defers over its term), out-of-band no-op, B2B send_invoice (clears AR) |
 | `credit_note.created` | B2B net-terms pre-payment credit reduces AR + reverses revenue/tax; whole-to-balance post-payment credit books 2200 + reverses revenue/tax; deferred-schedule credit drawn down statefully by the server (pure engine refuses); refund-backed post-payment / charge_automatically pre-payment / split acknowledged as no-op |
 | `credit_note.voided` | reverses a voided credit note the engine booked — pre-payment (restores AR) or post-payment-to-balance (claws back 2200) + revenue/tax; deferred-schedule draw-downs un-done statefully by the server (invert + re-inflate schedule); no-op for the shapes `credit_note.created` didn't book |
 | `invoice.payment_failed` | informational |
-| `customer.subscription.updated` | informational |
-| `customer.subscription.deleted` | informational |
+| `customer.subscription.updated` | informational; the paid invoice or credit note carries the accounting change |
+| `customer.subscription.deleted` | informational; service-through-term schedules continue unless an invoice or credit note changes them |
 | `payout.paid` | standard (USD) |
 | `payout.failed` | standard |
 
@@ -809,7 +809,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.12.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.13.0
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -839,7 +839,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ghcr.io/jakethehoffer/ledgerly:v0.12.0
+  ghcr.io/jakethehoffer/ledgerly:v0.13.0
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -895,7 +895,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.12.0 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.13.0 \
   --repo jakethehoffer/ledgerly
 ```
 

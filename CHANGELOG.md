@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.13.0] — 2026-08-05
+
+### Added
+
+- **Stateful mid-term annual upgrade reconciliation.** When a paid, positive,
+  same-currency `subscription_update` proration arrives while an annual
+  recognition schedule still has unposted rows, the bundled receiver now keeps
+  posted months immutable, cancels only the current term's future rows, combines
+  the old and new deferred amounts on the original remaining dates, and keeps
+  each invoice's slice separate so a later credit can only draw down the invoice
+  it belongs to. The whole change is atomic and idempotent in both storage
+  backends. Missing old rows and FX or mixed-currency schedules are refused
+  instead of being timed incorrectly, and rows with prior dispatch attempts are
+  refused rather than risking a duplicate posting under a new idempotency key.
+
+### Changed
+
+- Custom `Storage` implementations must add `persistSubscriptionChange`.
+
 ## [0.12.0] — 2026-07-09
 
 ### Added

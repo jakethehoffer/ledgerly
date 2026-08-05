@@ -31,6 +31,10 @@ import {
 } from './oauth/xero.js';
 import { inMemoryStorage } from './storage/inMemory.js';
 import type { Deduplicator, PersistResult, Storage } from './storage/types.js';
+import {
+  buildSubscriptionChangeReconcileInput,
+  subscriptionChangeNeedsReconcile,
+} from './subscriptionChangeReconciler.js';
 
 /**
  * OAuth client configuration block, attached to {@link ServerConfig.oauth}.
@@ -233,6 +237,37 @@ function resolveStorage(config: ServerConfig): Storage {
           for (const entry of result.reissuedSchedule.entries) {
             base.entries.saveScheduled(entry, result.reissuedSchedule);
           }
+        }
+        customDedup.record(eventId, now);
+        return { duplicate: false };
+      },
+      persistSubscriptionChange(eventId, input, now = Date.now()): PersistResult {
+        if (customDedup.has(eventId)) return { duplicate: true };
+        const rows = base.entries.findScheduledBySubscription(input.subscriptionId);
+        const pendingRows = rows.filter(
+          (row) =>
+            (row.status === 'pending' || row.status === 'failed') &&
+            row.entry.date <= input.throughDate,
+        );
+        if (pendingRows.some((row) => row.attempts > 0)) {
+          throw new Error(
+            `Cannot rebuild subscription ${input.subscriptionId}: ` +
+              `an unposted recognition row already has dispatch attempts`,
+          );
+        }
+        const plan = input.build(pendingRows.map((row) => row.entry));
+        if (plan.cancelExisting) {
+          for (const row of pendingRows) base.entries.cancelScheduled(row.id);
+        }
+        for (const entry of input.immediateEntries) {
+          base.entries.saveImmediate(entry, eventId);
+          base.entries.saveScheduled(entry, {
+            subscriptionId: `immediate:${entry.sourceEventId}`,
+            sourceEventId: entry.sourceEventId,
+          });
+        }
+        for (const entry of plan.schedule.entries) {
+          base.entries.saveScheduled(entry, plan.schedule);
         }
         customDedup.record(eventId, now);
         return { duplicate: false };
@@ -453,12 +488,23 @@ export function createServer(config: ServerConfig): ServerInstance {
       } else {
         const result = mapEvent(expanded);
         try {
-          // Atomic + idempotent per backend: persist all entries + record dedup,
-          // or roll back. The persistence layer — not the has() pre-check above —
-          // is the correctness boundary: if a concurrent delivery already claimed
-          // this event during the await-expansion gap, this returns
-          // { duplicate: true } and writes nothing, so entries post exactly once.
-          persistResult = storage.persistMapResult(event.id, result);
+          if (subscriptionChangeNeedsReconcile(expanded, result)) {
+            // A paid mid-term annual change carries a new deferred delta while
+            // the original invoice can still have future recognition rows. The
+            // bundled receiver atomically keeps posted months, cancels the old
+            // future rows, and rebuilds those dates with old + new deferred.
+            persistResult = storage.persistSubscriptionChange(
+              event.id,
+              buildSubscriptionChangeReconcileInput(expanded, result),
+            );
+          } else {
+            // Atomic + idempotent per backend: persist all entries + record dedup,
+            // or roll back. The persistence layer — not the has() pre-check above —
+            // is the correctness boundary: if a concurrent delivery already claimed
+            // this event during the await-expansion gap, this returns
+            // { duplicate: true } and writes nothing, so entries post exactly once.
+            persistResult = storage.persistMapResult(event.id, result);
+          }
         } catch (err) {
           metrics.inc('webhook_error', { type: event.type });
           log.error('Persistence failed', { eventId: event.id, err });

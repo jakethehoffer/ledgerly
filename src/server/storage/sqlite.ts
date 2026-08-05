@@ -12,6 +12,7 @@ import type {
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
+  SubscriptionChangeReconcileInput,
   VoidReconcileInput,
 } from './types.js';
 
@@ -780,6 +781,65 @@ export function sqliteStorage(db: Database.Database): Storage {
     },
   );
 
+  const persistSubscriptionChangeTxn = db.transaction(
+    (
+      eventId: string,
+      input: SubscriptionChangeReconcileInput,
+      now: number,
+    ): PersistResult => {
+      const claim = recordEvent.run(eventId, now);
+      if (claim.changes === 0) return { duplicate: true };
+
+      const pendingRows = selectBySubscriptionForVoid
+        .all(input.subscriptionId)
+        .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
+        .filter(
+          ({ row, entry }) =>
+            (row.status === 'pending' || row.status === 'failed') &&
+            entry.date <= input.throughDate,
+        );
+      if (pendingRows.some(({ row }) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot rebuild subscription ${input.subscriptionId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
+      // `better-sqlite3` rolls the event claim back with every later write if
+      // the builder or an insert throws, keeping Stripe retries safe.
+      const plan = input.build(pendingRows.map(({ entry }) => entry));
+      if (plan.cancelExisting) {
+        for (const { row } of pendingRows) cancelForVoid.run(row.id);
+      }
+      for (const entry of input.immediateEntries) {
+        insertImmediate.run(
+          eventId,
+          now,
+          entry.date,
+          entry.currency,
+          entry.memo,
+          entry.sourceEventType,
+          entry.sourceObjectId ?? null,
+          JSON.stringify(entry),
+        );
+        insertScheduled.run(
+          entry.sourceEventId,
+          `immediate:${entry.sourceEventId}`,
+          entry.date,
+          JSON.stringify(entry),
+        );
+      }
+      for (const entry of plan.schedule.entries) {
+        insertScheduled.run(
+          plan.schedule.sourceEventId,
+          plan.schedule.subscriptionId,
+          entry.date,
+          JSON.stringify(entry),
+        );
+      }
+      return { duplicate: false };
+    },
+  );
+
   // Prepared once for the lifetime of this Storage instance; readiness
   // probes call this on every request and the prepare cost should not
   // be in the hot path.
@@ -822,6 +882,13 @@ export function sqliteStorage(db: Database.Database): Storage {
       now: number = Date.now(),
     ): PersistResult {
       return persistCreditVoidTxn(eventId, input, now);
+    },
+    persistSubscriptionChange(
+      eventId: string,
+      input: SubscriptionChangeReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      return persistSubscriptionChangeTxn(eventId, input, now);
     },
   };
 }

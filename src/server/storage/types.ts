@@ -315,6 +315,31 @@ export interface CreditVoidReconcileInput {
   ) => { reversal: JournalEntry; reissuedSchedule: RecognitionSchedule | null } | null;
 }
 
+/** Result of planning a paid mid-term subscription schedule update. */
+export interface SubscriptionChangeReconcilePlan {
+  /** Whether the storage layer should cancel the subscription's old future rows. */
+  readonly cancelExisting: boolean;
+  /** The schedule that should be saved after the builder's accounting checks pass. */
+  readonly schedule: RecognitionSchedule;
+}
+
+/**
+ * Input to {@link Storage.persistSubscriptionChange}. The storage layer reads
+ * every unposted recognition row through the changed contract term's end, lets
+ * the accounting builder combine it with the paid change, then atomically
+ * cancels the old rows when requested and persists the cash entry plus
+ * replacement schedule. Rows from a later renewal term stay untouched.
+ */
+export interface SubscriptionChangeReconcileInput {
+  readonly subscriptionId: string;
+  /** Last service date whose unposted rows belong to the changed contract term. */
+  readonly throughDate: string;
+  readonly immediateEntries: ReadonlyArray<JournalEntry>;
+  readonly build: (
+    pendingRecognition: ReadonlyArray<JournalEntry>,
+  ) => SubscriptionChangeReconcilePlan;
+}
+
 /**
  * Aggregate persistence handle bundling a deduplicator and journal entry store.
  *
@@ -419,6 +444,19 @@ export interface Storage {
   persistCreditVoidReversal(
     eventId: string,
     input: CreditVoidReconcileInput,
+    now?: number,
+  ): PersistResult;
+
+  /**
+   * Persist a paid mid-term subscription change atomically. Already-posted
+   * recognition rows are immutable. Pending/failed rows are passed to the
+   * builder, cancelled only when the plan requests a rebuild, and replaced by
+   * the returned schedule. Immediate cash entries are persisted and dispatched
+   * exactly like {@link persistMapResult}. Duplicate event IDs write nothing.
+   */
+  persistSubscriptionChange(
+    eventId: string,
+    input: SubscriptionChangeReconcileInput,
     now?: number,
   ): PersistResult;
 }
