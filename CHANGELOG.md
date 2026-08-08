@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.15.0] — 2026-08-08
+
+### Fixed
+
+- **Manual retry can no longer reopen or duplicate accounting work.** The admin
+  retry endpoint and both storage backends now accept only dead-lettered
+  (`failed`) rows. Pending rows may have an outside send in flight, while
+  posted, cancelled, and held rows are final states; each is now rejected
+  without resetting its dispatch history. The endpoint returns 409 for those
+  state conflicts and keeps 404 for unknown ids.
+
 ## [0.14.0] — 2026-08-08
 
 ### Added
@@ -1138,6 +1149,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.15.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.15.0
 [0.4.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.3.0
 [0.2.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.2.1

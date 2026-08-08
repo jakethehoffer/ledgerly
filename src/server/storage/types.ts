@@ -217,10 +217,11 @@ export interface JournalEntryStore {
    * `lastAttemptedAt=null`, `nextAttemptAt=null`, `lastError=null`. The next
    * scheduler tick will pick it up immediately.
    *
-   * Held rows cannot be re-queued because they are outside the subscription's
-   * service term. Idempotent — calling on an already-pending row leaves it eligible-now
-   * with the same field reset semantics. Throws if the row does not exist.
-   * Returns the freshly-read row reflecting the new field values.
+   * Only failed rows can be re-queued. Pending rows may have an outside send in
+   * flight, while posted, cancelled, and held rows are terminal accounting
+   * states; resetting any of them could duplicate or reopen completed work.
+   * Throws if the row does not exist or is not failed. Returns the freshly-read
+   * row reflecting the new field values.
    *
    * Used by the operational admin endpoint `POST /admin/scheduled/:id/retry`
    * so an operator can recover dead-lettered entries after fixing the

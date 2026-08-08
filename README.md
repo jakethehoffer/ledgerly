@@ -528,15 +528,11 @@ SELECT id, event_id, subscription_id, scheduled_date, attempts, last_error
   FROM scheduled_entries WHERE status = 'failed';
 ```
 
-To re-queue a failed entry after fixing the underlying issue (e.g., a missing account in your account map):
-
-```sql
-UPDATE scheduled_entries
-   SET status = 'pending', attempts = 0, next_attempt_at = NULL, last_error = NULL
- WHERE id = <id>;
-```
-
-A future iteration will add an admin API for this; for now, direct SQL is the pattern.
+After fixing the underlying issue, use the bearer-protected
+`POST /admin/scheduled/:id/retry` endpoint documented below. It accepts only
+`failed` entries and rejects every other state without changing the row. Avoid
+editing retry state directly in SQLite, because that can erase an uncertain
+send or reopen completed accounting work.
 
 **Multi-process safety:** the scheduler assumes single-writer access to `scheduled_entries`. Running multiple scheduler instances against the same SQLite database may double-post entries. For multi-process deployments, use a separate locking mechanism or a queue-based dispatcher.
 
@@ -790,8 +786,9 @@ to scanners.
   metadata (attempts, lastError, nextAttemptAt). 404 when not found.
 - `POST /admin/scheduled/:id/retry` re-queues a dead-lettered entry. Resets
   `status='pending'`, `attempts=0`, `lastAttemptedAt=null`, `nextAttemptAt=null`,
-  `lastError=null`. The next scheduler tick picks it up. Idempotent on
-  already-pending rows. 404 when the id does not exist.
+  `lastError=null`. The next scheduler tick picks it up. Only `failed` entries
+  can be retried; other states return 409 without changing the row. Unknown ids
+  return 404.
 
   ```bash
   # See the most recent failed dispatches

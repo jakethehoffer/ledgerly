@@ -341,6 +341,31 @@ describe('Admin endpoints', () => {
       expect(res.status).toBe(404);
     });
 
+    it('409 when the entry is not failed', async () => {
+      const storage = inMemoryStorage();
+      const pending = storage.entries.saveScheduled(makeEntry(), {
+        subscriptionId: 'sub_pending',
+        sourceEventId: 'evt_pending',
+      });
+      storage.entries.markScheduledAttemptStarted(pending.id, 1, 1_000);
+      const { app } = createServer({
+        stripe,
+        webhookSecret: 'whsec_',
+        log: silentLogger(),
+        storage,
+        adminToken: ADMIN_TOKEN,
+      });
+
+      const res = await request(app)
+        .post(`/admin/scheduled/${String(pending.id)}/retry`)
+        .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
+
+      expect(res.status).toBe(409);
+      expect((res.body as { error?: string }).error).toMatch(/only failed/i);
+      expect(storage.entries.getScheduledById(pending.id)?.status).toBe('pending');
+      expect(storage.entries.getScheduledById(pending.id)?.attempts).toBe(1);
+    });
+
     it('400 on non-numeric id', async () => {
       const { app } = createServer({
         stripe,

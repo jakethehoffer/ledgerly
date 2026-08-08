@@ -441,17 +441,42 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         );
       });
 
-      it('requeueScheduled is idempotent on an already-pending row', () => {
+      it('requeueScheduled refuses every state except failed without changing the row', () => {
         const storage = factory();
-        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
-          subscriptionId: 'sub_idem',
-          sourceEventId: 'evt_idem',
+        const pending = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_pending',
+          sourceEventId: 'evt_pending',
         });
-        const first = storage.entries.requeueScheduled(saved.id);
-        const second = storage.entries.requeueScheduled(saved.id);
-        expect(first.status).toBe('pending');
-        expect(second.status).toBe('pending');
-        expect(second.attempts).toBe(0);
+        storage.entries.markScheduledAttemptStarted(pending.id, 1, 1_000);
+
+        const posted = storage.entries.saveScheduled(makeEntry({ date: '2026-05-02' }), {
+          subscriptionId: 'sub_posted',
+          sourceEventId: 'evt_posted',
+        });
+        storage.entries.markScheduledPosted(posted.id);
+
+        const cancelled = storage.entries.saveScheduled(makeEntry({ date: '2026-05-03' }), {
+          subscriptionId: 'sub_cancelled',
+          sourceEventId: 'evt_cancelled',
+        });
+        storage.entries.cancelScheduled(cancelled.id);
+
+        const held = storage.entries.saveScheduled(makeEntry({ date: '2026-05-04' }), {
+          subscriptionId: 'sub_held',
+          sourceEventId: 'evt_held',
+        });
+        storage.entries.holdScheduled(held.id);
+
+        for (const [row, status] of [
+          [pending, 'pending'],
+          [posted, 'posted'],
+          [cancelled, 'cancelled'],
+          [held, 'held'],
+        ] as const) {
+          expect(() => storage.entries.requeueScheduled(row.id)).toThrow(/only failed/i);
+          expect(storage.entries.getScheduledById(row.id)?.status).toBe(status);
+        }
+        expect(storage.entries.getScheduledById(pending.id)?.attempts).toBe(1);
       });
 
       it('requeueScheduled throws on unknown id', () => {

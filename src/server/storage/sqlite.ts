@@ -239,7 +239,7 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
             last_attempted_at = NULL,
             next_attempt_at = NULL,
             last_error = NULL
-      WHERE id = ? AND status <> 'held'`,
+      WHERE id = ? AND status = 'failed'`,
   );
 
   function scheduledRowToSaved(row: ScheduledEntryRow): SavedScheduledEntry {
@@ -437,8 +437,11 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
       const info = requeueStmt.run(id);
       if (info.changes === 0) {
         const existing = selectScheduledByIdStmt.get(id);
-        if (existing?.status === 'held') {
-          throw new Error(`held scheduled entry id=${String(id)} cannot be re-queued`);
+        if (existing !== undefined) {
+          throw new Error(
+            `Only failed scheduled entries can be re-queued; ` +
+              `id=${String(id)} has status ${existing.status}`,
+          );
         }
         throw new Error(`No scheduled entry with id=${String(id)}`);
       }

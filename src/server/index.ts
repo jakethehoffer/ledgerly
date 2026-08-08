@@ -892,12 +892,21 @@ export function createServer(config: ServerConfig): ServerInstance {
         res.status(400).json({ error: 'id must be a non-negative integer' });
         return;
       }
+      const current = storage.entries.getScheduledById(id);
+      if (current === null) {
+        res.status(404).json({ error: 'not found' });
+        return;
+      }
+      if (current.status !== 'failed') {
+        res.status(409).json({ error: 'only failed entries can be retried' });
+        return;
+      }
       try {
         const entry = storage.entries.requeueScheduled(id);
         log.info('Admin requeued scheduled entry', { id });
         res.json({ entry });
       } catch {
-        res.status(404).json({ error: 'not found' });
+        res.status(409).json({ error: 'entry could not be retried' });
       }
     });
   } else {

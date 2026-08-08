@@ -258,8 +258,11 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
       if (!existing) {
         throw new Error(`No scheduled entry with id=${String(id)}`);
       }
-      if (existing.status === 'held') {
-        throw new Error(`held scheduled entry id=${String(id)} cannot be re-queued`);
+      if (existing.status !== 'failed') {
+        throw new Error(
+          `Only failed scheduled entries can be re-queued; ` +
+            `id=${String(id)} has status ${existing.status}`,
+        );
       }
       const updated: SavedScheduledEntry = {
         ...existing,
