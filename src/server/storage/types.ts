@@ -54,12 +54,11 @@ export interface SavedImmediateEntry {
  * (dead-letter); a human re-queues it via SQL after fixing the root cause.
  *
  * Attempt fields:
- * - `attempts` — count of dispatch attempts that have been recorded (each
- *   thrown dispatcher call increments this by 1). 0 for fresh entries.
- * - `lastAttemptedAt` — epoch ms of the most recent failed dispatch attempt.
- *   `null` for entries that have never been attempted (or where the most
- *   recent attempt succeeded — but those rows are `'posted'` so the field is
- *   moot).
+ * - `attempts` — count of dispatch attempts that have started. 0 for fresh
+ *   entries. The count is recorded before the external call begins so another
+ *   reconciliation never replaces a row whose outcome is not known yet.
+ * - `lastAttemptedAt` — epoch ms when the most recent dispatch attempt began.
+ *   `null` only for entries that have never been attempted.
  * - `nextAttemptAt` — epoch ms after which the scheduler is allowed to retry.
  *   `null` means "ready now" (fresh entry, or no backoff scheduled).
  * - `lastError` — truncated error message from the most recent failed
@@ -70,7 +69,7 @@ export interface SavedScheduledEntry {
   readonly eventId: string;
   readonly subscriptionId: string;
   readonly entry: JournalEntry;
-  readonly status: 'pending' | 'posted' | 'cancelled' | 'failed';
+  readonly status: 'pending' | 'posted' | 'cancelled' | 'failed' | 'held';
   readonly attempts: number;
   readonly lastAttemptedAt: number | null;
   readonly nextAttemptAt: number | null;
@@ -132,16 +131,33 @@ export interface JournalEntryStore {
 
   /**
    * Transition a scheduled entry to `'cancelled'` so the scheduler never posts
-   * it. Only `'pending'` and `'failed'` rows are cancellable; a `'posted'` or
-   * already-`'cancelled'` row is left unchanged (a no-op, not an error, so a
+   * it. `'pending'`, `'failed'`, and `'held'` rows are cancellable; a `'posted'`
+   * or already-`'cancelled'` row is left unchanged (a no-op, not an error, so a
    * void reconciliation is safe against a row the scheduler posted a moment
    * earlier). Throws only if no row with `id` exists.
    */
   cancelScheduled(id: number): void;
 
   /**
-   * Record a failed dispatch attempt. Storage just persists what it's told —
-   * the scheduler computes `attempts + 1`, `lastAttemptedAt = now`,
+   * Hold an unposted recognition row after an ended subscription's last
+   * service date. A held row is still deferred for later credit-note math, but
+   * the scheduler never dispatches it. Only pending/failed rows transition;
+   * posted/cancelled/held rows are unchanged.
+   */
+  holdScheduled(id: number): void;
+
+  /**
+   * Record that an external dispatch is about to start, before the caller
+   * awaits network I/O. The row stays pending so the same scheduler owns it,
+   * but reconciliation can now refuse to replace or hold an uncertain row.
+   * Throws unless the row currently exists in pending state.
+   */
+  markScheduledAttemptStarted(id: number, attempts: number, attemptedAt: number): void;
+
+  /**
+   * Finish a failed dispatch attempt. Storage just persists what it's told —
+   * the scheduler has already recorded the attempt before external I/O, then
+   * stores `lastAttemptedAt = now`,
    * `nextAttemptAt = now + backoffMs(...)` (or `null` when dead-lettering),
    * and `status` (`'pending'` for a retry, `'failed'` for dead-letter).
    */
@@ -201,7 +217,8 @@ export interface JournalEntryStore {
    * `lastAttemptedAt=null`, `nextAttemptAt=null`, `lastError=null`. The next
    * scheduler tick will pick it up immediately.
    *
-   * Idempotent — calling on an already-pending row leaves it eligible-now
+   * Held rows cannot be re-queued because they are outside the subscription's
+   * service term. Idempotent — calling on an already-pending row leaves it eligible-now
    * with the same field reset semantics. Throws if the row does not exist.
    * Returns the freshly-read row reflecting the new field values.
    *
@@ -341,6 +358,17 @@ export interface SubscriptionChangeReconcileInput {
 }
 
 /**
+ * Input to {@link Storage.persistSubscriptionCancellation}. The subscription
+ * has actually ended at `effectiveEndDate`; recognition dated on or before that
+ * day still represents delivered service, while later unposted rows must never
+ * reach the downstream books.
+ */
+export interface SubscriptionCancellationInput {
+  readonly subscriptionId: string;
+  readonly effectiveEndDate: string;
+}
+
+/**
  * Aggregate persistence handle bundling a deduplicator and journal entry store.
  *
  * `persistMapResult` is the single-call entry point the server uses after a
@@ -404,11 +432,7 @@ export interface Storage {
    * and persist that entry as an immediate posting (audit log + dispatch queue),
    * exactly as {@link persistMapResult} does for immediate entries.
    */
-  persistVoidReversal(
-    eventId: string,
-    input: VoidReconcileInput,
-    now?: number,
-  ): PersistResult;
+  persistVoidReversal(eventId: string, input: VoidReconcileInput, now?: number): PersistResult;
 
   /**
    * Persist a credit-note draw-down against a deferred-schedule invoice, and
@@ -418,17 +442,13 @@ export interface Storage {
    *
    * In one transaction: claim `eventId`; read the recognition rows for
    * `(subscriptionId, invoiceId)`; pass the `'posted'` and `'pending'`/`'failed'`
-   * ones to `input.build`; transition the pending/failed ones to `'cancelled'` so
+   * ones to `input.build`; transition the pending/failed/held ones to `'cancelled'` so
    * the scheduler never posts the pre-credit schedule; persist the returned
    * `reversal` as an immediate posting (audit log + dispatch queue); and enqueue
    * the returned `reducedSchedule` rows (the re-spread of what remains deferred),
    * exactly as {@link persistMapResult} does for a schedule.
    */
-  persistCreditReversal(
-    eventId: string,
-    input: CreditReconcileInput,
-    now?: number,
-  ): PersistResult;
+  persistCreditReversal(eventId: string, input: CreditReconcileInput, now?: number): PersistResult;
 
   /**
    * Persist the reversal of a voided deferred-credit draw-down, and record
@@ -457,6 +477,24 @@ export interface Storage {
   persistSubscriptionChange(
     eventId: string,
     input: SubscriptionChangeReconcileInput,
+    now?: number,
+  ): PersistResult;
+
+  /**
+   * Hold unposted recognition after a subscription's actual service end, and
+   * record `eventId` atomically. Rows on the end date remain eligible because
+   * they close service delivered through that date. A row already posted or
+   * attempted after the end makes the operation refuse without recording the
+   * event, because its downstream state needs an operator correction. The end
+   * is saved so a schedule delivered later by Stripe is held too.
+   *
+   * This method posts no accounting entry. Stripe refunds, credit notes, and
+   * prorations are separate money events; when none exists, the remaining
+   * deferred balance needs an accountant-approved close-out.
+   */
+  persistSubscriptionCancellation(
+    eventId: string,
+    input: SubscriptionCancellationInput,
     now?: number,
   ): PersistResult;
 }

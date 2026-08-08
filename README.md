@@ -13,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-774 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+803 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -112,7 +112,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.13.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.14.0
 ```
 
 ### Use the engine as a library
@@ -236,7 +236,7 @@ If `charge.invoice` is not expanded, meaning a string ID or null, refunds are bo
 | `credit_note.voided` | reverses a voided credit note the engine booked — pre-payment (restores AR) or post-payment-to-balance (claws back 2200) + revenue/tax; deferred-schedule draw-downs un-done statefully by the server (invert + re-inflate schedule); no-op for the shapes `credit_note.created` didn't book |
 | `invoice.payment_failed` | informational |
 | `customer.subscription.updated` | informational; the paid invoice or credit note carries the accounting change |
-| `customer.subscription.deleted` | informational; service-through-term schedules continue unless an invoice or credit note changes them |
+| `customer.subscription.deleted` | the bundled server keeps recognition through Stripe's actual `ended_at` date and holds every later unposted month; planned end-of-period cancellation stays informational until service ends; the pure engine emits no entry |
 | `payout.paid` | standard (USD) |
 | `payout.failed` | standard |
 
@@ -447,20 +447,22 @@ When the variable is unset (or empty), the receiver falls back to in-memory and 
 
 #### Schema
 
-The SQLite backend manages three tables. `openSqliteDatabase(path)` applies the schema on open (idempotent via `CREATE TABLE IF NOT EXISTS`):
+The SQLite backend manages five tables. `openSqliteDatabase(path)` applies the schema on open (idempotent via `CREATE TABLE IF NOT EXISTS`):
 
 | Table | Purpose |
 |---|---|
 | `processed_events` | One row per Stripe `event.id` we've successfully processed. Backs the deduplicator. |
 | `journal_entries` | One row per emitted immediate `JournalEntry`. Full entry JSON in `payload`; `date`, `currency`, `memo`, `source_event_type`, `source_object_id` denormalized for indexed querying. |
-| `scheduled_entries` | Future-dated entries from a `RecognitionSchedule` (e.g. monthly draws against an annual subscription's deferred-revenue balance). `status` starts as `'pending'` and transitions to `'posted'` once a downstream poster pushes them. |
+| `scheduled_entries` | Future-dated entries from a `RecognitionSchedule` (e.g. monthly draws against an annual subscription's deferred-revenue balance). `status` starts as `'pending'`, transitions to `'posted'` after dispatch, or becomes `'held'` when it falls after an ended subscription's last service date. |
+| `subscription_ends` | One durable actual end date per ended Stripe subscription. It keeps late, out-of-order invoice schedules from re-opening post-end recognition. |
+| `oauth_tokens` | QBO and Xero access and refresh tokens, keyed by provider and tenant. |
 
 #### What gets persisted
 
 After a successful `mapEvent`, the server calls `storage.persistMapResult(eventId, result)` which atomically (in a single SQLite transaction):
 
 1. Inserts every entry in `result.entries` into `journal_entries`.
-2. Inserts every entry in `result.schedule?.entries` (if present) into `scheduled_entries` with `status='pending'`.
+2. Inserts every entry in `result.schedule?.entries` (if present) into `scheduled_entries` with `status='pending'`, unless a saved subscription end makes that row `held`.
 3. Records the event ID in `processed_events`.
 
 If any insert throws, like disk full or a constraint violation, the entire bundle rolls back and the event ID is not recorded, so Stripe's next redelivery retries cleanly.
@@ -497,6 +499,12 @@ sqlite3 /var/lib/ledgerly/ledgerly.db \
 ### Scheduler
 
 ledgerly's engine emits future-dated recognition entries for annual subscriptions (12 monthly Dr 2100 / Cr 4000 entries spread over the year). The receiver persists them to the `scheduled_entries` table as `pending`. The scheduler is a background loop that polls for due entries and dispatches them via a pluggable handler.
+
+When Stripe says a subscription has actually ended, the receiver keeps rows on
+or before `ended_at` and changes later unposted rows to `held`. Held rows are not
+dispatched and cannot be re-queued. They still count as deferred revenue when a
+later credit note rebuilds the schedule. The deletion itself does not guess a
+refund or write-off entry because Stripe sends those money changes separately.
 
 Enable it by setting `LEDGERLY_SCHEDULER_ENABLED=true` alongside `LEDGERLY_DB_PATH`:
 
@@ -775,7 +783,7 @@ to scanners.
 
 - `GET /admin/entries?limit=N` lists immediate journal entries, newest-first.
   `limit` defaults to 50, capped at 500.
-- `GET /admin/scheduled?status=pending|posted|cancelled|failed&limit=N` lists
+- `GET /admin/scheduled?status=pending|posted|cancelled|failed|held&limit=N` lists
   scheduled entries (recognition rows + immediate-dispatch rows). `status`
   defaults to `pending`.
 - `GET /admin/scheduled/:id` fetches one scheduled entry with full retry
@@ -809,7 +817,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.13.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.14.0
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -839,7 +847,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ghcr.io/jakethehoffer/ledgerly:v0.13.0
+  ghcr.io/jakethehoffer/ledgerly:v0.14.0
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -895,7 +903,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.13.0 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.14.0 \
   --repo jakethehoffer/ledgerly
 ```
 

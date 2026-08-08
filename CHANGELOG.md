@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.14.0] — 2026-08-08
+
+### Added
+
+- **Ended-subscription schedule close-out.** The bundled receiver now handles
+  `customer.subscription.deleted` using Stripe's actual `ended_at` date. It
+  leaves earned recognition through that date alone and moves every later
+  unposted month to a new `held` state that the scheduler cannot dispatch.
+  Planned end-of-period cancellations remain informational until service truly
+  ends, so removing a planned cancellation needs no schedule repair.
+- **Out-of-order event safety.** The SQLite backend keeps a durable subscription
+  end record. If Stripe sends the deleted event before its invoice event, later
+  post-end schedule rows are inserted as `held` instead of becoming payable to
+  QBO or Xero. Held rows remain part of deferred revenue for later credit-note
+  and upgrade reconciliation, and cannot be manually re-queued.
+
+### Changed
+
+- Custom `Storage` implementations must add `persistSubscriptionCancellation`,
+  and custom `JournalEntryStore` implementations must add `holdScheduled` and
+  accept `held` as a scheduled-entry status.
+- Dispatch attempts are now saved before an outside QBO or Xero call begins.
+  Cancellation, void, and credit reconciliation refuse to replace an unposted
+  row once a send has started, so an uncertain outside result cannot be hidden
+  behind a new schedule.
+- A deferred credit note that arrives before its invoice schedule is now left
+  retryable instead of being guessed as fully recognized revenue. Stripe can
+  redeliver it after the invoice event supplies the missing schedule state.
+- A subscription deletion alone creates no journal entry. Refunds, credit notes,
+  and prorations remain separate Stripe money events. When none exists, the held
+  deferred balance still needs an accountant-approved close-out.
+
 ## [0.13.0] — 2026-08-05
 
 ### Added

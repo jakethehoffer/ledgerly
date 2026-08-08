@@ -28,6 +28,10 @@ import type Database from 'better-sqlite3';
  * - The retry-tracking columns (`attempts`, `last_attempted_at`,
  *   `next_attempt_at`, `last_error`) let the scheduler implement exponential
  *   backoff and a dead-letter state. See `scheduler.ts`.
+ *
+ * - `subscription_ends` is a durable stop record. Stripe does not promise
+ *   event order, so a schedule that arrives after its subscription-deleted
+ *   event still has every post-end row inserted as `held`.
  */
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS processed_events (
@@ -67,6 +71,13 @@ CREATE TABLE IF NOT EXISTS scheduled_entries (
 CREATE INDEX IF NOT EXISTS idx_scheduled_pending
   ON scheduled_entries(status, scheduled_date);
 
+CREATE TABLE IF NOT EXISTS subscription_ends (
+  subscription_id TEXT PRIMARY KEY,
+  effective_end_date TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  recorded_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS oauth_tokens (
   provider TEXT NOT NULL,
   tenant_id TEXT NOT NULL,
@@ -96,9 +107,7 @@ interface PragmaTableInfoRow {
  * Returns `true` iff the table exists AND lacks the `attempts` column.
  */
 function needsScheduledEntriesRebuild(db: Database.Database): boolean {
-  const cols = db
-    .prepare<[], PragmaTableInfoRow>(`PRAGMA table_info('scheduled_entries')`)
-    .all();
+  const cols = db.prepare<[], PragmaTableInfoRow>(`PRAGMA table_info('scheduled_entries')`).all();
   if (cols.length === 0) return false; // table doesn't exist yet → CREATE will handle it
   return !cols.some((c) => c.name === 'attempts');
 }

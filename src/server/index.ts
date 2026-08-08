@@ -1,6 +1,7 @@
 import express, { type Express, type Request, type Response } from 'express';
 import type Stripe from 'stripe';
 import { mapEvent } from '../engine.js';
+import type { JournalEntry, RecognitionSchedule } from '../journal.js';
 import { UnhandledEventError } from '../errors.js';
 import { voidHasDeferredSchedule } from '../events/invoices/invoiceVoided.js';
 import { adminAuthMiddleware } from './admin.js';
@@ -16,21 +17,17 @@ import { consoleLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import { inMemoryMetrics } from './metrics.js';
 import type { Metrics } from './metrics.js';
-import {
-  buildQboAuthUrl,
-  exchangeQboCode,
-  type QboCallbackParams,
-} from './oauth/qbo.js';
+import { buildQboAuthUrl, exchangeQboCode, type QboCallbackParams } from './oauth/qbo.js';
 import { createStateSigner, type StateSigner } from './oauth/state.js';
 import type { OAuthClientConfig, OAuthProvider } from './oauth/types.js';
 import { OAuthError } from './oauth/types.js';
-import {
-  buildXeroAuthUrl,
-  exchangeXeroCode,
-  getXeroConnections,
-} from './oauth/xero.js';
+import { buildXeroAuthUrl, exchangeXeroCode, getXeroConnections } from './oauth/xero.js';
 import { inMemoryStorage } from './storage/inMemory.js';
-import type { Deduplicator, PersistResult, Storage } from './storage/types.js';
+import type { Deduplicator, PersistResult, SavedScheduledEntry, Storage } from './storage/types.js';
+import {
+  buildSubscriptionCancellationInput,
+  subscriptionCancellationNeedsReconcile,
+} from './subscriptionCancellationReconciler.js';
 import {
   buildSubscriptionChangeReconcileInput,
   subscriptionChangeNeedsReconcile,
@@ -118,6 +115,17 @@ function resolveStorage(config: ServerConfig): Storage {
   const base = inMemoryStorage();
   if (config.dedup) {
     const customDedup = config.dedup;
+    const subscriptionEnds = new Map<string, string>();
+    const saveRecognitionEntry = (
+      entry: JournalEntry,
+      schedule: Pick<RecognitionSchedule, 'subscriptionId' | 'sourceEventId'>,
+    ): void => {
+      const saved = base.entries.saveScheduled(entry, schedule);
+      const endDate = subscriptionEnds.get(schedule.subscriptionId);
+      if (endDate !== undefined && entry.date > endDate) {
+        base.entries.holdScheduled(saved.id);
+      }
+    };
     return {
       dedup: customDedup,
       entries: base.entries,
@@ -137,7 +145,7 @@ function resolveStorage(config: ServerConfig): Storage {
         }
         if (result.schedule) {
           for (const entry of result.schedule.entries) {
-            base.entries.saveScheduled(entry, result.schedule);
+            saveRecognitionEntry(entry, result.schedule);
           }
         }
         customDedup.record(eventId, now);
@@ -153,11 +161,18 @@ function resolveStorage(config: ServerConfig): Storage {
         const rows = base.entries
           .findScheduledBySubscription(input.subscriptionId)
           .filter((row) => row.entry.sourceObjectId === input.invoiceId);
-        const posted = rows
-          .filter((row) => row.status === 'posted')
-          .map((row) => row.entry);
+        const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
+        const unposted = rows.filter(
+          (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+        );
+        if (unposted.some((row) => row.attempts > 0)) {
+          throw new Error(
+            `Cannot reconcile void for invoice ${input.invoiceId}: ` +
+              `an unposted recognition row already has dispatch attempts`,
+          );
+        }
         for (const row of rows) {
-          if (row.status === 'pending' || row.status === 'failed') {
+          if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
             base.entries.cancelScheduled(row.id);
           }
         }
@@ -179,15 +194,26 @@ function resolveStorage(config: ServerConfig): Storage {
         const rows = base.entries
           .findScheduledBySubscription(input.subscriptionId)
           .filter((row) => row.entry.sourceObjectId === input.invoiceId);
-        const posted = rows
-          .filter((row) => row.status === 'posted')
-          .map((row) => row.entry);
-        const pending = rows
-          .filter((row) => row.status === 'pending' || row.status === 'failed')
-          .map((row) => row.entry);
+        if (rows.length === 0) {
+          throw new Error(
+            `Cannot reconcile credit for invoice ${input.invoiceId}: ` +
+              `no recognition rows exist yet; refusing until the invoice event arrives`,
+          );
+        }
+        const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
+        const unposted = rows.filter(
+          (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+        );
+        if (unposted.some((row) => row.attempts > 0)) {
+          throw new Error(
+            `Cannot reconcile credit for invoice ${input.invoiceId}: ` +
+              `an unposted recognition row already has dispatch attempts`,
+          );
+        }
+        const pending = unposted.map((row) => row.entry);
         const { reversal, reducedSchedule } = input.build(posted, pending);
         for (const row of rows) {
-          if (row.status === 'pending' || row.status === 'failed') {
+          if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
             base.entries.cancelScheduled(row.id);
           }
         }
@@ -198,7 +224,7 @@ function resolveStorage(config: ServerConfig): Storage {
         });
         if (reducedSchedule) {
           for (const entry of reducedSchedule.entries) {
-            base.entries.saveScheduled(entry, reducedSchedule);
+            saveRecognitionEntry(entry, reducedSchedule);
           }
         }
         customDedup.record(eventId, now);
@@ -216,15 +242,26 @@ function resolveStorage(config: ServerConfig): Storage {
           .findScheduledBySubscription(input.subscriptionId)
           .filter((row) => row.entry.sourceObjectId === input.invoiceId);
         const pending = rows
-          .filter((row) => row.status === 'pending' || row.status === 'failed')
+          .filter(
+            (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+          )
           .map((row) => row.entry);
         const result = input.build(drawDown, pending);
         if (result === null) {
           customDedup.record(eventId, now);
           return { duplicate: false };
         }
+        const unposted = rows.filter(
+          (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+        );
+        if (unposted.some((row) => row.attempts > 0)) {
+          throw new Error(
+            `Cannot reconcile credit void for invoice ${input.invoiceId}: ` +
+              `an unposted recognition row already has dispatch attempts`,
+          );
+        }
         for (const row of rows) {
-          if (row.status === 'pending' || row.status === 'failed') {
+          if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
             base.entries.cancelScheduled(row.id);
           }
         }
@@ -235,7 +272,7 @@ function resolveStorage(config: ServerConfig): Storage {
         });
         if (result.reissuedSchedule) {
           for (const entry of result.reissuedSchedule.entries) {
-            base.entries.saveScheduled(entry, result.reissuedSchedule);
+            saveRecognitionEntry(entry, result.reissuedSchedule);
           }
         }
         customDedup.record(eventId, now);
@@ -246,7 +283,7 @@ function resolveStorage(config: ServerConfig): Storage {
         const rows = base.entries.findScheduledBySubscription(input.subscriptionId);
         const pendingRows = rows.filter(
           (row) =>
-            (row.status === 'pending' || row.status === 'failed') &&
+            (row.status === 'pending' || row.status === 'failed' || row.status === 'held') &&
             row.entry.date <= input.throughDate,
         );
         if (pendingRows.some((row) => row.attempts > 0)) {
@@ -267,8 +304,40 @@ function resolveStorage(config: ServerConfig): Storage {
           });
         }
         for (const entry of plan.schedule.entries) {
-          base.entries.saveScheduled(entry, plan.schedule);
+          saveRecognitionEntry(entry, plan.schedule);
         }
+        customDedup.record(eventId, now);
+        return { duplicate: false };
+      },
+      persistSubscriptionCancellation(eventId, input, now = Date.now()): PersistResult {
+        if (customDedup.has(eventId)) return { duplicate: true };
+        const existingEnd = subscriptionEnds.get(input.subscriptionId);
+        if (existingEnd !== undefined && existingEnd !== input.effectiveEndDate) {
+          throw new Error(
+            `Subscription ${input.subscriptionId} already ended on ${existingEnd}; ` +
+              `refusing conflicting end date ${input.effectiveEndDate}`,
+          );
+        }
+        const afterEnd = base.entries
+          .findScheduledBySubscription(input.subscriptionId)
+          .filter((row) => row.entry.date > input.effectiveEndDate);
+        if (afterEnd.some((row) => row.status === 'posted')) {
+          throw new Error(
+            `Cannot close subscription ${input.subscriptionId}: ` +
+              `a recognition row after ${input.effectiveEndDate} is already posted`,
+          );
+        }
+        const holdable = afterEnd.filter(
+          (row) => row.status === 'pending' || row.status === 'failed',
+        );
+        if (holdable.some((row) => row.attempts > 0)) {
+          throw new Error(
+            `Cannot close subscription ${input.subscriptionId}: ` +
+              `an unposted recognition row after ${input.effectiveEndDate} already has dispatch attempts`,
+          );
+        }
+        for (const row of holdable) base.entries.holdScheduled(row.id);
+        subscriptionEnds.set(input.subscriptionId, input.effectiveEndDate);
         customDedup.record(eventId, now);
         return { duplicate: false };
       },
@@ -377,11 +446,7 @@ export function createServer(config: ServerConfig): ServerInstance {
 
     let event: Stripe.Event;
     try {
-      event = config.stripe.webhooks.constructEvent(
-        req.body as Buffer,
-        sig,
-        config.webhookSecret,
-      );
+      event = config.stripe.webhooks.constructEvent(req.body as Buffer, sig, config.webhookSecret);
     } catch (err) {
       metrics.inc('webhook_signature_error');
       log.error('Signature verification failed', { err });
@@ -417,6 +482,27 @@ export function createServer(config: ServerConfig): ServerInstance {
       let hasSchedule: boolean;
 
       if (
+        expanded.type === 'customer.subscription.deleted' &&
+        subscriptionCancellationNeedsReconcile(expanded)
+      ) {
+        try {
+          persistResult = storage.persistSubscriptionCancellation(
+            event.id,
+            buildSubscriptionCancellationInput(expanded),
+          );
+        } catch (err) {
+          metrics.inc('webhook_error', { type: event.type });
+          log.error('Subscription cancellation reconciliation failed', {
+            eventId: event.id,
+            err,
+          });
+          res.status(500).json({ error: 'Subscription cancellation reconciliation failed' });
+          return;
+        }
+        entryCount = 0;
+        scheduleEntryCount = 0;
+        hasSchedule = false;
+      } else if (
         expanded.type === 'invoice.voided' &&
         voidHasDeferredSchedule(expanded.data.object)
       ) {
@@ -426,10 +512,7 @@ export function createServer(config: ServerConfig): ServerInstance {
         // schedule must be cancelled. Reconcile against the ledger instead —
         // read + cancel + post happen atomically inside persistVoidReversal.
         try {
-          persistResult = storage.persistVoidReversal(
-            event.id,
-            buildVoidReconcileInput(expanded),
-          );
+          persistResult = storage.persistVoidReversal(event.id, buildVoidReconcileInput(expanded));
         } catch (err) {
           metrics.inc('webhook_error', { type: event.type });
           log.error('Void reconciliation failed', { eventId: event.id, err });
@@ -439,10 +522,7 @@ export function createServer(config: ServerConfig): ServerInstance {
         entryCount = 1;
         scheduleEntryCount = 0;
         hasSchedule = false;
-      } else if (
-        expanded.type === 'credit_note.created' &&
-        creditNoteNeedsReconcile(expanded)
-      ) {
+      } else if (expanded.type === 'credit_note.created' && creditNoteNeedsReconcile(expanded)) {
         // A credit note against a deferred-schedule invoice can't be booked by the
         // stateless engine (mapEvent would throw): the reversal depends on how much
         // has recognized, and the remaining schedule must be re-spread. Reconcile
@@ -462,10 +542,7 @@ export function createServer(config: ServerConfig): ServerInstance {
         entryCount = 1;
         scheduleEntryCount = 0;
         hasSchedule = false;
-      } else if (
-        expanded.type === 'credit_note.voided' &&
-        creditNoteVoidNeedsReconcile(expanded)
-      ) {
+      } else if (expanded.type === 'credit_note.voided' && creditNoteVoidNeedsReconcile(expanded)) {
         // Voiding a credit note that was booked as a deferred draw-down can't be
         // un-booked by the stateless engine (mapEvent would throw): it must invert
         // the draw-down entry and re-inflate the schedule. Reconcile against the
@@ -745,11 +822,12 @@ export function createServer(config: ServerConfig): ServerInstance {
   if (adminToken !== undefined && adminToken !== '') {
     log.info('Admin endpoints enabled');
     const requireAdmin = adminAuthMiddleware(adminToken);
-    const VALID_STATUSES: ReadonlyArray<'pending' | 'posted' | 'cancelled' | 'failed'> = [
+    const VALID_STATUSES: ReadonlyArray<SavedScheduledEntry['status']> = [
       'pending',
       'posted',
       'cancelled',
       'failed',
+      'held',
     ];
 
     const parseLimit = (req: Request): number | { error: string } => {
@@ -775,8 +853,8 @@ export function createServer(config: ServerConfig): ServerInstance {
 
     app.get('/admin/scheduled', requireAdmin, (req: Request, res: Response): void => {
       const statusRaw = req.query['status'];
-      const status: 'pending' | 'posted' | 'cancelled' | 'failed' =
-        statusRaw === undefined ? 'pending' : (statusRaw as 'pending');
+      const status: SavedScheduledEntry['status'] =
+        statusRaw === undefined ? 'pending' : (statusRaw as SavedScheduledEntry['status']);
       if (!VALID_STATUSES.includes(status)) {
         res.status(400).json({
           error: `invalid status; expected one of: ${VALID_STATUSES.join(', ')}`,
@@ -807,25 +885,21 @@ export function createServer(config: ServerConfig): ServerInstance {
       res.json({ entry });
     });
 
-    app.post(
-      '/admin/scheduled/:id/retry',
-      requireAdmin,
-      (req: Request, res: Response): void => {
-        const idRaw = req.params['id'] ?? '';
-        const id = Number.parseInt(idRaw, 10);
-        if (!Number.isFinite(id) || id < 0 || String(id) !== idRaw) {
-          res.status(400).json({ error: 'id must be a non-negative integer' });
-          return;
-        }
-        try {
-          const entry = storage.entries.requeueScheduled(id);
-          log.info('Admin requeued scheduled entry', { id });
-          res.json({ entry });
-        } catch {
-          res.status(404).json({ error: 'not found' });
-        }
-      },
-    );
+    app.post('/admin/scheduled/:id/retry', requireAdmin, (req: Request, res: Response): void => {
+      const idRaw = req.params['id'] ?? '';
+      const id = Number.parseInt(idRaw, 10);
+      if (!Number.isFinite(id) || id < 0 || String(id) !== idRaw) {
+        res.status(400).json({ error: 'id must be a non-negative integer' });
+        return;
+      }
+      try {
+        const entry = storage.entries.requeueScheduled(id);
+        log.info('Admin requeued scheduled entry', { id });
+        res.json({ entry });
+      } catch {
+        res.status(404).json({ error: 'not found' });
+      }
+    });
   } else {
     log.info('Admin endpoints disabled (no adminToken configured)');
   }

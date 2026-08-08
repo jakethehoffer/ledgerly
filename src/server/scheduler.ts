@@ -149,6 +149,8 @@ export function createScheduler(config: SchedulerConfig): Scheduler {
     try {
       const due = config.storage.entries.findPendingScheduled(today(), now());
       for (const entry of due) {
+        const attemptNumber = entry.attempts + 1;
+        config.storage.entries.markScheduledAttemptStarted(entry.id, attemptNumber, now());
         attempted++;
         try {
           await config.dispatcher(entry);
@@ -157,7 +159,7 @@ export function createScheduler(config: SchedulerConfig): Scheduler {
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           const truncated = truncate(errMsg, 1000);
-          const newAttempts = entry.attempts + 1;
+          const newAttempts = attemptNumber;
           const attemptedAt = now();
 
           if (newAttempts >= maxAttempts) {

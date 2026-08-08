@@ -268,24 +268,32 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(due[0]?.status).toBe('pending');
       });
 
+      it('records a dispatch start before the outside send finishes', () => {
+        const storage = factory();
+        const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
+          subscriptionId: 'sub_start',
+          sourceEventId: 'evt_start',
+        });
+
+        storage.entries.markScheduledAttemptStarted(saved.id, 1, 1_000_000);
+
+        const started = storage.entries.getScheduledById(saved.id);
+        expect(started?.status).toBe('pending');
+        expect(started?.attempts).toBe(1);
+        expect(started?.lastAttemptedAt).toBe(1_000_000);
+        expect(started?.nextAttemptAt).toBeNull();
+        expect(started?.lastError).toBeNull();
+      });
+
       it('recordScheduledAttempt can transition to failed (dead-letter)', () => {
         const storage = factory();
         const saved = storage.entries.saveScheduled(makeEntry({ date: '2026-05-01' }), {
           subscriptionId: 'sub_dl',
           sourceEventId: 'evt_dl',
         });
-        storage.entries.recordScheduledAttempt(
-          saved.id,
-          10,
-          5_000_000,
-          null,
-          'gave up',
-          'failed',
-        );
+        storage.entries.recordScheduledAttempt(saved.id, 10, 5_000_000, null, 'gave up', 'failed');
         // 'failed' rows are excluded from findPendingScheduled at any time.
-        expect(
-          storage.entries.findPendingScheduled('2026-05-16', 9_999_999_999),
-        ).toEqual([]);
+        expect(storage.entries.findPendingScheduled('2026-05-16', 9_999_999_999)).toEqual([]);
         expect(storage.entries.countPendingScheduled()).toBe(0);
         expect(storage.entries.countFailedScheduled()).toBe(1);
       });
@@ -297,25 +305,18 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
           sourceEventId: 'evt_backoff',
         });
         // Backoff schedules retry at t=2000.
-        storage.entries.recordScheduledAttempt(
-          saved.id,
-          1,
-          1000,
-          2000,
-          'transient',
-          'pending',
-        );
+        storage.entries.recordScheduledAttempt(saved.id, 1, 1000, 2000, 'transient', 'pending');
 
         // At t=1500 (before backoff expires) the entry is NOT due.
         expect(storage.entries.findPendingScheduled('2026-05-16', 1500)).toEqual([]);
         // At t=2000 (exactly) the entry IS due.
-        expect(
-          storage.entries.findPendingScheduled('2026-05-16', 2000).map((r) => r.id),
-        ).toEqual([saved.id]);
+        expect(storage.entries.findPendingScheduled('2026-05-16', 2000).map((r) => r.id)).toEqual([
+          saved.id,
+        ]);
         // At t=2500 (past backoff) the entry IS due.
-        expect(
-          storage.entries.findPendingScheduled('2026-05-16', 2500).map((r) => r.id),
-        ).toEqual([saved.id]);
+        expect(storage.entries.findPendingScheduled('2026-05-16', 2500).map((r) => r.id)).toEqual([
+          saved.id,
+        ]);
       });
 
       it('findPendingScheduled includes entries with next_attempt_at = NULL (fresh)', () => {
@@ -325,9 +326,9 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
           sourceEventId: 'evt_fresh',
         });
         // A fresh entry has next_attempt_at = null → always ready.
-        expect(
-          storage.entries.findPendingScheduled('2026-05-16', 0).map((r) => r.id),
-        ).toEqual([saved.id]);
+        expect(storage.entries.findPendingScheduled('2026-05-16', 0).map((r) => r.id)).toEqual([
+          saved.id,
+        ]);
       });
 
       it('countFailedScheduled reflects dead-lettered entries', () => {
@@ -435,11 +436,9 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(storage.entries.countFailedScheduled()).toBe(0);
         expect(storage.entries.countPendingScheduled()).toBe(1);
         // Now findPendingScheduled picks it up.
-        expect(
-          storage.entries
-            .findPendingScheduled('2026-12-31')
-            .map((r) => r.id),
-        ).toContain(saved.id);
+        expect(storage.entries.findPendingScheduled('2026-12-31').map((r) => r.id)).toContain(
+          saved.id,
+        );
       });
 
       it('requeueScheduled is idempotent on an already-pending row', () => {
@@ -574,11 +573,7 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
 
         const due = storage.entries.findPendingScheduled('2026-12-31');
         expect(due).toHaveLength(3);
-        expect(due.map((row) => row.entry.memo).sort()).toEqual([
-          'immediate',
-          'month1',
-          'month2',
-        ]);
+        expect(due.map((row) => row.entry.memo).sort()).toEqual(['immediate', 'month1', 'month2']);
 
         // The immediate-dispatch row uses a synthetic subscriptionId that
         // distinguishes it from the recognition-schedule rows.
@@ -759,6 +754,26 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(storage.entries.findByEventId('evt_void_dup')).toHaveLength(1);
         expect(storage.entries.getScheduledById(m1.id)?.status).toBe('cancelled');
       });
+
+      it('refuses to cancel a row while its outside send may still finish', () => {
+        const storage = factory();
+        const row = storage.entries.saveScheduled(recognitionEntry('2026-07-01', 'sending'), {
+          subscriptionId: 'sub_void_sending',
+          sourceEventId: 'evt_fin_void',
+        });
+        storage.entries.markScheduledAttemptStarted(row.id, 1, 1_000);
+
+        expect(() =>
+          storage.persistVoidReversal('evt_void_sending', {
+            subscriptionId: 'sub_void_sending',
+            invoiceId: 'in_void',
+            buildReversal: () => makeEntry({ sourceEventId: 'evt_void_sending' }),
+          }),
+        ).toThrow(/already has dispatch attempts/);
+        expect(storage.entries.getScheduledById(row.id)?.status).toBe('pending');
+        expect(storage.dedup.has('evt_void_sending')).toBe(false);
+        expect(storage.entries.findByEventId('evt_void_sending')).toHaveLength(0);
+      });
     });
 
     describe('findImmediateBySourceObject', () => {
@@ -873,6 +888,11 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
 
       it('is idempotent — a duplicate credit delivery writes nothing more', () => {
         const storage = factory();
+        const recognized = storage.entries.saveScheduled(recognitionEntry('2026-06-01', 'done'), {
+          subscriptionId: 'sub_credit',
+          sourceEventId: 'evt_fin_credit',
+        });
+        storage.entries.markScheduledPosted(recognized.id);
         const reversal: JournalEntry = {
           date: '2026-07-15',
           currency: 'USD',
@@ -890,9 +910,49 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
           invoiceId: 'in_credit',
           build: () => ({ reversal, reducedSchedule: null }),
         };
-        expect(storage.persistCreditReversal('evt_credit_dup', input)).toEqual({ duplicate: false });
+        expect(storage.persistCreditReversal('evt_credit_dup', input)).toEqual({
+          duplicate: false,
+        });
         expect(storage.persistCreditReversal('evt_credit_dup', input)).toEqual({ duplicate: true });
         expect(storage.entries.findByEventId('evt_credit_dup')).toHaveLength(1);
+      });
+
+      it('refuses a credit that arrives before its invoice schedule', () => {
+        const storage = factory();
+        expect(() =>
+          storage.persistCreditReversal('evt_credit_before_invoice', {
+            subscriptionId: 'sub_credit_late_invoice',
+            invoiceId: 'in_credit_late_invoice',
+            build: () => {
+              throw new Error('must not guess without invoice rows');
+            },
+          }),
+        ).toThrow(/no recognition rows exist yet/);
+        expect(storage.dedup.has('evt_credit_before_invoice')).toBe(false);
+        expect(storage.entries.findByEventId('evt_credit_before_invoice')).toHaveLength(0);
+      });
+
+      it('refuses to replace a row while its outside send may still finish', () => {
+        const storage = factory();
+        const row = storage.entries.saveScheduled(recognitionEntry('2026-07-01', 'sending'), {
+          subscriptionId: 'sub_credit_sending',
+          sourceEventId: 'evt_fin_credit',
+        });
+        storage.entries.markScheduledAttemptStarted(row.id, 1, 1_000);
+
+        expect(() =>
+          storage.persistCreditReversal('evt_credit_sending', {
+            subscriptionId: 'sub_credit_sending',
+            invoiceId: 'in_credit',
+            build: () => ({
+              reversal: makeEntry({ sourceEventId: 'evt_credit_sending' }),
+              reducedSchedule: null,
+            }),
+          }),
+        ).toThrow(/already has dispatch attempts/);
+        expect(storage.entries.getScheduledById(row.id)?.status).toBe('pending');
+        expect(storage.dedup.has('evt_credit_sending')).toBe(false);
+        expect(storage.entries.findByEventId('evt_credit_sending')).toHaveLength(0);
       });
     });
 
@@ -958,7 +1018,9 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(result).toEqual({ duplicate: false });
         expect(sawDrawDown.map((e) => e.memo)).toEqual(['draw-down']);
         expect(storage.entries.getScheduledById(p.id)?.status).toBe('cancelled');
-        expect(storage.entries.findByEventId('evt_void')[0]?.entry.memo).toBe('credit void reversal');
+        expect(storage.entries.findByEventId('evt_void')[0]?.entry.memo).toBe(
+          'credit void reversal',
+        );
         expect(storage.dedup.has('evt_void')).toBe(true);
       });
 
@@ -983,13 +1045,64 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
           subscriptionId: 'sub_void',
           invoiceId: 'in_void',
           creditNoteId: 'cn_absent',
-          build: (drawDown) => (drawDown.length === 0 ? null : { reversal: makeEntry(), reissuedSchedule: null }),
+          build: (drawDown) =>
+            drawDown.length === 0 ? null : { reversal: makeEntry(), reissuedSchedule: null },
         });
         expect(result).toEqual({ duplicate: false });
         // No draw-down existed, so the schedule is left pending and nothing posts.
         expect(storage.entries.getScheduledById(p.id)?.status).toBe('pending');
         expect(storage.entries.findByEventId('evt_void_noop')).toHaveLength(0);
         expect(storage.dedup.has('evt_void_noop')).toBe(true);
+      });
+
+      it('refuses to rebuild a row while its outside send may still finish', () => {
+        const storage = factory();
+        storage.entries.saveImmediate(
+          {
+            date: '2026-04-01',
+            currency: 'USD',
+            memo: 'draw-down',
+            sourceEventId: 'evt_credit_sending',
+            sourceEventType: 'credit_note.created',
+            sourceObjectId: 'cn_sending',
+            lines: [
+              { accountCode: '2100', side: 'debit', amount: cents(5000) },
+              { accountCode: '1100', side: 'credit', amount: cents(5000) },
+            ],
+          },
+          'evt_credit_sending',
+        );
+        const row = storage.entries.saveScheduled(
+          {
+            date: '2026-07-01',
+            currency: 'USD',
+            memo: 'sending',
+            sourceEventId: 'evt_credit_sending',
+            sourceEventType: 'credit_note.created',
+            sourceObjectId: 'in_void_sending',
+            lines: [
+              { accountCode: '2100', side: 'debit', amount: cents(5000) },
+              { accountCode: '4000', side: 'credit', amount: cents(5000) },
+            ],
+          },
+          { subscriptionId: 'sub_void_sending', sourceEventId: 'evt_credit_sending' },
+        );
+        storage.entries.markScheduledAttemptStarted(row.id, 1, 1_000);
+
+        expect(() =>
+          storage.persistCreditVoidReversal('evt_credit_void_sending', {
+            subscriptionId: 'sub_void_sending',
+            invoiceId: 'in_void_sending',
+            creditNoteId: 'cn_sending',
+            build: () => ({
+              reversal: makeEntry({ sourceEventId: 'evt_credit_void_sending' }),
+              reissuedSchedule: null,
+            }),
+          }),
+        ).toThrow(/already has dispatch attempts/);
+        expect(storage.entries.getScheduledById(row.id)?.status).toBe('pending');
+        expect(storage.dedup.has('evt_credit_void_sending')).toBe(false);
+        expect(storage.entries.findByEventId('evt_credit_void_sending')).toHaveLength(0);
       });
     });
 
@@ -1041,12 +1154,15 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
           },
         };
 
-        expect(storage.persistSubscriptionChange('evt_change', input)).toEqual({ duplicate: false });
+        expect(storage.persistSubscriptionChange('evt_change', input)).toEqual({
+          duplicate: false,
+        });
         expect(sawPending.map((entry) => entry.memo)).toEqual(['old future']);
         expect(storage.entries.getScheduledById(old.id)?.status).toBe('cancelled');
         expect(storage.entries.getScheduledById(nextTerm.id)?.status).toBe('pending');
-        expect(storage.entries.findByEventId('evt_change').map((row) => row.entry.memo))
-          .toEqual(['upgrade cash']);
+        expect(storage.entries.findByEventId('evt_change').map((row) => row.entry.memo)).toEqual([
+          'upgrade cash',
+        ]);
         expect(
           storage.entries
             .findScheduledBySubscription('sub_change')
@@ -1112,14 +1228,7 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
           recognitionEntry('2026-07-01', 'possibly sent', 'evt_old_attempted'),
           { subscriptionId: 'sub_change_attempted', sourceEventId: 'evt_old_attempted' },
         );
-        storage.entries.recordScheduledAttempt(
-          old.id,
-          1,
-          1000,
-          2000,
-          'reply was lost',
-          'pending',
-        );
+        storage.entries.recordScheduledAttempt(old.id, 1, 1000, 2000, 'reply was lost', 'pending');
         expect(() =>
           storage.persistSubscriptionChange('evt_change_attempted', {
             subscriptionId: 'sub_change_attempted',
@@ -1137,6 +1246,195 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         ).toThrow(/already has dispatch attempts/);
         expect(storage.entries.getScheduledById(old.id)?.status).toBe('pending');
         expect(storage.dedup.has('evt_change_attempted')).toBe(false);
+      });
+    });
+
+    describe('persistSubscriptionCancellation', () => {
+      function recognitionEntry(date: string, memo: string): JournalEntry {
+        return makeEntry({
+          date,
+          memo,
+          sourceEventId: 'evt_cancel_source',
+          sourceEventType: 'invoice.payment_succeeded',
+          sourceObjectId: 'in_cancel_source',
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(10000) },
+            { accountCode: '4000', side: 'credit', amount: cents(10000) },
+          ],
+        });
+      }
+
+      it('keeps rows through the end date and atomically holds only later rows', () => {
+        const storage = factory();
+        const kept = storage.entries.saveScheduled(
+          recognitionEntry('2026-07-15', 'service through end'),
+          { subscriptionId: 'sub_cancel', sourceEventId: 'evt_cancel_source' },
+        );
+        const stopped = storage.entries.saveScheduled(
+          recognitionEntry('2026-08-15', 'service after end'),
+          { subscriptionId: 'sub_cancel', sourceEventId: 'evt_cancel_source' },
+        );
+        const sibling = storage.entries.saveScheduled(
+          recognitionEntry('2026-08-15', 'different subscription'),
+          { subscriptionId: 'sub_other', sourceEventId: 'evt_other' },
+        );
+
+        const input = {
+          subscriptionId: 'sub_cancel',
+          effectiveEndDate: '2026-07-15',
+        };
+        expect(storage.persistSubscriptionCancellation('evt_cancel', input)).toEqual({
+          duplicate: false,
+        });
+        expect(storage.entries.getScheduledById(kept.id)?.status).toBe('pending');
+        expect(storage.entries.getScheduledById(stopped.id)?.status).toBe('held');
+        expect(storage.entries.getScheduledById(sibling.id)?.status).toBe('pending');
+        expect(storage.dedup.has('evt_cancel')).toBe(true);
+
+        expect(storage.persistSubscriptionCancellation('evt_cancel', input)).toEqual({
+          duplicate: true,
+        });
+        expect(storage.entries.getScheduledById(stopped.id)?.status).toBe('held');
+      });
+
+      it('holds a later schedule even when Stripe sends the end before the invoice', () => {
+        const storage = factory();
+        storage.persistSubscriptionCancellation('evt_cancel_first', {
+          subscriptionId: 'sub_cancel_first',
+          effectiveEndDate: '2026-07-15',
+        });
+
+        const result: MapResult = {
+          entries: [],
+          schedule: {
+            subscriptionId: 'sub_cancel_first',
+            sourceEventId: 'evt_invoice_late',
+            entries: [
+              recognitionEntry('2026-07-15', 'service through end'),
+              recognitionEntry('2026-08-15', 'late future month'),
+            ],
+          },
+        };
+        storage.persistMapResult('evt_invoice_late', result);
+
+        const rows = storage.entries.findScheduledBySubscription('sub_cancel_first');
+        expect(rows.map((row) => [row.entry.memo, row.status])).toEqual([
+          ['service through end', 'pending'],
+          ['late future month', 'held'],
+        ]);
+        expect(storage.entries.findPendingScheduled('2026-12-31')).toHaveLength(1);
+      });
+
+      it('treats held months as deferred when a later credit rebuilds the schedule', () => {
+        const storage = factory();
+        const held = storage.entries.saveScheduled(
+          recognitionEntry('2026-08-15', 'still deferred'),
+          { subscriptionId: 'sub_cancel_credit', sourceEventId: 'evt_source' },
+        );
+        storage.persistSubscriptionCancellation('evt_cancel_credit', {
+          subscriptionId: 'sub_cancel_credit',
+          effectiveEndDate: '2026-07-15',
+        });
+
+        let sawDeferred: ReadonlyArray<JournalEntry> = [];
+        storage.persistCreditReversal('evt_credit_after_cancel', {
+          subscriptionId: 'sub_cancel_credit',
+          invoiceId: 'in_cancel_source',
+          build(_posted, pending) {
+            sawDeferred = pending;
+            return {
+              reversal: makeEntry({
+                sourceEventId: 'evt_credit_after_cancel',
+                sourceEventType: 'credit_note.created',
+                sourceObjectId: 'cn_after_cancel',
+              }),
+              reducedSchedule: {
+                subscriptionId: 'sub_cancel_credit',
+                sourceEventId: 'evt_credit_after_cancel',
+                entries: [recognitionEntry('2026-08-15', 'reduced but still held')],
+              },
+            };
+          },
+        });
+
+        expect(sawDeferred.map((entry) => entry.memo)).toEqual(['still deferred']);
+        expect(storage.entries.getScheduledById(held.id)?.status).toBe('cancelled');
+        const rebuilt = storage.entries
+          .findScheduledBySubscription('sub_cancel_credit')
+          .find((row) => row.entry.memo === 'reduced but still held');
+        expect(rebuilt?.status).toBe('held');
+        expect(() => storage.entries.requeueScheduled(rebuilt?.id ?? -1)).toThrow(/held/);
+      });
+
+      it('refuses an after-end row with a dispatch attempt and leaves the event retryable', () => {
+        const storage = factory();
+        const attempted = storage.entries.saveScheduled(
+          recognitionEntry('2026-08-15', 'possibly sent'),
+          { subscriptionId: 'sub_cancel_attempted', sourceEventId: 'evt_source' },
+        );
+        storage.entries.recordScheduledAttempt(
+          attempted.id,
+          1,
+          1000,
+          2000,
+          'reply was lost',
+          'pending',
+        );
+
+        expect(() =>
+          storage.persistSubscriptionCancellation('evt_cancel_attempted', {
+            subscriptionId: 'sub_cancel_attempted',
+            effectiveEndDate: '2026-07-15',
+          }),
+        ).toThrow(/already has dispatch attempts/);
+        expect(storage.entries.getScheduledById(attempted.id)?.status).toBe('pending');
+        expect(storage.dedup.has('evt_cancel_attempted')).toBe(false);
+      });
+
+      it('refuses an already-posted after-end row and leaves the event retryable', () => {
+        const storage = factory();
+        const posted = storage.entries.saveScheduled(
+          recognitionEntry('2026-08-15', 'already sent'),
+          { subscriptionId: 'sub_cancel_posted', sourceEventId: 'evt_source' },
+        );
+        storage.entries.markScheduledPosted(posted.id);
+
+        expect(() =>
+          storage.persistSubscriptionCancellation('evt_cancel_posted', {
+            subscriptionId: 'sub_cancel_posted',
+            effectiveEndDate: '2026-07-15',
+          }),
+        ).toThrow(/already posted/);
+        expect(storage.entries.getScheduledById(posted.id)?.status).toBe('posted');
+        expect(storage.dedup.has('evt_cancel_posted')).toBe(false);
+      });
+
+      it('refuses a different end date and keeps the first end rule', () => {
+        const storage = factory();
+        storage.persistSubscriptionCancellation('evt_cancel_first_end', {
+          subscriptionId: 'sub_cancel_conflict',
+          effectiveEndDate: '2026-07-15',
+        });
+
+        expect(() =>
+          storage.persistSubscriptionCancellation('evt_cancel_conflict', {
+            subscriptionId: 'sub_cancel_conflict',
+            effectiveEndDate: '2026-08-15',
+          }),
+        ).toThrow(/conflicting end date/);
+        expect(storage.dedup.has('evt_cancel_conflict')).toBe(false);
+
+        storage.persistMapResult('evt_after_conflict', {
+          entries: [],
+          schedule: {
+            subscriptionId: 'sub_cancel_conflict',
+            sourceEventId: 'evt_after_conflict',
+            entries: [recognitionEntry('2026-08-01', 'must follow first end')],
+          },
+        });
+        expect(storage.entries.findScheduledBySubscription('sub_cancel_conflict')[0]?.status).toBe(
+          'held',
+        );
       });
     });
 

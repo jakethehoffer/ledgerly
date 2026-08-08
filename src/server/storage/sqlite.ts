@@ -12,6 +12,7 @@ import type {
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
+  SubscriptionCancellationInput,
   SubscriptionChangeReconcileInput,
   VoidReconcileInput,
 } from './types.js';
@@ -22,6 +23,10 @@ import type {
 interface ProcessedEventRow {
   readonly event_id: string;
   readonly processed_at: number;
+}
+
+interface SubscriptionEndRow {
+  readonly effective_end_date: string;
 }
 
 /**
@@ -42,7 +47,7 @@ interface ScheduledEntryRow {
   readonly id: number;
   readonly event_id: string;
   readonly subscription_id: string;
-  readonly status: 'pending' | 'posted' | 'cancelled' | 'failed';
+  readonly status: 'pending' | 'posted' | 'cancelled' | 'failed' | 'held';
   readonly payload: string;
   readonly attempts: number;
   readonly last_attempted_at: number | null;
@@ -163,19 +168,32 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
   const cancelStmt = db.prepare<[number]>(
     `UPDATE scheduled_entries
         SET status = 'cancelled'
+      WHERE id = ? AND status IN ('pending', 'failed', 'held')`,
+  );
+
+  const holdStmt = db.prepare<[number]>(
+    `UPDATE scheduled_entries
+        SET status = 'held'
       WHERE id = ? AND status IN ('pending', 'failed')`,
   );
 
-  const recordAttemptStmt = db.prepare<
-    [number, number, number | null, string, string, number]
-  >(
+  const recordAttemptStmt = db.prepare<[number, number, number | null, string, string, number]>(
     `UPDATE scheduled_entries
         SET attempts = ?,
             last_attempted_at = ?,
             next_attempt_at = ?,
             last_error = ?,
             status = ?
-      WHERE id = ?`,
+      WHERE id = ? AND status = 'pending'`,
+  );
+
+  const markAttemptStartedStmt = db.prepare<[number, number, number]>(
+    `UPDATE scheduled_entries
+        SET attempts = ?,
+            last_attempted_at = ?,
+            next_attempt_at = NULL,
+            last_error = NULL
+      WHERE id = ? AND status = 'pending'`,
   );
 
   const countImmediateStmt = db.prepare<[], { count: number }>(
@@ -221,7 +239,7 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
             last_attempted_at = NULL,
             next_attempt_at = NULL,
             last_error = NULL
-      WHERE id = ?`,
+      WHERE id = ? AND status <> 'held'`,
   );
 
   function scheduledRowToSaved(row: ScheduledEntryRow): SavedScheduledEntry {
@@ -333,8 +351,22 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
       }
     },
 
+    holdScheduled(id: number): void {
+      const info = holdStmt.run(id);
+      if (info.changes === 0 && selectScheduledByIdStmt.get(id) === undefined) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+    },
+
     markScheduledPosted(id: number): void {
       const info = markPosted.run(Date.now(), id);
+      if (info.changes === 0) {
+        throw new Error(`No pending scheduled entry with id=${String(id)}`);
+      }
+    },
+
+    markScheduledAttemptStarted(id: number, attempts: number, attemptedAt: number): void {
+      const info = markAttemptStartedStmt.run(attempts, attemptedAt, id);
       if (info.changes === 0) {
         throw new Error(`No pending scheduled entry with id=${String(id)}`);
       }
@@ -357,7 +389,7 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
         id,
       );
       if (info.changes === 0) {
-        throw new Error(`No scheduled entry with id=${String(id)}`);
+        throw new Error(`No pending scheduled entry with id=${String(id)}`);
       }
     },
 
@@ -404,6 +436,10 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
     requeueScheduled(id: number): SavedScheduledEntry {
       const info = requeueStmt.run(id);
       if (info.changes === 0) {
+        const existing = selectScheduledByIdStmt.get(id);
+        if (existing?.status === 'held') {
+          throw new Error(`held scheduled entry id=${String(id)} cannot be re-queued`);
+        }
         throw new Error(`No scheduled entry with id=${String(id)}`);
       }
       // Re-read so the returned row reflects exactly what is now on disk.
@@ -545,9 +581,40 @@ export function sqliteStorage(db: Database.Database): Storage {
      VALUES (?, ?, ?, ?)`,
   );
 
+  const insertScheduledWithStatus = db.prepare<[string, string, string, string, string]>(
+    `INSERT INTO scheduled_entries
+       (event_id, subscription_id, scheduled_date, payload, status)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+
+  const selectSubscriptionEnd = db.prepare<[string], SubscriptionEndRow>(
+    `SELECT effective_end_date FROM subscription_ends WHERE subscription_id = ?`,
+  );
+
+  const insertSubscriptionEnd = db.prepare<[string, string, string, number]>(
+    `INSERT INTO subscription_ends
+       (subscription_id, effective_end_date, source_event_id, recorded_at)
+     VALUES (?, ?, ?, ?)`,
+  );
+
   const recordEvent = db.prepare<[string, number]>(
     'INSERT OR IGNORE INTO processed_events (event_id, processed_at) VALUES (?, ?)',
   );
+
+  function insertRecognitionEntry(
+    entry: JournalEntry,
+    schedule: Pick<RecognitionSchedule, 'subscriptionId' | 'sourceEventId'>,
+  ): void {
+    const endDate = selectSubscriptionEnd.get(schedule.subscriptionId)?.effective_end_date;
+    const status = endDate !== undefined && entry.date > endDate ? 'held' : 'pending';
+    insertScheduledWithStatus.run(
+      schedule.sourceEventId,
+      schedule.subscriptionId,
+      entry.date,
+      JSON.stringify(entry),
+      status,
+    );
+  }
 
   const persistTxn = db.transaction(
     (eventId: string, result: MapResult, now: number): PersistResult => {
@@ -588,12 +655,7 @@ export function sqliteStorage(db: Database.Database): Storage {
       if (result.schedule) {
         const sched = result.schedule;
         for (const entry of sched.entries) {
-          insertScheduled.run(
-            sched.sourceEventId,
-            sched.subscriptionId,
-            entry.date,
-            JSON.stringify(entry),
-          );
+          insertRecognitionEntry(entry, sched);
         }
       }
       return { duplicate: false };
@@ -610,6 +672,12 @@ export function sqliteStorage(db: Database.Database): Storage {
   const cancelForVoid = db.prepare<[number]>(
     `UPDATE scheduled_entries
         SET status = 'cancelled'
+      WHERE id = ? AND status IN ('pending', 'failed', 'held')`,
+  );
+
+  const holdForCancellation = db.prepare<[number]>(
+    `UPDATE scheduled_entries
+        SET status = 'held'
       WHERE id = ? AND status IN ('pending', 'failed')`,
   );
 
@@ -635,11 +703,18 @@ export function sqliteStorage(db: Database.Database): Storage {
         .all(input.subscriptionId)
         .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
         .filter(({ entry }) => entry.sourceObjectId === input.invoiceId);
-      const posted = rows
-        .filter(({ row }) => row.status === 'posted')
-        .map(({ entry }) => entry);
+      const posted = rows.filter(({ row }) => row.status === 'posted').map(({ entry }) => entry);
+      const unposted = rows.filter(
+        ({ row }) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+      );
+      if (unposted.some(({ row }) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot reconcile void for invoice ${input.invoiceId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
       for (const { row } of rows) {
-        if (row.status === 'pending' || row.status === 'failed') {
+        if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
           cancelForVoid.run(row.id);
         }
       }
@@ -680,15 +755,26 @@ export function sqliteStorage(db: Database.Database): Storage {
         .all(input.subscriptionId)
         .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
         .filter(({ entry }) => entry.sourceObjectId === input.invoiceId);
-      const posted = rows
-        .filter(({ row }) => row.status === 'posted')
-        .map(({ entry }) => entry);
-      const pending = rows
-        .filter(({ row }) => row.status === 'pending' || row.status === 'failed')
-        .map(({ entry }) => entry);
+      if (rows.length === 0) {
+        throw new Error(
+          `Cannot reconcile credit for invoice ${input.invoiceId}: ` +
+            `no recognition rows exist yet; refusing until the invoice event arrives`,
+        );
+      }
+      const posted = rows.filter(({ row }) => row.status === 'posted').map(({ entry }) => entry);
+      const unposted = rows.filter(
+        ({ row }) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+      );
+      if (unposted.some(({ row }) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot reconcile credit for invoice ${input.invoiceId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
+      const pending = unposted.map(({ entry }) => entry);
       const { reversal, reducedSchedule } = input.build(posted, pending);
       for (const { row } of rows) {
-        if (row.status === 'pending' || row.status === 'failed') {
+        if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
           cancelForVoid.run(row.id);
         }
       }
@@ -710,12 +796,7 @@ export function sqliteStorage(db: Database.Database): Storage {
       );
       if (reducedSchedule) {
         for (const entry of reducedSchedule.entries) {
-          insertScheduled.run(
-            reducedSchedule.sourceEventId,
-            reducedSchedule.subscriptionId,
-            entry.date,
-            JSON.stringify(entry),
-          );
+          insertRecognitionEntry(entry, reducedSchedule);
         }
       }
       return { duplicate: false };
@@ -739,15 +820,26 @@ export function sqliteStorage(db: Database.Database): Storage {
         .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
         .filter(({ entry }) => entry.sourceObjectId === input.invoiceId);
       const pending = rows
-        .filter(({ row }) => row.status === 'pending' || row.status === 'failed')
+        .filter(
+          ({ row }) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+        )
         .map(({ entry }) => entry);
       const result = input.build(drawDown, pending);
       if (result === null) {
         // The credit note was never booked as a draw-down; voiding is a no-op.
         return { duplicate: false };
       }
+      const unposted = rows.filter(
+        ({ row }) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+      );
+      if (unposted.some(({ row }) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot reconcile credit void for invoice ${input.invoiceId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
       for (const { row } of rows) {
-        if (row.status === 'pending' || row.status === 'failed') {
+        if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
           cancelForVoid.run(row.id);
         }
       }
@@ -769,12 +861,7 @@ export function sqliteStorage(db: Database.Database): Storage {
       );
       if (result.reissuedSchedule) {
         for (const entry of result.reissuedSchedule.entries) {
-          insertScheduled.run(
-            result.reissuedSchedule.sourceEventId,
-            result.reissuedSchedule.subscriptionId,
-            entry.date,
-            JSON.stringify(entry),
-          );
+          insertRecognitionEntry(entry, result.reissuedSchedule);
         }
       }
       return { duplicate: false };
@@ -782,11 +869,7 @@ export function sqliteStorage(db: Database.Database): Storage {
   );
 
   const persistSubscriptionChangeTxn = db.transaction(
-    (
-      eventId: string,
-      input: SubscriptionChangeReconcileInput,
-      now: number,
-    ): PersistResult => {
+    (eventId: string, input: SubscriptionChangeReconcileInput, now: number): PersistResult => {
       const claim = recordEvent.run(eventId, now);
       if (claim.changes === 0) return { duplicate: true };
 
@@ -795,7 +878,7 @@ export function sqliteStorage(db: Database.Database): Storage {
         .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
         .filter(
           ({ row, entry }) =>
-            (row.status === 'pending' || row.status === 'failed') &&
+            (row.status === 'pending' || row.status === 'failed' || row.status === 'held') &&
             entry.date <= input.throughDate,
         );
       if (pendingRows.some(({ row }) => row.attempts > 0)) {
@@ -829,12 +912,47 @@ export function sqliteStorage(db: Database.Database): Storage {
         );
       }
       for (const entry of plan.schedule.entries) {
-        insertScheduled.run(
-          plan.schedule.sourceEventId,
-          plan.schedule.subscriptionId,
-          entry.date,
-          JSON.stringify(entry),
+        insertRecognitionEntry(entry, plan.schedule);
+      }
+      return { duplicate: false };
+    },
+  );
+
+  const persistSubscriptionCancellationTxn = db.transaction(
+    (eventId: string, input: SubscriptionCancellationInput, now: number): PersistResult => {
+      const claim = recordEvent.run(eventId, now);
+      if (claim.changes === 0) return { duplicate: true };
+
+      const existingEnd = selectSubscriptionEnd.get(input.subscriptionId)?.effective_end_date;
+      if (existingEnd !== undefined && existingEnd !== input.effectiveEndDate) {
+        throw new Error(
+          `Subscription ${input.subscriptionId} already ended on ${existingEnd}; ` +
+            `refusing conflicting end date ${input.effectiveEndDate}`,
         );
+      }
+
+      const afterEnd = selectBySubscriptionForVoid
+        .all(input.subscriptionId)
+        .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
+        .filter(({ entry }) => entry.date > input.effectiveEndDate);
+      if (afterEnd.some(({ row }) => row.status === 'posted')) {
+        throw new Error(
+          `Cannot close subscription ${input.subscriptionId}: ` +
+            `a recognition row after ${input.effectiveEndDate} is already posted`,
+        );
+      }
+      const holdable = afterEnd.filter(
+        ({ row }) => row.status === 'pending' || row.status === 'failed',
+      );
+      if (holdable.some(({ row }) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot close subscription ${input.subscriptionId}: ` +
+            `an unposted recognition row after ${input.effectiveEndDate} already has dispatch attempts`,
+        );
+      }
+      for (const { row } of holdable) holdForCancellation.run(row.id);
+      if (existingEnd === undefined) {
+        insertSubscriptionEnd.run(input.subscriptionId, input.effectiveEndDate, eventId, now);
       }
       return { duplicate: false };
     },
@@ -855,11 +973,7 @@ export function sqliteStorage(db: Database.Database): Storage {
       // etc.); the /readyz handler catches and surfaces the message.
       pingStmt.get();
     },
-    persistMapResult(
-      eventId: string,
-      result: MapResult,
-      now: number = Date.now(),
-    ): PersistResult {
+    persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): PersistResult {
       return persistTxn(eventId, result, now);
     },
     persistVoidReversal(
@@ -889,6 +1003,13 @@ export function sqliteStorage(db: Database.Database): Storage {
       now: number = Date.now(),
     ): PersistResult {
       return persistSubscriptionChangeTxn(eventId, input, now);
+    },
+    persistSubscriptionCancellation(
+      eventId: string,
+      input: SubscriptionCancellationInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      return persistSubscriptionCancellationTxn(eventId, input, now);
     },
   };
 }

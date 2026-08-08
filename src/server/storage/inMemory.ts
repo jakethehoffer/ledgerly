@@ -10,6 +10,7 @@ import type {
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
+  SubscriptionCancellationInput,
   SubscriptionChangeReconcileInput,
   VoidReconcileInput,
 } from './types.js';
@@ -128,8 +129,26 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
       // cancelled; a row that already posted stays posted, and re-cancelling is
       // a no-op. This keeps a void reconciliation safe against a row the
       // scheduler posted a moment earlier.
-      if (existing.status === 'pending' || existing.status === 'failed') {
+      if (
+        existing.status === 'pending' ||
+        existing.status === 'failed' ||
+        existing.status === 'held'
+      ) {
         scheduled[idx] = { ...existing, status: 'cancelled' };
+      }
+    },
+
+    holdScheduled(id: number): void {
+      const idx = scheduled.findIndex((row) => row.id === id);
+      if (idx === -1) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      const existing = scheduled[idx];
+      if (!existing) {
+        throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      if (existing.status === 'pending' || existing.status === 'failed') {
+        scheduled[idx] = { ...existing, status: 'held' };
       }
     },
 
@@ -143,7 +162,28 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
       if (!existing) {
         throw new Error(`No scheduled entry with id=${String(id)}`);
       }
+      if (existing.status !== 'pending') {
+        throw new Error(`No pending scheduled entry with id=${String(id)}`);
+      }
       scheduled[idx] = { ...existing, status: 'posted' };
+    },
+
+    markScheduledAttemptStarted(id: number, attempts: number, attemptedAt: number): void {
+      const idx = scheduled.findIndex((row) => row.id === id);
+      if (idx === -1) {
+        throw new Error(`No pending scheduled entry with id=${String(id)}`);
+      }
+      const existing = scheduled[idx];
+      if (!existing || existing.status !== 'pending') {
+        throw new Error(`No pending scheduled entry with id=${String(id)}`);
+      }
+      scheduled[idx] = {
+        ...existing,
+        attempts,
+        lastAttemptedAt: attemptedAt,
+        nextAttemptAt: null,
+        lastError: null,
+      };
     },
 
     recordScheduledAttempt(
@@ -161,6 +201,9 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
       const existing = scheduled[idx];
       if (!existing) {
         throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      if (existing.status !== 'pending') {
+        throw new Error(`No pending scheduled entry with id=${String(id)}`);
       }
       scheduled[idx] = {
         ...existing,
@@ -214,6 +257,9 @@ export function inMemoryJournalEntryStore(): JournalEntryStore {
       const existing = scheduled[idx];
       if (!existing) {
         throw new Error(`No scheduled entry with id=${String(id)}`);
+      }
+      if (existing.status === 'held') {
+        throw new Error(`held scheduled entry id=${String(id)} cannot be re-queued`);
       }
       const updated: SavedScheduledEntry = {
         ...existing,
@@ -283,6 +329,20 @@ export function inMemoryStorage(ttlMs?: number): Storage {
   const dedup = inMemoryDeduplicator(ttlMs);
   const entries = inMemoryJournalEntryStore();
   const oauth = inMemoryOAuthTokenStore();
+  const subscriptionEnds = new Map<string, string>();
+
+  function saveRecognitionEntry(
+    entry: JournalEntry,
+    schedule: Pick<RecognitionSchedule, 'subscriptionId' | 'sourceEventId'>,
+  ): SavedScheduledEntry {
+    const saved = entries.saveScheduled(entry, schedule);
+    const endDate = subscriptionEnds.get(schedule.subscriptionId);
+    if (endDate !== undefined && entry.date > endDate) {
+      entries.holdScheduled(saved.id);
+      return entries.getScheduledById(saved.id) ?? saved;
+    }
+    return saved;
+  }
   return {
     dedup,
     entries,
@@ -291,11 +351,7 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       // In-memory storage is reachable for as long as the process is alive.
       // No I/O happens; if this function is reachable at all, the storage is.
     },
-    persistMapResult(
-      eventId: string,
-      result: MapResult,
-      now: number = Date.now(),
-    ): PersistResult {
+    persistMapResult(eventId: string, result: MapResult, now: number = Date.now()): PersistResult {
       // Idempotency boundary. The has() check, the writes, and record() run
       // with no `await` between them, so under JS single-threaded semantics
       // this whole block is atomic with respect to other webhook handlers — a
@@ -315,7 +371,7 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       }
       if (result.schedule) {
         for (const entry of result.schedule.entries) {
-          entries.saveScheduled(entry, result.schedule);
+          saveRecognitionEntry(entry, result.schedule);
         }
       }
       dedup.record(eventId, now);
@@ -335,8 +391,17 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         .findScheduledBySubscription(input.subscriptionId)
         .filter((row) => row.entry.sourceObjectId === input.invoiceId);
       const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
+      const unposted = rows.filter(
+        (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+      );
+      if (unposted.some((row) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot reconcile void for invoice ${input.invoiceId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
       for (const row of rows) {
-        if (row.status === 'pending' || row.status === 'failed') {
+        if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
           entries.cancelScheduled(row.id);
         }
       }
@@ -364,13 +429,26 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       const rows = entries
         .findScheduledBySubscription(input.subscriptionId)
         .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+      if (rows.length === 0) {
+        throw new Error(
+          `Cannot reconcile credit for invoice ${input.invoiceId}: ` +
+            `no recognition rows exist yet; refusing until the invoice event arrives`,
+        );
+      }
       const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
-      const pending = rows
-        .filter((row) => row.status === 'pending' || row.status === 'failed')
-        .map((row) => row.entry);
+      const unposted = rows.filter(
+        (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+      );
+      if (unposted.some((row) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot reconcile credit for invoice ${input.invoiceId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
+      const pending = unposted.map((row) => row.entry);
       const { reversal, reducedSchedule } = input.build(posted, pending);
       for (const row of rows) {
-        if (row.status === 'pending' || row.status === 'failed') {
+        if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
           entries.cancelScheduled(row.id);
         }
       }
@@ -381,7 +459,7 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       });
       if (reducedSchedule) {
         for (const entry of reducedSchedule.entries) {
-          entries.saveScheduled(entry, reducedSchedule);
+          saveRecognitionEntry(entry, reducedSchedule);
         }
       }
       dedup.record(eventId, now);
@@ -404,7 +482,9 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         .findScheduledBySubscription(input.subscriptionId)
         .filter((row) => row.entry.sourceObjectId === input.invoiceId);
       const pending = rows
-        .filter((row) => row.status === 'pending' || row.status === 'failed')
+        .filter(
+          (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+        )
         .map((row) => row.entry);
       const result = input.build(drawDown, pending);
       if (result === null) {
@@ -412,8 +492,17 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         dedup.record(eventId, now);
         return { duplicate: false };
       }
+      const unposted = rows.filter(
+        (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+      );
+      if (unposted.some((row) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot reconcile credit void for invoice ${input.invoiceId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
       for (const row of rows) {
-        if (row.status === 'pending' || row.status === 'failed') {
+        if (row.status === 'pending' || row.status === 'failed' || row.status === 'held') {
           entries.cancelScheduled(row.id);
         }
       }
@@ -424,7 +513,7 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       });
       if (result.reissuedSchedule) {
         for (const entry of result.reissuedSchedule.entries) {
-          entries.saveScheduled(entry, result.reissuedSchedule);
+          saveRecognitionEntry(entry, result.reissuedSchedule);
         }
       }
       dedup.record(eventId, now);
@@ -439,7 +528,7 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       const rows = entries.findScheduledBySubscription(input.subscriptionId);
       const pendingRows = rows.filter(
         (row) =>
-          (row.status === 'pending' || row.status === 'failed') &&
+          (row.status === 'pending' || row.status === 'failed' || row.status === 'held') &&
           row.entry.date <= input.throughDate,
       );
       if (pendingRows.some((row) => row.attempts > 0)) {
@@ -462,8 +551,44 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         });
       }
       for (const entry of plan.schedule.entries) {
-        entries.saveScheduled(entry, plan.schedule);
+        saveRecognitionEntry(entry, plan.schedule);
       }
+      dedup.record(eventId, now);
+      return { duplicate: false };
+    },
+    persistSubscriptionCancellation(
+      eventId: string,
+      input: SubscriptionCancellationInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      if (dedup.has(eventId)) return { duplicate: true };
+      const existingEnd = subscriptionEnds.get(input.subscriptionId);
+      if (existingEnd !== undefined && existingEnd !== input.effectiveEndDate) {
+        throw new Error(
+          `Subscription ${input.subscriptionId} already ended on ${existingEnd}; ` +
+            `refusing conflicting end date ${input.effectiveEndDate}`,
+        );
+      }
+      const afterEnd = entries
+        .findScheduledBySubscription(input.subscriptionId)
+        .filter((row) => row.entry.date > input.effectiveEndDate);
+      if (afterEnd.some((row) => row.status === 'posted')) {
+        throw new Error(
+          `Cannot close subscription ${input.subscriptionId}: ` +
+            `a recognition row after ${input.effectiveEndDate} is already posted`,
+        );
+      }
+      const holdable = afterEnd.filter(
+        (row) => row.status === 'pending' || row.status === 'failed',
+      );
+      if (holdable.some((row) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot close subscription ${input.subscriptionId}: ` +
+            `an unposted recognition row after ${input.effectiveEndDate} already has dispatch attempts`,
+        );
+      }
+      for (const row of holdable) entries.holdScheduled(row.id);
+      subscriptionEnds.set(input.subscriptionId, input.effectiveEndDate);
       dedup.record(eventId, now);
       return { duplicate: false };
     },

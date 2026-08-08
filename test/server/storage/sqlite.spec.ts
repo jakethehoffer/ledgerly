@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { describe, it, expect } from 'vitest';
 import { applyMigrations } from '../../../src/server/storage/migrations.js';
 import { sqliteStorage } from '../../../src/server/storage/sqlite.js';
+import { cents } from '../../../src/money.js';
 import { runStorageSuite } from './suite.js';
 
 runStorageSuite('sqliteStorage', () => {
@@ -25,6 +26,40 @@ describe('sqliteStorage durability and atomicity', () => {
     const second = sqliteStorage(db);
     expect(second.dedup.has('evt_persist')).toBe(true);
     expect(second.dedup.size()).toBe(1);
+  });
+
+  it('keeps a subscription end across fresh store instances', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    sqliteStorage(db).persistSubscriptionCancellation('evt_end', {
+      subscriptionId: 'sub_ended',
+      effectiveEndDate: '2026-07-15',
+    });
+
+    const fresh = sqliteStorage(db);
+    fresh.persistMapResult('evt_late_invoice', {
+      entries: [],
+      schedule: {
+        subscriptionId: 'sub_ended',
+        sourceEventId: 'evt_late_invoice',
+        entries: [
+          {
+            date: '2026-08-15',
+            currency: 'USD',
+            memo: 'late month',
+            sourceEventId: 'evt_late_invoice',
+            sourceEventType: 'invoice.payment_succeeded',
+            sourceObjectId: 'in_late',
+            lines: [
+              { accountCode: '2100', side: 'debit', amount: cents(100) },
+              { accountCode: '4000', side: 'credit', amount: cents(100) },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(fresh.entries.findScheduledBySubscription('sub_ended')[0]?.status).toBe('held');
   });
 
   it('migrates a legacy v0 scheduled_entries table (CHECK + missing retry columns)', () => {
@@ -65,21 +100,22 @@ describe('sqliteStorage durability and atomicity', () => {
 
     // Row preserved.
     const rows = db
-      .prepare<[], { id: number; status: string; attempts: number; payload: string }>(
-        'SELECT id, status, attempts, payload FROM scheduled_entries',
-      )
+      .prepare<
+        [],
+        { id: number; status: string; attempts: number; payload: string }
+      >('SELECT id, status, attempts, payload FROM scheduled_entries')
       .all();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe('pending');
     expect(rows[0]?.attempts).toBe(0);
     expect(rows[0]?.payload).toBe('{"legacy":true}');
 
-    // CHECK gone — we can now insert status='failed' directly.
+    // CHECK gone — newer states can be inserted without another rebuild.
     expect(() => {
       db.exec(
         `INSERT INTO scheduled_entries
            (event_id, subscription_id, scheduled_date, status, payload, attempts)
-         VALUES ('evt_fail', 'sub_fail', '2026-05-01', 'failed', '{}', 10)`,
+         VALUES ('evt_fail', 'sub_fail', '2026-05-01', 'held', '{}', 10)`,
       );
     }).not.toThrow();
 
