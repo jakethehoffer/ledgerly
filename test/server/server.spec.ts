@@ -162,6 +162,45 @@ describe('createServer', () => {
       expect(dedup.size()).toBe(1);
     });
 
+    it('loads complete refund history before saving a signed refund event', async () => {
+      const { raw, parsed } = loadFixture('charge_refunded_fx');
+      const charge = structuredClone(parsed.data.object) as Stripe.Charge;
+      if (!charge.refunds) throw new Error('FX refund fixture is missing refunds');
+
+      const embeddedRefunds = { ...charge.refunds, has_more: true };
+      const completeRefunds = { ...charge.refunds, has_more: false };
+      const listRefunds = vi.fn().mockResolvedValue(completeRefunds);
+      const stubStripe = {
+        webhooks: stripe.webhooks,
+        charges: {
+          retrieve: vi.fn().mockResolvedValue({ ...charge, refunds: embeddedRefunds }),
+        },
+        refunds: { list: listRefunds },
+      } as unknown as Stripe;
+      const storage = inMemoryStorage();
+      const { app } = createServer({
+        stripe: stubStripe,
+        webhookSecret: WEBHOOK_SECRET,
+        storage,
+        log: silentLogger(),
+      });
+
+      const res = await request(app)
+        .post('/webhook')
+        .set('Content-Type', 'application/json')
+        .set('Stripe-Signature', signPayload(raw))
+        .send(raw);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ ok: true, entries: 1 });
+      expect(listRefunds).toHaveBeenCalledWith({
+        charge: charge.id,
+        limit: 100,
+        expand: ['data.balance_transaction'],
+      });
+      expect(storage.entries.findByEventId(parsed.id)).toHaveLength(1);
+    });
+
     it('treats duplicate event IDs as duplicates (200 with duplicate:true)', async () => {
       const { app } = createServer({
         stripe,

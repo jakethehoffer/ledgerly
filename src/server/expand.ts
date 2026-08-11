@@ -29,7 +29,44 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
       const expanded = await stripe.charges.retrieve(charge.id, {
         expand: ['balance_transaction', 'refunds.data.balance_transaction', 'invoice'],
       });
-      return cloneEventWithObject(event, expanded);
+      const embeddedRefunds = expanded.refunds;
+      if (!embeddedRefunds?.has_more) {
+        return cloneEventWithObject(event, expanded);
+      }
+
+      // A Charge only embeds its newest refunds. Cumulative basis allocation
+      // needs every prior refund on the charge, so page through the dedicated
+      // list endpoint and expand each refund's balance transaction before the
+      // pure mapper runs.
+      const refunds: Stripe.Refund[] = [];
+      let startingAfter: string | undefined;
+      let hasMore = true;
+      while (hasMore) {
+        const page = await stripe.refunds.list({
+          charge: charge.id,
+          limit: 100,
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+          expand: ['data.balance_transaction'],
+        });
+        refunds.push(...page.data);
+
+        hasMore = page.has_more;
+        if (!hasMore) continue;
+
+        const lastRefund = page.data.at(-1);
+        if (!lastRefund || lastRefund.id === startingAfter) {
+          throw new Error(
+            `Stripe returned an invalid refund page for charge ${charge.id}; ` +
+              'complete refund history required',
+          );
+        }
+        startingAfter = lastRefund.id;
+      }
+
+      return cloneEventWithObject(event, {
+        ...expanded,
+        refunds: { ...embeddedRefunds, data: refunds, has_more: false },
+      });
     }
 
     case 'invoice.payment_succeeded': {

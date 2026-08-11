@@ -524,6 +524,14 @@ original charge and a later refund or dispute, ledgerly books the revenue-offset
 and receivable legs at the *original* charge's rate (so they cleanly mirror what
 was booked) and the cash leg at the *current* rate (what Stripe actually moved),
 and routes the difference to **7000 FX Gain/Loss** as a realized gain or loss.
+When one charge is refunded in several pieces, the original settlement value is
+allocated cumulatively. That makes the pieces add back to the exact original
+amount instead of turning a rounding cent into a false FX gain or loss. This
+requires the complete refund history. The bundled receiver loads every refund
+page when Stripe only embeds the newest ones. A direct `mapEvent` call with
+`refunds.has_more=true` fails closed instead of allocating from partial history.
+Failed and canceled refund attempts remain in that history but do not advance
+the cumulative basis for a later refund.
 
 This runs through the whole dispute lifecycle, not just the withdrawal. The 1200
 Disputes Receivable is *parked* at the original charge's rate when funds are

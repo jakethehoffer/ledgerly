@@ -14,7 +14,16 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
   const charge = event.data.object;
 
   const refundsList = charge.refunds;
-  if (!refundsList || refundsList.data.length === 0) {
+  if (!refundsList) {
+    return { entries: [], schedule: null };
+  }
+  if (refundsList.has_more) {
+    throw new Error(
+      `Charge ${charge.id} has paginated refunds (refunds.has_more=true); ` +
+        'complete refund list required for exact cumulative basis allocation',
+    );
+  }
+  if (refundsList.data.length === 0) {
     return { entries: [], schedule: null };
   }
 
@@ -63,16 +72,14 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
       ? Math.abs(chargeBt.amount) / charge.amount
       : 1;
 
-  const expectedSettlementOf = (r: Stripe.Refund): number =>
-    Math.round(r.amount * originalRate);
-
-  // Cumulative tax allocation. Order every refund on the charge by creation so
-  // each refund's sales-tax share is computed as
+  // Cumulative original-basis and tax allocation. Order every refund on the
+  // charge by creation so both shares are computed as
+  //   round(cumulativeThrough * rate) - round(cumulativeBefore * rate)
+  // and, for tax,
   //   round(cumulativeThrough * rate * taxRatio) - round(cumulativeBefore * rate * taxRatio)
-  // rather than rounding each refund's tax independently. Independent rounding
-  // drifts: two 5500 refunds of an 11000 / tax-825 charge each round 412.5 -> 413,
-  // reversing 826 against the 825 collected and stranding -1 in 2000 Sales Tax
-  // Payable after a full refund.
+  // rather than rounding each refund independently. Independent rounding can
+  // strand a cent in either 4900 Refunds Issued or 2000 Sales Tax Payable and
+  // mislabel that cent as FX movement after a full split refund.
   //
   // The cumulative basis is the CUSTOMER-currency amount (`refund.amount`), not
   // the per-refund settlement amount. Customer amounts sum EXACTLY to
@@ -93,7 +100,14 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     let running = 0;
     for (const r of ordered) {
       cumulativeCustomerBeforeById.set(r.id, running);
-      running += r.amount;
+      // Failed and canceled refunds stay in Stripe's refund history even
+      // though they did not leave a lasting refund against the charge. Do not
+      // let those attempts shift the cumulative original basis for a later
+      // refund. Pending and requires_action refunds are kept because Stripe
+      // can already have removed their balance amount while they are open.
+      if (r.status !== 'failed' && r.status !== 'canceled') {
+        running += r.amount;
+      }
     }
   }
 
@@ -127,16 +141,18 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     // expectedSettlement = actualSettlement and fxDelta = 0 → no 7000
     // line, byte-identical to the pre-FX-gain/loss behavior. The
     // existing same-currency refund fixtures pass unchanged.
-    const actualSettlement = Math.abs(bt.amount);
-    const expectedSettlement = expectedSettlementOf(refund);
-    const fxDelta = actualSettlement - expectedSettlement;
-
-    // Tax share via cumulative rounding on customer amounts, folding the
-    // settlement rate into the factor (see cumulativeCustomerBeforeById above)
-    // so the 2000 reversals across a multi-refund sequence sum to exactly the
-    // tax collected at charge time — under FX as well as same-currency.
     const cumCustomerBefore = cumulativeCustomerBeforeById.get(refund.id) ?? 0;
     const cumCustomerThrough = cumCustomerBefore + refund.amount;
+    const actualSettlement = Math.abs(bt.amount);
+    const expectedSettlement =
+      Math.round(cumCustomerThrough * originalRate) -
+      Math.round(cumCustomerBefore * originalRate);
+    const fxDelta = actualSettlement - expectedSettlement;
+
+    // Tax share uses the same cumulative customer basis, folding the settlement
+    // rate into the factor so the 2000 reversals across a multi-refund sequence
+    // sum to exactly the tax collected at charge time — under FX as well as
+    // same-currency.
     const taxPortion =
       taxRatio > 0
         ? Math.round(cumCustomerThrough * originalRate * taxRatio) -

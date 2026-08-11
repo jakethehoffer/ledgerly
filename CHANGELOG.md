@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [0.15.1] — 2026-08-11
+
+### Fixed
+
+- **Split FX refunds no longer turn a rounding cent into a false currency gain
+  or loss.** The original settlement value is now divided cumulatively across
+  every partial refund, so a fully refunded charge clears its original basis
+  exactly even when the conversion does not divide evenly. The bundled receiver
+  loads every refund page when Stripe only embeds the newest ones. Direct engine
+  calls fail closed on an incomplete list rather than guessing from partial
+  history. Failed and canceled refund attempts stay visible but no longer move
+  the running share used for a later successful refund.
+
 ## [0.15.0] — 2026-08-08
 
 ### Fixed
@@ -1149,6 +1162,7 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[0.15.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.15.1
 [0.15.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.15.0
 [0.4.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.3.0
