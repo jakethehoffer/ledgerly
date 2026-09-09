@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { cents } from '../../../src/money.js';
 import type { JournalEntry, MapResult, RecognitionSchedule } from '../../../src/journal.js';
 import type { ConnectedTokens } from '../../../src/server/oauth/types.js';
-import type { Storage } from '../../../src/server/storage/types.js';
+import type { SavedScheduledEntry, Storage } from '../../../src/server/storage/types.js';
 
 /**
  * A balanced journal entry suitable for storage tests. Real engine output is
@@ -978,6 +978,162 @@ export function runStorageSuite(name: string, factory: () => Storage): void {
         expect(storage.entries.getScheduledById(row.id)?.status).toBe('pending');
         expect(storage.dedup.has('evt_credit_sending')).toBe(false);
         expect(storage.entries.findByEventId('evt_credit_sending')).toHaveLength(0);
+      });
+    });
+
+    describe('persistRefundReversal', () => {
+      function refundRecognitionEntry(date: string, memo: string): JournalEntry {
+        return {
+          date,
+          currency: 'USD',
+          memo,
+          sourceEventId: 'evt_paid_refund',
+          sourceEventType: 'invoice.payment_succeeded',
+          sourceObjectId: 'in_refund',
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(10000) },
+            { accountCode: '4000', side: 'credit', amount: cents(10000) },
+          ],
+        };
+      }
+
+      function refundEntry(memo: string, eventId: string): JournalEntry {
+        return {
+          date: '2026-07-15',
+          currency: 'USD',
+          memo,
+          sourceEventId: eventId,
+          sourceEventType: 'charge.refunded',
+          sourceObjectId: `re_${memo}`,
+          lines: [
+            { accountCode: '2100', side: 'debit', amount: cents(5000) },
+            { accountCode: '1010', side: 'credit', amount: cents(5000) },
+          ],
+        };
+      }
+
+      it('hands posted+pending to build, cancels unposted rows including held ones, and posts every reversal', () => {
+        const storage = factory();
+        const save = (date: string, memo: string): SavedScheduledEntry =>
+          storage.entries.saveScheduled(refundRecognitionEntry(date, memo), {
+            subscriptionId: 'sub_refund',
+            sourceEventId: 'evt_paid_refund',
+          });
+        const m1 = save('2026-06-01', 'm1');
+        const m2 = save('2026-07-01', 'm2');
+        const m3 = save('2026-08-01', 'm3');
+        storage.entries.markScheduledPosted(m1.id);
+        storage.entries.holdScheduled(m3.id);
+
+        let sawPosted: ReadonlyArray<JournalEntry> = [];
+        let sawPending: ReadonlyArray<JournalEntry> = [];
+        const reducedSchedule: RecognitionSchedule = {
+          subscriptionId: 'sub_refund',
+          sourceEventId: 'evt_refund',
+          entries: [refundRecognitionEntry('2026-07-01', 'reissued m2')],
+        };
+
+        const result = storage.persistRefundReversal('evt_refund', {
+          subscriptionId: 'sub_refund',
+          invoiceId: 'in_refund',
+          build(posted, pending) {
+            sawPosted = posted;
+            sawPending = pending;
+            return {
+              reversals: [refundEntry('first', 'evt_refund'), refundEntry('second', 'evt_refund')],
+              reducedSchedule,
+            };
+          },
+        });
+
+        expect(result).toEqual({ duplicate: false });
+        expect(sawPosted.map((e) => e.memo)).toEqual(['m1']);
+        // A held row is still unrecognized deferred revenue, so the refund sees it.
+        expect(sawPending.map((e) => e.memo)).toEqual(['m2', 'm3']);
+        expect(storage.entries.getScheduledById(m1.id)?.status).toBe('posted');
+        expect(storage.entries.getScheduledById(m2.id)?.status).toBe('cancelled');
+        expect(storage.entries.getScheduledById(m3.id)?.status).toBe('cancelled');
+        // Both refund entries are audited and both are queued for dispatch.
+        expect(storage.entries.findByEventId('evt_refund').map((r) => r.entry.memo)).toEqual([
+          'first',
+          'second',
+        ]);
+        expect(
+          storage.entries
+            .findScheduledBySubscription('immediate:evt_refund')
+            .map((r) => r.entry.memo),
+        ).toEqual(['first', 'second']);
+        const reissued = storage.entries
+          .findScheduledBySubscription('sub_refund')
+          .filter((r) => r.entry.memo === 'reissued m2');
+        expect(reissued).toHaveLength(1);
+        expect(reissued[0]?.status).toBe('pending');
+        expect(storage.dedup.has('evt_refund')).toBe(true);
+      });
+
+      it('books a refund for an invoice with no recognition rows instead of refusing', () => {
+        const storage = factory();
+        let sawPosted: ReadonlyArray<JournalEntry> | null = null;
+        let sawPending: ReadonlyArray<JournalEntry> | null = null;
+
+        const result = storage.persistRefundReversal('evt_refund_no_rows', {
+          subscriptionId: 'sub_refund_unknown',
+          invoiceId: 'in_refund_unknown',
+          build(posted, pending) {
+            sawPosted = posted;
+            sawPending = pending;
+            return {
+              reversals: [refundEntry('engine fallback', 'evt_refund_no_rows')],
+              reducedSchedule: null,
+            };
+          },
+        });
+
+        expect(result).toEqual({ duplicate: false });
+        expect(sawPosted).toEqual([]);
+        expect(sawPending).toEqual([]);
+        expect(storage.entries.findByEventId('evt_refund_no_rows')).toHaveLength(1);
+        expect(storage.dedup.has('evt_refund_no_rows')).toBe(true);
+      });
+
+      it('is idempotent — a duplicate refund delivery writes nothing more', () => {
+        const storage = factory();
+        const input = {
+          subscriptionId: 'sub_refund_dup',
+          invoiceId: 'in_refund_dup',
+          build: () => ({
+            reversals: [refundEntry('dup', 'evt_refund_dup')],
+            reducedSchedule: null,
+          }),
+        };
+        expect(storage.persistRefundReversal('evt_refund_dup', input)).toEqual({
+          duplicate: false,
+        });
+        expect(storage.persistRefundReversal('evt_refund_dup', input)).toEqual({ duplicate: true });
+        expect(storage.entries.findByEventId('evt_refund_dup')).toHaveLength(1);
+      });
+
+      it('refuses to replace a row while its outside send may still finish', () => {
+        const storage = factory();
+        const row = storage.entries.saveScheduled(refundRecognitionEntry('2026-07-01', 'sending'), {
+          subscriptionId: 'sub_refund_sending',
+          sourceEventId: 'evt_paid_refund',
+        });
+        storage.entries.markScheduledAttemptStarted(row.id, 1, 1_000);
+
+        expect(() =>
+          storage.persistRefundReversal('evt_refund_sending', {
+            subscriptionId: 'sub_refund_sending',
+            invoiceId: 'in_refund',
+            build: () => ({
+              reversals: [refundEntry('sending', 'evt_refund_sending')],
+              reducedSchedule: null,
+            }),
+          }),
+        ).toThrow(/already has dispatch attempts/);
+        expect(storage.entries.getScheduledById(row.id)?.status).toBe('pending');
+        expect(storage.dedup.has('evt_refund_sending')).toBe(false);
+        expect(storage.entries.findByEventId('evt_refund_sending')).toHaveLength(0);
       });
     });
 

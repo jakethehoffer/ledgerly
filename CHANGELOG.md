@@ -8,7 +8,30 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ## [Unreleased]
 
+### Added
+
+- **`Storage.persistRefundReversal`** — the atomic read + deferred-first split +
+  cancel + re-spread used by the refund reconciliation below, alongside the
+  existing `persistCreditReversal`. Both bundled backends implement it. Custom
+  `Storage` implementations must add it (pre-1.0 interface change).
+
 ### Fixed
+
+- **Refunding a deferred-schedule invoice no longer strands a phantom deferred
+  liability.** A cash refund against an invoice that deferred revenue was booked
+  entirely to 4900 Refunds Issued, reversing revenue the ledger had never
+  recognized. 2100 kept the refunded amount forever and net revenue went
+  negative — refunding the unrecognized $900 of a $1,200 annual plan three months
+  in left 2100 at $900 and revenue at −$600 on $300 of delivered service. The
+  bundled receiver now reconciles such a refund against the schedule: it repays
+  the still-deferred balance first (Dr 2100), posts to 4900 only the excess over
+  all remaining deferred, and re-spreads whatever stays deferred across the
+  remaining months. The cash leg, the proportional tax drain, realized FX, and the
+  cumulative basis across a multi-refund charge are unchanged, so refunds of
+  non-deferred invoices book exactly as before. A refund after a subscription
+  cancellation now also closes out the held schedule instead of leaving it
+  stranded. The pure engine keeps its stateless 4900 behaviour and its documented
+  limitation.
 
 - **A scheduled-entry race can no longer stop the webhook receiver.** If a
   refund or other reconciliation changes a due row just before dispatch starts,

@@ -7,6 +7,7 @@ import type {
   JournalEntryStore,
   OAuthTokenStore,
   PersistResult,
+  RefundReconcileInput,
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
@@ -460,6 +461,49 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         subscriptionId: `immediate:${reversal.sourceEventId}`,
         sourceEventId: reversal.sourceEventId,
       });
+      if (reducedSchedule) {
+        for (const entry of reducedSchedule.entries) {
+          saveRecognitionEntry(entry, reducedSchedule);
+        }
+      }
+      dedup.record(eventId, now);
+      return { duplicate: false };
+    },
+    persistRefundReversal(
+      eventId: string,
+      input: RefundReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      // Same shape as persistCreditReversal, minus the "no rows yet" refusal: a
+      // refund against an invoice this ledger never saw still has to book (see
+      // RefundReconcileInput), and build() degrades to the engine's own entries
+      // when both arrays are empty.
+      if (dedup.has(eventId)) return { duplicate: true };
+      const rows = entries
+        .findScheduledBySubscription(input.subscriptionId)
+        .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+      const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
+      const unposted = rows.filter(
+        (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+      );
+      if (unposted.some((row) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot reconcile refund for invoice ${input.invoiceId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
+      const pending = unposted.map((row) => row.entry);
+      const { reversals, reducedSchedule } = input.build(posted, pending);
+      for (const row of unposted) {
+        entries.cancelScheduled(row.id);
+      }
+      for (const reversal of reversals) {
+        entries.saveImmediate(reversal, eventId);
+        entries.saveScheduled(reversal, {
+          subscriptionId: `immediate:${reversal.sourceEventId}`,
+          sourceEventId: reversal.sourceEventId,
+        });
+      }
       if (reducedSchedule) {
         for (const entry of reducedSchedule.entries) {
           saveRecognitionEntry(entry, reducedSchedule);

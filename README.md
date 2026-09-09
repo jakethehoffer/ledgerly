@@ -224,7 +224,7 @@ If `charge.invoice` is not expanded, meaning a string ID or null, refunds are bo
 | Event | Variants covered |
 |---|---|
 | `charge.succeeded` | standard, with-app-fee (Connect), zero-amount, trial-conversion |
-| `charge.refunded` | partial, full, multi-refund-sequence |
+| `charge.refunded` | partial, full, multi-refund-sequence; refunds of a deferred-schedule invoice reconciled statefully by the server (repays 2100 first, 4900 only for the recognized excess, remaining months re-spread) |
 | `charge.failed` | informational (no entries) |
 | `charge.dispute.created` | informational |
 | `charge.dispute.funds_withdrawn` | standard |

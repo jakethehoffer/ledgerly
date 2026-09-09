@@ -432,6 +432,59 @@ returns to zero once the sale is fully refunded — no penny stranded by roundin
 This requires the charge's `invoice` to be expanded; if it isn't, the refund falls
 back to the flat two-line shape above. *(`charge_refunded_with_tax`)*
 
+### Refunding a deferred-schedule invoice
+
+4900 is the right home for a refund of revenue you actually **earned**. It is the
+wrong home for money returned against service you have **not yet delivered** —
+there, nothing was recognized, so there is no revenue to reverse. What the refund
+really does is hand back part of the 2100 Deferred Revenue liability the payment
+created.
+
+Refund the unrecognized remainder of a $1,200 annual plan three months in ($900
+still deferred):
+
+```
+Dr  2100 Deferred Revenue          $900.00
+Cr  1010 Stripe Clearing                   $900.00
+```
+
+Revenue stays at the $300 actually delivered. Booking that $900 to 4900 instead
+would leave 2100 standing at $900 forever *and* drive net revenue to −$600 on a
+customer who received $300 of service.
+
+How much is still deferred is a **ledger** fact, not something in the Stripe
+event, so — exactly like a deferred void or a deferred credit note — the pure
+engine cannot decide it and the **bundled receiver** reconciles the refund against
+the schedule. The split follows the same deferred-first rule as the credit-note
+draw-down:
+
+- **Deferred first.** The refund's pre-tax revenue reduces the still-deferred
+  balance up to whatever remains.
+- **Clawback only for the excess.** Anything beyond all remaining deferred is
+  revenue that really was recognized, and that part still posts to 4900.
+- **The remainder is re-spread.** A partial refund leaves the rest deferred, and
+  the remaining months are reissued at the reduced amount — re-held automatically
+  if the subscription has already ended.
+
+Everything else in the entry is unchanged: the cash leg, the proportional tax
+drain, any realized FX gain or loss, and the cumulative basis across a
+multi-refund charge. Only the classification of the revenue-side debit moves, so a
+refund against an invoice that never deferred anything books exactly as it always
+has.
+
+**Cross-currency is supported here**, unlike the credit-note draw-down. Both sides
+of this subtraction are already in the same money: the recognition schedule is
+booked in the paying charge's settlement currency, and the refund's revenue-side
+debit posts at that same original charge rate. The rate movement between charge
+and refund lands in 7000 as realized FX, exactly as it does for a non-deferred
+refund. A credit note has no such anchor — its amount is in the customer's
+currency — which is why that draw-down refuses FX and this one does not.
+
+This also closes out a **cancelled** subscription's held schedule. When service
+ends mid-term the unposted months are held pending a money event; a refund is that
+money event, and it drains the held deferred balance instead of leaving it
+stranded.
+
 ## Disputes (chargebacks)
 
 A dispute moves through a lifecycle, and ledgerly books each step as the money
@@ -634,6 +687,19 @@ These are deliberate gaps, documented rather than approximated:
   **between** the credit and its void are not retroactively re-recognized — the
   re-inflated remaining months restore the lifetime total, but that specific timing
   is not (a bounded residual).
+- **Refunding a deferred-schedule invoice — pure engine vs. bundled server**
+  (`charge.refunded`). The pure engine books every refund's revenue side to 4900
+  Refunds Issued, which is correct only for revenue it recognized. When the
+  refunded charge paid an invoice that **deferred** revenue, the bundled receiver
+  reconciles against the ledger instead: deferred balance first, 4900 only for the
+  excess, remaining months re-spread. A caller using the pure engine on its own
+  still gets the flat 4900 treatment and must post the 2100 reclass by hand. See
+  [Refunding a deferred-schedule invoice](#refunding-a-deferred-schedule-invoice).
+  Bounded residual: if the refund arrives **before** the invoice event that
+  creates the schedule, there is nothing to draw down yet and the refund books the
+  old 4900 way — the receiver books it rather than refusing, because an invoice
+  predating ledgerly is the commoner cause of an empty schedule than an
+  out-of-order delivery.
 - **Multi-period FX revaluation** — exposed via `fxContext`, not auto-posted (see
   above).
 - **Cross-currency payouts** — rejected with a clear error (see above).

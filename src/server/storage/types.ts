@@ -333,6 +333,33 @@ export interface CreditVoidReconcileInput {
   ) => { reversal: JournalEntry; reissuedSchedule: RecognitionSchedule | null } | null;
 }
 
+/**
+ * Input to {@link Storage.persistRefundReversal}. Describes a cash refund against
+ * an invoice that deferred revenue: which invoice's schedule to draw down, and how
+ * to build both the refund entries and the reduced (re-spread) schedule from the
+ * ledger's current recognition rows.
+ *
+ * The same read-build-cancel-reissue shape as {@link CreditReconcileInput}, with
+ * two differences that the refund case needs:
+ *
+ *   - `build` returns an **array** of entries, because one `charge.refunded`
+ *     event can carry several refunds created at the same instant and the engine
+ *     books one entry per refund.
+ *   - An invoice with **no** recognition rows is not an error. A credit note is
+ *     refused until the invoice event arrives, but a refund must still book: the
+ *     ledger may simply predate ledgerly. `build` receives two empty arrays and
+ *     is expected to fall back to the stateless engine's entries, which is what
+ *     the ledger would have recorded anyway.
+ */
+export interface RefundReconcileInput {
+  readonly subscriptionId: string;
+  readonly invoiceId: string;
+  readonly build: (
+    postedRecognition: ReadonlyArray<JournalEntry>,
+    pendingRecognition: ReadonlyArray<JournalEntry>,
+  ) => { reversals: ReadonlyArray<JournalEntry>; reducedSchedule: RecognitionSchedule | null };
+}
+
 /** Result of planning a paid mid-term subscription schedule update. */
 export interface SubscriptionChangeReconcilePlan {
   /** Whether the storage layer should cancel the subscription's old future rows. */
@@ -467,6 +494,21 @@ export interface Storage {
     input: CreditVoidReconcileInput,
     now?: number,
   ): PersistResult;
+
+  /**
+   * Persist a cash refund against a deferred-schedule invoice, and record
+   * `eventId` as processed. Idempotent like {@link persistCreditReversal}.
+   *
+   * In one transaction: claim `eventId`; read the recognition rows for
+   * `(subscriptionId, invoiceId)`; pass the `'posted'` and
+   * `'pending'`/`'failed'`/`'held'` ones to `input.build`; cancel those unposted
+   * rows; persist each returned entry as an immediate posting (audit log +
+   * dispatch queue); and enqueue the returned `reducedSchedule`.
+   *
+   * Unlike {@link persistCreditReversal} this does not refuse an invoice with no
+   * recognition rows — see {@link RefundReconcileInput}.
+   */
+  persistRefundReversal(eventId: string, input: RefundReconcileInput, now?: number): PersistResult;
 
   /**
    * Persist a paid mid-term subscription change atomically. Already-posted

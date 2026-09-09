@@ -9,6 +9,7 @@ import type {
   JournalEntryStore,
   OAuthTokenStore,
   PersistResult,
+  RefundReconcileInput,
   SavedImmediateEntry,
   SavedScheduledEntry,
   Storage,
@@ -742,6 +743,62 @@ export function sqliteStorage(db: Database.Database): Storage {
     },
   );
 
+  const persistRefundTxn = db.transaction(
+    (eventId: string, input: RefundReconcileInput, now: number): PersistResult => {
+      const claim = recordEvent.run(eventId, now);
+      if (claim.changes === 0) {
+        return { duplicate: true };
+      }
+      // Same read-build-cancel-reissue shape as persistCreditTxn, minus the "no
+      // rows yet" refusal: a refund against an invoice this ledger never saw
+      // still has to book (see RefundReconcileInput), and build() degrades to
+      // the engine's own entries when both arrays are empty.
+      const rows = selectBySubscriptionForVoid
+        .all(input.subscriptionId)
+        .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
+        .filter(({ entry }) => entry.sourceObjectId === input.invoiceId);
+      const posted = rows.filter(({ row }) => row.status === 'posted').map(({ entry }) => entry);
+      const unposted = rows.filter(
+        ({ row }) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+      );
+      if (unposted.some(({ row }) => row.attempts > 0)) {
+        throw new Error(
+          `Cannot reconcile refund for invoice ${input.invoiceId}: ` +
+            `an unposted recognition row already has dispatch attempts`,
+        );
+      }
+      const pending = unposted.map(({ entry }) => entry);
+      const { reversals, reducedSchedule } = input.build(posted, pending);
+      for (const { row } of unposted) {
+        cancelForVoid.run(row.id);
+      }
+      for (const reversal of reversals) {
+        insertImmediate.run(
+          eventId,
+          now,
+          reversal.date,
+          reversal.currency,
+          reversal.memo,
+          reversal.sourceEventType,
+          reversal.sourceObjectId ?? null,
+          JSON.stringify(reversal),
+        );
+        insertScheduled.run(
+          reversal.sourceEventId,
+          `immediate:${reversal.sourceEventId}`,
+          reversal.date,
+          JSON.stringify(reversal),
+        );
+      }
+      if (reducedSchedule) {
+        for (const entry of reducedSchedule.entries) {
+          insertRecognitionEntry(entry, reducedSchedule);
+        }
+      }
+      return { duplicate: false };
+    },
+  );
+
   const persistCreditTxn = db.transaction(
     (eventId: string, input: CreditReconcileInput, now: number): PersistResult => {
       // Claim first (same compare-and-set as persistMapResult), so a duplicate
@@ -999,6 +1056,13 @@ export function sqliteStorage(db: Database.Database): Storage {
       now: number = Date.now(),
     ): PersistResult {
       return persistCreditVoidTxn(eventId, input, now);
+    },
+    persistRefundReversal(
+      eventId: string,
+      input: RefundReconcileInput,
+      now: number = Date.now(),
+    ): PersistResult {
+      return persistRefundTxn(eventId, input, now);
     },
     persistSubscriptionChange(
       eventId: string,

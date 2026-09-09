@@ -13,6 +13,7 @@ import {
   creditNoteNeedsReconcile,
   creditNoteVoidNeedsReconcile,
 } from './creditReconciler.js';
+import { buildRefundReconcileInput, refundNeedsReconcile } from './refundReconciler.js';
 import { consoleLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import { inMemoryMetrics } from './metrics.js';
@@ -222,6 +223,44 @@ function resolveStorage(config: ServerConfig): Storage {
           subscriptionId: `immediate:${reversal.sourceEventId}`,
           sourceEventId: reversal.sourceEventId,
         });
+        if (reducedSchedule) {
+          for (const entry of reducedSchedule.entries) {
+            saveRecognitionEntry(entry, reducedSchedule);
+          }
+        }
+        customDedup.record(eventId, now);
+        return { duplicate: false };
+      },
+      persistRefundReversal(eventId, input, now = Date.now()): PersistResult {
+        // Mirrors the first-class backends' refund draw-down against the caller's
+        // deduplicator. Unlike the credit path, an invoice with no recognition
+        // rows is not refused — build() falls back to the engine's own entries.
+        if (customDedup.has(eventId)) return { duplicate: true };
+        const rows = base.entries
+          .findScheduledBySubscription(input.subscriptionId)
+          .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+        const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
+        const unposted = rows.filter(
+          (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
+        );
+        if (unposted.some((row) => row.attempts > 0)) {
+          throw new Error(
+            `Cannot reconcile refund for invoice ${input.invoiceId}: ` +
+              `an unposted recognition row already has dispatch attempts`,
+          );
+        }
+        const pending = unposted.map((row) => row.entry);
+        const { reversals, reducedSchedule } = input.build(posted, pending);
+        for (const row of unposted) {
+          base.entries.cancelScheduled(row.id);
+        }
+        for (const reversal of reversals) {
+          base.entries.saveImmediate(reversal, eventId);
+          base.entries.saveScheduled(reversal, {
+            subscriptionId: `immediate:${reversal.sourceEventId}`,
+            sourceEventId: reversal.sourceEventId,
+          });
+        }
         if (reducedSchedule) {
           for (const entry of reducedSchedule.entries) {
             saveRecognitionEntry(entry, reducedSchedule);
@@ -560,6 +599,34 @@ export function createServer(config: ServerConfig): ServerInstance {
           return;
         }
         entryCount = 1;
+        scheduleEntryCount = 0;
+        hasSchedule = false;
+      } else if (expanded.type === 'charge.refunded' && refundNeedsReconcile(expanded)) {
+        // A refund of a charge that paid a deferred invoice is partly (or wholly)
+        // repayment of the 2100 liability, not a reversal of revenue the ledger
+        // never recognized. The stateless engine can't tell the two apart — how
+        // much has recognized is a ledger fact — so reconcile: the read, the
+        // deferred-first split, the cancellation and the re-spread all happen
+        // atomically inside persistRefundReversal.
+        const refundInput = buildRefundReconcileInput(expanded);
+        let reversalCount = 0;
+        try {
+          persistResult = storage.persistRefundReversal(event.id, {
+            subscriptionId: refundInput.subscriptionId,
+            invoiceId: refundInput.invoiceId,
+            build: (posted, pending) => {
+              const built = refundInput.build(posted, pending);
+              reversalCount = built.reversals.length;
+              return built;
+            },
+          });
+        } catch (err) {
+          metrics.inc('webhook_error', { type: event.type });
+          log.error('Refund reconciliation failed', { eventId: event.id, err });
+          res.status(500).json({ error: 'Refund reconciliation failed' });
+          return;
+        }
+        entryCount = reversalCount;
         scheduleEntryCount = 0;
         hasSchedule = false;
       } else {
