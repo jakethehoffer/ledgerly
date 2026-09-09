@@ -208,6 +208,87 @@ describe('createScheduler', () => {
     });
   });
 
+  describe('storage races and failures', () => {
+    it('continues the batch when reconciliation cancels a row just before dispatch starts', async () => {
+      const storage = inMemoryStorage();
+      const cancelled = seedScheduled(storage, '2026-05-10', 'sub_cancelled', 'evt_cancelled');
+      const later = seedScheduled(storage, '2026-05-11', 'sub_later', 'evt_later');
+      const originalMarkStarted = storage.entries.markScheduledAttemptStarted.bind(storage.entries);
+      const onError = vi.fn();
+
+      vi.spyOn(storage.entries, 'markScheduledAttemptStarted').mockImplementation(
+        (id, attempts, attemptedAt) => {
+          if (id === cancelled.id) storage.entries.cancelScheduled(id);
+          originalMarkStarted(id, attempts, attemptedAt);
+        },
+      );
+
+      const dispatcher = vi.fn();
+      const scheduler = createScheduler({
+        storage,
+        dispatcher,
+        onError,
+        today: () => '2026-05-16',
+      });
+
+      await expect(scheduler.tick()).resolves.toEqual({
+        attempted: 1,
+        posted: 1,
+        failed: 1,
+        deadLettered: 0,
+      });
+      expect(dispatcher).toHaveBeenCalledTimes(1);
+      expect(dispatcher).toHaveBeenCalledWith(expect.objectContaining({ id: later.id }));
+      expect(storage.entries.getScheduledById(cancelled.id)?.status).toBe('cancelled');
+      expect(storage.entries.getScheduledById(later.id)?.status).toBe('posted');
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('contains a batch read failure so a later tick can recover', async () => {
+      const storage = inMemoryStorage();
+      const due = seedScheduled(storage, '2026-05-10', 'sub_due', 'evt_due');
+      const originalFindPending = storage.entries.findPendingScheduled.bind(storage.entries);
+      const log = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+      let failOnce = true;
+      vi.spyOn(storage.entries, 'findPendingScheduled').mockImplementation((date, time) => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error('database was briefly busy');
+        }
+        return originalFindPending(date, time);
+      });
+
+      const dispatcher = vi.fn();
+      const scheduler = createScheduler({
+        storage,
+        dispatcher,
+        log,
+        today: () => '2026-05-16',
+      });
+
+      await expect(scheduler.tick()).resolves.toEqual({
+        attempted: 0,
+        posted: 0,
+        failed: 0,
+        deadLettered: 0,
+      });
+      await expect(scheduler.tick()).resolves.toEqual({
+        attempted: 1,
+        posted: 1,
+        failed: 0,
+        deadLettered: 0,
+      });
+      expect(dispatcher).toHaveBeenCalledTimes(1);
+      expect(dispatcher).toHaveBeenCalledWith(expect.objectContaining({ id: due.id }));
+      expect(log.error).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('re-entrant safety (concurrent ticks)', () => {
     it('a second concurrent tick is a no-op while the first is in flight', async () => {
       const storage = inMemoryStorage();

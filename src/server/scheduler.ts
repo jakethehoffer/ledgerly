@@ -25,7 +25,7 @@ export interface SchedulerConfig {
   readonly dispatcher: Dispatcher;
   /** How often to poll for due entries. Default 60000ms. */
   readonly intervalMs?: number;
-  /** Called when a dispatch attempt throws. Defaults to logging via `log.error`. */
+  /** Called when processing an entry throws. Defaults to logging via `log.error`. */
   readonly onError?: (entry: SavedScheduledEntry, error: unknown) => void;
   /** Optional logger. Defaults to {@link consoleLogger}. */
   readonly log?: Logger;
@@ -55,6 +55,7 @@ export interface SchedulerConfig {
 export interface TickResult {
   readonly attempted: number;
   readonly posted: number;
+  /** Entries that could not be processed, including pre-dispatch storage races. */
   readonly failed: number;
   /**
    * Subset of `failed`: entries that transitioned from `'pending'` to
@@ -127,7 +128,7 @@ export function createScheduler(config: SchedulerConfig): Scheduler {
   const onError =
     config.onError ??
     ((entry, err): void => {
-      log.error('[scheduler] dispatch failed', { entryId: entry.id, err });
+      log.error('[scheduler] entry processing failed', { entryId: entry.id, err });
     });
   const today = config.today ?? ((): string => new Date().toISOString().slice(0, 10));
   const now = config.now ?? ((): number => Date.now());
@@ -136,6 +137,17 @@ export function createScheduler(config: SchedulerConfig): Scheduler {
 
   let timer: NodeJS.Timeout | null = null;
   let isTicking = false;
+
+  function reportEntryError(entry: SavedScheduledEntry, err: unknown): void {
+    try {
+      onError(entry, err);
+    } catch (reportingError) {
+      log.error('[scheduler] error callback failed', {
+        entryId: entry.id,
+        err: reportingError,
+      });
+    }
+  }
 
   async function tick(): Promise<TickResult> {
     // Re-entrant safety: if a previous tick is still running (slow dispatcher),
@@ -149,48 +161,59 @@ export function createScheduler(config: SchedulerConfig): Scheduler {
     try {
       const due = config.storage.entries.findPendingScheduled(today(), now());
       for (const entry of due) {
-        const attemptNumber = entry.attempts + 1;
-        config.storage.entries.markScheduledAttemptStarted(entry.id, attemptNumber, now());
-        attempted++;
         try {
-          await config.dispatcher(entry);
-          config.storage.entries.markScheduledPosted(entry.id);
-          posted++;
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          const truncated = truncate(errMsg, 1000);
-          const newAttempts = attemptNumber;
-          const attemptedAt = now();
+          const attemptNumber = entry.attempts + 1;
+          config.storage.entries.markScheduledAttemptStarted(entry.id, attemptNumber, now());
+          attempted++;
+          try {
+            await config.dispatcher(entry);
+            config.storage.entries.markScheduledPosted(entry.id);
+            posted++;
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const truncated = truncate(errMsg, 1000);
+            const attemptedAt = now();
 
-          if (newAttempts >= maxAttempts) {
-            // Dead-letter: leave next_attempt_at null so the entry doesn't
-            // accidentally re-surface if status is later flipped back to
-            // 'pending' without resetting next_attempt_at.
-            config.storage.entries.recordScheduledAttempt(
-              entry.id,
-              newAttempts,
-              attemptedAt,
-              null,
-              truncated,
-              'failed',
-            );
-            deadLettered++;
-          } else {
-            const delay = backoffMs(newAttempts);
-            config.storage.entries.recordScheduledAttempt(
-              entry.id,
-              newAttempts,
-              attemptedAt,
-              attemptedAt + delay,
-              truncated,
-              'pending',
-            );
+            if (attemptNumber >= maxAttempts) {
+              // Dead-letter: leave next_attempt_at null so the entry doesn't
+              // accidentally re-surface if status is later flipped back to
+              // 'pending' without resetting next_attempt_at.
+              config.storage.entries.recordScheduledAttempt(
+                entry.id,
+                attemptNumber,
+                attemptedAt,
+                null,
+                truncated,
+                'failed',
+              );
+              deadLettered++;
+            } else {
+              const delay = backoffMs(attemptNumber);
+              config.storage.entries.recordScheduledAttempt(
+                entry.id,
+                attemptNumber,
+                attemptedAt,
+                attemptedAt + delay,
+                truncated,
+                'pending',
+              );
+            }
+
+            reportEntryError(entry, err);
+            failed++;
           }
-
-          onError(entry, err);
+        } catch (err) {
+          // A reconciliation may legitimately cancel or hold a row after the
+          // batch query but before this scheduler claims it. Contain that row
+          // (and any other storage failure) so later rows still get a turn.
+          reportEntryError(entry, err);
           failed++;
         }
       }
+    } catch (err) {
+      // A temporary storage read failure must not become an unhandled promise
+      // rejection that takes down the webhook receiver. The next tick retries.
+      log.error('[scheduler] tick failed', { err });
     } finally {
       isTicking = false;
     }
@@ -202,15 +225,27 @@ export function createScheduler(config: SchedulerConfig): Scheduler {
     return { attempted, posted, failed, deadLettered };
   }
 
+  function runTickInBackground(): void {
+    void tick().catch((err: unknown) => {
+      // Last line of defence for custom loggers/metrics/hooks that throw.
+      // Keep this callback non-throwing or it would create a new rejection.
+      try {
+        log.error('[scheduler] background tick failed', { err });
+      } catch {
+        // A broken custom logger cannot be safely reported here.
+      }
+    });
+  }
+
   return {
     start(): void {
       if (timer !== null) return;
       // Run an initial tick immediately, then schedule subsequent ones.
       // Production deployments want due entries posted on startup, not
       // delayed by a full interval.
-      void tick();
+      runTickInBackground();
       timer = setInterval(() => {
-        void tick();
+        runTickInBackground();
       }, interval);
       // Don't keep the Node process alive just for the scheduler.
       if (typeof timer.unref === 'function') timer.unref();

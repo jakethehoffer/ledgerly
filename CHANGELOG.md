@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 means breaking changes can happen in any minor release.
 
+## [Unreleased]
+
+### Fixed
+
+- **A scheduled-entry race can no longer stop the webhook receiver.** If a
+  refund or other reconciliation changes a due row just before dispatch starts,
+  the scheduler now contains that row's error and continues the batch. Temporary
+  storage read failures are logged and retried on the next tick instead of
+  escaping as an unhandled promise rejection.
+
 ## [0.15.1] — 2026-08-11
 
 ### Fixed
