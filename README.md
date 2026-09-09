@@ -650,7 +650,17 @@ The static-token variables (`LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_XERO_ACCESS_T
 
 **4. Complete the consent flow.**
 
-Visit `https://your-domain.example.com/oauth/qbo/start` (or `/oauth/xero/start`) in a browser. Sign in to the QBO / Xero org you want ledgerly to manage, approve the requested scopes, and the receiver will redirect back to the callback URL. On success you'll see a one-line "Connected" page; the receiver has now persisted the token set to the `oauth_tokens` table.
+Starting a connection is an operator action, so `GET /oauth/<provider>/start` is gated behind `LEDGERLY_ADMIN_TOKEN` — the same bearer token as the `/admin/*` routes. The CLI refuses to start if OAuth client config is set without it, and the route is not mounted at all when it is missing. Ask for the consent link with your token, then open the URL it returns:
+
+```bash
+curl -sS -o /dev/null -w '%{redirect_url}\n' \
+  -H "Authorization: Bearer $LEDGERLY_ADMIN_TOKEN" \
+  https://your-domain.example.com/oauth/qbo/start
+```
+
+Open that URL in a browser (use `/oauth/xero/start` for Xero). Sign in to the QBO / Xero org you want ledgerly to manage, approve the requested scopes, and the provider redirects back to the callback URL. On success you'll see a one-line "Connected" page; the receiver has now persisted the token set to the `oauth_tokens` table.
+
+The link is single-use and expires in 10 minutes: the callback only honours a `state` that this process issued, and only once. If you need to connect again, ask for a fresh link. A receiver restart also invalidates any link still in flight.
 
 **5. The scheduler dispatches automatically.**
 
@@ -661,7 +671,7 @@ From this point on, the background scheduler dispatches due scheduled entries to
 - **HTTPS is required.** Intuit and Xero both reject HTTP redirect URIs except for `localhost`. Terminate TLS at a reverse proxy in front of ledgerly.
 - **Redirect URI must match the registered value exactly.** A trailing slash, port mismatch, or `http` vs. `https` will produce a hard error at consent.
 - **Tokens live in SQLite.** They sit in the `oauth_tokens` table at `LEDGERLY_DB_PATH`. Protect the file with appropriate filesystem permissions (mode `0600`, owned by the ledgerly service user) and include it in your backup strategy.
-- **Single-tenant MVP.** Storage is keyed by `(provider, tenant_id)` and ready for multi-tenant deployments, but the managed dispatchers and CLI currently use the first stored token set per provider. Connecting to a different QBO realm / Xero org overwrites the existing row.
+- **Single-tenant MVP.** Storage is keyed by `(provider, tenant_id)` and ready for multi-tenant deployments, but the managed dispatchers and CLI expect exactly one token set per provider. Connecting a *different* QBO realm / Xero org does **not** replace the existing row — it adds a second one, and the dispatcher then refuses to guess which company to post into, so every dispatch fails until one is removed. List what is connected with `GET /admin/oauth` and remove the wrong row with `DELETE /admin/oauth/<provider>/<tenantId>`. Re-connecting the *same* realm / org does replace its own row.
 - **Refresh token revocation.** If an admin manually revokes the connection from the QBO / Xero side, the next refresh attempt will fail with `invalid_grant`. The scheduler will dead-letter the entry after `maxAttempts` failures (default 10); the operator must re-run the consent flow to restore the connection.
 
 #### Production caveats
@@ -781,6 +791,11 @@ to scanners.
 
 - `GET /admin/entries?limit=N` lists immediate journal entries, newest-first.
   `limit` defaults to 50, capped at 500.
+- `GET /admin/oauth` lists the connected QBO / Xero companies — provider, tenant
+  id, access-token expiry, and granted scope. Token values are never returned.
+- `DELETE /admin/oauth/<provider>/<tenantId>` removes one connection. This is the
+  recovery path when two companies are connected for one provider and dispatch has
+  stopped. Idempotent, so repeating it is safe.
 - `GET /admin/scheduled?status=pending|posted|cancelled|failed|held&limit=N` lists
   scheduled entries (recognition rows + immediate-dispatch rows). `status`
   defaults to `pending`.

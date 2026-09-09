@@ -27,7 +27,14 @@ coordinated-disclosure timeline) within 30 days for high-severity issues.
 - Signature-verification bypass on `POST /webhook`.
 - Authentication bypass on `/admin/*` (the bearer-token gate, or routes
   becoming reachable when `LEDGERLY_ADMIN_TOKEN` is unset).
-- OAuth state CSRF bypass on `/oauth/{qbo,xero}/callback`.
+- OAuth state CSRF bypass on `/oauth/{qbo,xero}/callback`, including replay of a
+  previously used `state` or acceptance of a `state` this receiver never issued.
+- Anything that lets a party other than the operator start or complete a QBO /
+  Xero connection — `/oauth/{qbo,xero}/start` reachable without the admin bearer
+  token, or a connection landing in storage without an authenticated start.
+  Connecting a stranger's company either stops every dispatch (two rows for one
+  provider) or, if it is the only row, sends the operator's journal entries into
+  that stranger's books.
 - SQL injection anywhere `better-sqlite3` is used with user-controlled
   input.
 - Privilege escalation — e.g. a crafted webhook event causing the engine to

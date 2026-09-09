@@ -8,12 +8,49 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ## [Unreleased]
 
+### Security
+
+- **Only the operator can connect an accounting company now.**
+  `GET /oauth/<provider>/start` had no authentication. Anyone who found the URL
+  could complete consent with their own QuickBooks or Xero company: connecting
+  after the operator added a second token row, which stops every dispatch, and
+  connecting first made their company the only row, so the receiver would post
+  the operator's journal entries — amounts and memos carrying Stripe customer,
+  subscription and charge references — into a stranger's books. `start` is now
+  gated behind `LEDGERLY_ADMIN_TOKEN`, and is not mounted at all when that token
+  is unset. The callback cannot be gated the same way (it arrives as a redirect
+  from the provider, not from the operator), so it now requires a `state` nonce
+  that an authenticated `start` on this process issued, and accepts each one only
+  once — a leaked or replayed consent link no longer works.
+
 ### Added
+
+- **Operator endpoints for connected companies.** `GET /admin/oauth` lists the
+  connected QBO / Xero companies (provider, tenant id, token expiry, scope —
+  never the token values) and `DELETE /admin/oauth/<provider>/<tenantId>` removes
+  one. Before this there was no supported way to clear a token row, so two rows
+  for one provider stopped dispatch with no recovery short of editing storage by
+  hand. The "multiple token rows" error now names these endpoints.
 
 - **`Storage.persistRefundReversal`** — the atomic read + deferred-first split +
   cancel + re-spread used by the refund reconciliation below, alongside the
   existing `persistCreditReversal`. Both bundled backends implement it. Custom
   `Storage` implementations must add it (pre-1.0 interface change).
+
+### Changed
+
+- **The server CLI now exits at startup if OAuth client config is set without
+  `LEDGERLY_ADMIN_TOKEN`**, rather than starting with a connect flow that cannot
+  be reached — the same treatment the CLI already gives other partial OAuth
+  configuration. **Upgrade impact:** a deployment currently running OAuth client
+  config with no admin token will not boot until you set one (`openssl rand
+  -base64 48`), or drop the OAuth client variables and use the static-token
+  dispatchers. Already-stored tokens are untouched and keep dispatching. That
+  deployment is also the one exposed to the issue above, so setting the token is
+  the fix either way.
+- **README correction:** connecting a different QBO realm or Xero org does not
+  overwrite the existing token row. It adds a second row, which stops dispatch
+  until one is removed.
 
 ### Fixed
 

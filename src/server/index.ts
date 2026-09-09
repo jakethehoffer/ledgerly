@@ -5,6 +5,7 @@ import type { JournalEntry, RecognitionSchedule } from '../journal.js';
 import { UnhandledEventError } from '../errors.js';
 import { voidHasDeferredSchedule } from '../events/invoices/invoiceVoided.js';
 import { adminAuthMiddleware } from './admin.js';
+import { createPendingStateStore } from './oauth/pendingStates.js';
 import { expandEvent } from './expand.js';
 import { buildVoidReconcileInput } from './voidReconciler.js';
 import {
@@ -728,16 +729,47 @@ export function createServer(config: ServerConfig): ServerInstance {
   //
   // Routes are only mounted when the corresponding `config.oauth.<provider>`
   // block is set. Otherwise the path falls through to Express's 404 handler.
+  //
+  // `start` is an OPERATOR action and is gated behind the admin bearer token.
+  // Left open, anyone who found the URL could complete consent with their own
+  // QuickBooks or Xero company: connecting after the operator adds a second
+  // token row, which stops every dispatch, and connecting first makes their
+  // company the only row, so this receiver would post the operator's journal
+  // entries into a stranger's books. Without an admin token there is no way to
+  // tell the operator apart from anyone else, so `start` is not mounted at all.
+  //
+  // The callback cannot be gated — it is a redirect from the provider — so it
+  // is protected instead by only honouring a nonce that an authenticated
+  // `start` on this process issued, and only once (see `pendingStates`).
+  const oauthAdminToken = config.adminToken;
+  const oauthConnectEnabled =
+    stateSigner !== null && oauthAdminToken !== undefined && oauthAdminToken !== '';
+  const requireOperator = oauthConnectEnabled
+    ? adminAuthMiddleware(oauthAdminToken)
+    : null;
+  const pendingStates = createPendingStateStore();
+  if (stateSigner !== null && !oauthConnectEnabled) {
+    log.warn(
+      'OAuth connect disabled: set LEDGERLY_ADMIN_TOKEN to enable /oauth/<provider>/start. ' +
+        'The callback stays mounted but cannot mint a state, so no tokens can be saved.',
+    );
+  }
 
   if (stateSigner !== null && oauthConfig?.qbo) {
     const signer = stateSigner;
     const qboClient = oauthConfig.qbo;
 
-    app.get('/oauth/qbo/start', (_req: Request, res: Response): void => {
-      const state = signer.sign({ provider: 'qbo' });
-      const url = buildQboAuthUrl(qboClient, state);
-      res.redirect(302, url);
-    });
+    if (requireOperator !== null) {
+      app.get('/oauth/qbo/start', requireOperator, (_req: Request, res: Response): void => {
+        const state = signer.sign({ provider: 'qbo' });
+        // Record the nonce we just minted so the callback can recognise it.
+        // Decoding our own freshly signed token is the only way to read the
+        // generated nonce, and it cannot fail.
+        pendingStates.issue(signer.verify(state));
+        const url = buildQboAuthUrl(qboClient, state);
+        res.redirect(302, url);
+      });
+    }
 
     app.get('/oauth/qbo/callback', (req: Request, res: Response): void => {
       void (async (): Promise<void> => {
@@ -759,6 +791,12 @@ export function createServer(config: ServerConfig): ServerInstance {
           const payload = signer.verify(state);
           if (payload.provider !== 'qbo') {
             res.status(400).json({ error: 'State payload provider mismatch' });
+            return;
+          }
+          // Single use, and only for a state an authenticated start issued.
+          if (!pendingStates.consume(payload.nonce)) {
+            log.warn('[oauth] QBO state was not issued by this receiver, or was already used');
+            res.status(400).json({ error: 'Invalid or expired state' });
             return;
           }
         } catch (err) {
@@ -797,11 +835,15 @@ export function createServer(config: ServerConfig): ServerInstance {
     const signer = stateSigner;
     const xeroClient = oauthConfig.xero;
 
-    app.get('/oauth/xero/start', (_req: Request, res: Response): void => {
-      const state = signer.sign({ provider: 'xero' });
-      const url = buildXeroAuthUrl(xeroClient, state);
-      res.redirect(302, url);
-    });
+    if (requireOperator !== null) {
+      app.get('/oauth/xero/start', requireOperator, (_req: Request, res: Response): void => {
+        const state = signer.sign({ provider: 'xero' });
+        // See the QBO start route: register the nonce we just issued.
+        pendingStates.issue(signer.verify(state));
+        const url = buildXeroAuthUrl(xeroClient, state);
+        res.redirect(302, url);
+      });
+    }
 
     app.get('/oauth/xero/callback', (req: Request, res: Response): void => {
       void (async (): Promise<void> => {
@@ -819,6 +861,12 @@ export function createServer(config: ServerConfig): ServerInstance {
           const payload = signer.verify(stateRaw);
           if (payload.provider !== 'xero') {
             res.status(400).json({ error: 'State payload provider mismatch' });
+            return;
+          }
+          // See the QBO callback: single use, and issued by this receiver.
+          if (!pendingStates.consume(payload.nonce)) {
+            log.warn('[oauth] Xero state was not issued by this receiver, or was already used');
+            res.status(400).json({ error: 'Invalid or expired state' });
             return;
           }
         } catch (err) {
@@ -907,6 +955,46 @@ export function createServer(config: ServerConfig): ServerInstance {
       }
       return n;
     };
+
+    // Connected accounting companies. The operator needs to see which books
+    // this receiver is posting into, and to remove a row that should not be
+    // there: two rows for one provider is exactly the state that stops every
+    // dispatch, and before this there was no way to clear it short of editing
+    // storage by hand. Token values are never returned — only which company is
+    // connected, when its access token expires, and what scope it was granted.
+    app.get('/admin/oauth', requireAdmin, (_req: Request, res: Response): void => {
+      const connections = (['qbo', 'xero'] as const).flatMap((provider) =>
+        storage.oauth.list(provider).map((row) => ({
+          provider: row.provider,
+          tenantId: row.tenantId,
+          expiresAt: row.expiresAt,
+          scope: row.scope,
+        })),
+      );
+      res.json({ connections });
+    });
+
+    app.delete(
+      '/admin/oauth/:provider/:tenantId',
+      requireAdmin,
+      (req: Request, res: Response): void => {
+        const provider = req.params['provider'] ?? '';
+        const tenantId = req.params['tenantId'] ?? '';
+        if (provider !== 'qbo' && provider !== 'xero') {
+          res.status(404).json({ error: 'unknown provider' });
+          return;
+        }
+        if (tenantId === '') {
+          res.status(400).json({ error: 'tenantId is required' });
+          return;
+        }
+        // Idempotent by design: delete() is a no-op for a row that is already
+        // gone, so a repeated call is safe.
+        storage.oauth.delete(provider, tenantId);
+        log.info('[admin] OAuth connection removed', { provider, tenantId });
+        res.json({ deleted: true, provider, tenantId });
+      },
+    );
 
     app.get('/admin/entries', requireAdmin, (req: Request, res: Response): void => {
       const limit = parseLimit(req);

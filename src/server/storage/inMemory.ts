@@ -301,7 +301,10 @@ export function inMemoryOAuthTokenStore(): OAuthTokenStore {
       if (matches.length === 0) return null;
       if (matches.length > 1) {
         throw new Error(
-          `Multiple token rows for provider=${provider}; use list() in multi-tenant deployments`,
+          `Multiple token rows for provider=${provider}; use list() in multi-tenant deployments. ` +
+            `If you did not connect two companies on purpose, one of them should not be there: ` +
+            `list them with GET /admin/oauth and remove the wrong one with ` +
+            `DELETE /admin/oauth/${provider}/<tenantId>.`,
         );
       }
       return matches[0] ?? null;

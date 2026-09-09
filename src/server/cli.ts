@@ -173,6 +173,19 @@ if (qboOAuthClient !== null || xeroOAuthClient !== null) {
     );
     process.exit(1);
   }
+  if (adminToken === undefined) {
+    // Starting the consent flow is an operator action, and the admin token is
+    // the only thing that identifies the operator. Without it the receiver
+    // cannot mount /oauth/<provider>/start at all, so OAuth client config with
+    // no admin token is a partial configuration — fail loudly at startup rather
+    // than 404 at the moment the operator tries to connect.
+    log.error(
+      'OAuth client config detected but LEDGERLY_ADMIN_TOKEN is unset. Connecting QBO/Xero is ' +
+        'restricted to the operator, so /oauth/<provider>/start is only mounted when an admin ' +
+        'token is set. Generate one with `openssl rand -base64 48`.',
+    );
+    process.exit(1);
+  }
   oauthConfig = {
     stateSecret: oauthStateSecret,
     ...(qboOAuthClient !== null ? { qbo: qboOAuthClient } : {}),
