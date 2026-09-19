@@ -114,7 +114,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.16.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.17.0
 ```
 
 ### Use the engine as a library
@@ -385,7 +385,7 @@ Imported from `ledgerly` (after build, the barrel is at `dist/index.js`):
 ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint, including signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel, so importing `mapEvent` keeps the Express server out of your bundle. The server's runtime dependencies, `express`, `better-sqlite3`, `dotenv`, and `stripe`, are declared as `peerDependencies`, so engine-only consumers don't install them. `npm i ledgerly` pulls in no Express and no native SQLite module. To run the receiver yourself, install them alongside ledgerly:
 
 ```bash
-pnpm add ledgerly express@^4.22.2 better-sqlite3@^11.10.0 dotenv@^17.4.2 stripe@^16
+pnpm add ledgerly express@^4.22.2 better-sqlite3@^13.0.3 dotenv@^17.4.2 stripe@^16
 ```
 
 The published Docker image already bundles them.
@@ -840,7 +840,11 @@ to scanners.
 
 ## Deployment
 
-### Upgrading to 0.16.0
+### Upgrading to 0.17.0
+
+Use Node 22 or newer. Direct receiver installs also need `better-sqlite3@^13.0.3`;
+the Docker image includes Node 24 and the updated SQLite binding. This replaces
+the old binding that could crash on current Node 24.
 
 Back up the database before upgrading. The first startup holds old attempted
 sends whose outcome is uncertain. Check those entries against QuickBooks or
@@ -855,7 +859,7 @@ must implement the new `inbox` and `persistRefundReversal` contracts.
 Failed verified webhook payloads remain in SQLite until handled successfully.
 Protect this database and its backups as payment data. Refunds for deferred
 invoices from before Ledgerly need reconciled opening balances and recognition
-history before retry. See the [release notes](./CHANGELOG.md#0160--2026-09-19).
+history before retry. See the [release notes](./CHANGELOG.md#0170--2026-09-19).
 
 ### Docker
 
@@ -865,7 +869,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.16.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.17.0
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -873,7 +877,7 @@ docker pull ghcr.io/jakethehoffer/ledgerly:latest
 
 The image is built from a multi-stage `Dockerfile`: the build stage installs
 all dependencies, compiles TypeScript, and prunes devDependencies; the
-runtime stage carries only `node:20-slim` + the pruned `node_modules` +
+runtime stage carries only `node:24-slim` + the pruned `node_modules` +
 compiled `dist/`. It runs as a non-root user (UID 10001), exposes port
 3000, and declares a `HEALTHCHECK` against `/health`. You can also build
 locally from source:
@@ -896,7 +900,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=false \
-  ghcr.io/jakethehoffer/ledgerly:v0.16.0
+  ghcr.io/jakethehoffer/ledgerly:v0.17.0
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -954,7 +958,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.16.0 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.17.0 \
   --repo jakethehoffer/ledgerly
 ```
 
@@ -1032,7 +1036,7 @@ pnpm start          # Run the built webhook receiver (requires pnpm build first)
 
 ## Tech stack
 
-- Node 20+
+- Node 22+
 - TypeScript (strict, NodeNext ESM, `verbatimModuleSyntax`)
 - Vitest
 - ESLint + Prettier

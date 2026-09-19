@@ -8,6 +8,25 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-09-19
+
+### Fixed
+
+- Upgrade `better-sqlite3` to `^13.0.3`, whose N-API implementation avoids the
+  native statement cleanup crash seen with the old binding on current Node 24.
+  Closing test databases alone did not resolve the crash during publication.
+
+### Upgrade notes
+
+- Node 22 or newer is now required. The Docker image includes Node 24. Direct
+  receiver installations must also update `better-sqlite3` to `^13.0.3`.
+  This new minimum is a pre-1.0 breaking change, so it uses a minor release.
+- Includes all payment, refund, retry, and OAuth fixes listed under 0.16.0.
+  Follow those database backup and reconciliation notes when upgrading from
+  0.15.1 or earlier. Existing SQLite data is retained.
+- Supersedes the partial 0.16.0 release: its Docker image was published, but
+  npm publication stopped at the native test crash. Existing tags are preserved.
+
 ## [0.16.0] — 2026-09-19
 
 ### Upgrade notes
@@ -1261,7 +1280,8 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
-[Unreleased]: https://github.com/jakethehoffer/ledgerly/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/jakethehoffer/ledgerly/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.17.0
 [0.16.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.16.0
 [0.15.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.15.1
 [0.15.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.15.0

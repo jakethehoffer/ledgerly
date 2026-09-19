@@ -21,9 +21,12 @@ env:
 
 jobs:
   verify:
-    name: typecheck + lint + test + build
+    name: typecheck + lint + test + build (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      matrix:
+        node: [22, 24]
 
     steps:
       - name: Checkout
@@ -35,10 +38,10 @@ jobs:
           version: 9
           run_install: false
 
-      - name: Install Node 24
+      - name: Install Node ${{ matrix.node }}
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: ${{ matrix.node }}
           cache: pnpm
 
       - name: Install dependencies

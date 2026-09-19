@@ -13,11 +13,10 @@
 # set explicitly (below) instead.
 #
 # Build tooling (python3 + build-essential) is here as a safety net for
-# `better-sqlite3`'s native binding: the prebuilt binary usually downloads
-# cleanly for linux/glibc + node 20, but if the prebuild isn't available
-# for the target arch, the install falls back to compiling from source.
+# `better-sqlite3`'s native binding: N-API prebuilt binaries ship with the
+# package for supported platforms, including linux x64 and arm64.
 
-FROM node:20-slim AS build
+FROM node:24-slim AS build
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,17 +40,17 @@ RUN mkdir -p /opt/app && cd /opt/app \
     && npm init -y >/dev/null 2>&1 \
     && npm install --omit=dev --no-audit --no-fund \
         express@^4.22.2 \
-        better-sqlite3@^11.10.0 \
+        better-sqlite3@^13.0.3 \
         dotenv@^17.4.2 \
         stripe@^16
 
 # ---- Runtime stage ---------------------------------------------------------
-# Minimal runtime: node:20-slim + the server's production node_modules +
+# Minimal runtime: node:24-slim + the server's production node_modules +
 # compiled dist. No build tooling, no source, no tests, no dev dependencies.
 # Runs as a non-root user; SQLite state lives on /data which operators mount
 # as a volume to persist across container restarts.
 
-FROM node:20-slim AS runtime
+FROM node:24-slim AS runtime
 WORKDIR /app
 
 COPY --from=build /app/dist ./dist

@@ -1,6 +1,6 @@
 {
   "name": "ledgerly",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Stripe-to-double-entry mapping engine for indie SaaS",
   "keywords": [
     "stripe",
@@ -40,7 +40,7 @@
     "CHANGELOG.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "bin": {
     "ledgerly": "dist/cli.js",
@@ -60,7 +60,7 @@
     "start": "node dist/server/cli.js"
   },
   "peerDependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
     "express": "^4.22.2",
     "stripe": "^16"
@@ -84,7 +84,7 @@
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitest/coverage-v8": "^2.1.9",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
     "eslint": "^8.57.1",
     "express": "^4.22.2",

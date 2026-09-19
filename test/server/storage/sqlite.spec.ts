@@ -14,8 +14,7 @@ function testDatabase(): Database.Database {
 }
 
 afterEach(() => {
-  // Do not leave native statements to be collected after Vitest's VM context
-  // is gone. Node 24 on Linux can abort in the native cleanup hook then.
+  // Release each test's native database even when an assertion fails.
   for (const db of databases.splice(0)) {
     if (db.open) db.close();
   }
