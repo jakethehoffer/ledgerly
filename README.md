@@ -385,7 +385,7 @@ Imported from `ledgerly` (after build, the barrel is at `dist/index.js`):
 ledgerly ships with an optional Express-based webhook receiver that wraps the pure engine with everything you need to run a production Stripe webhook endpoint, including signature verification, event deduplication, and per-event-type Stripe API expansion of the nested objects the engine requires. The receiver lives in `src/server/` and is intentionally **not** re-exported from the main `ledgerly` barrel, so importing `mapEvent` keeps the Express server out of your bundle. The server's runtime dependencies, `express`, `better-sqlite3`, `dotenv`, and `stripe`, are declared as `peerDependencies`, so engine-only consumers don't install them. `npm i ledgerly` pulls in no Express and no native SQLite module. To run the receiver yourself, install them alongside ledgerly:
 
 ```bash
-pnpm add ledgerly express better-sqlite3 dotenv stripe
+pnpm add ledgerly express@^4.22.2 better-sqlite3@^11.10.0 dotenv@^17.4.2 stripe@^16
 ```
 
 The published Docker image already bundles them.
@@ -398,13 +398,18 @@ Required environment variables:
 | `STRIPE_WEBHOOK_SECRET` | Used to verify the `Stripe-Signature` header (HMAC over the raw body) |
 | `PORT` | Optional; defaults to `3000` |
 
-Run it:
+From a source checkout, build and run it:
 
 ```bash
 pnpm build
 pnpm start
-# or, after publication:
-npx ledgerly-server
+```
+
+After installing the package and its server dependencies as above, run its
+installed launcher instead:
+
+```bash
+pnpm exec ledgerly-server
 ```
 
 Endpoints:
@@ -413,11 +418,13 @@ Endpoints:
 - `GET /health` is the liveness probe. It returns `{ ok: true, dedupSize }`.
 - `GET /metrics` returns Prometheus text exposition format (see [Metrics](#metrics) below).
 
-To embed the receiver in a larger Express app, import `createServer` directly:
+When working from a source checkout, you can embed the receiver by importing
+`createServer` from the built server. The published package exports the core
+engine only, so its server subpaths are not public package imports:
 
 ```typescript
 import Stripe from 'stripe';
-import { createServer } from 'ledgerly/dist/server/index.js';
+import { createServer } from './dist/server/index.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 const { app } = createServer({
