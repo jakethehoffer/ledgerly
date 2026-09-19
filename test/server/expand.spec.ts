@@ -5,7 +5,7 @@ import { expandEvent } from '../../src/server/expand.js';
 interface MockStripe {
   charges: { retrieve: ReturnType<typeof vi.fn> };
   refunds: { list: ReturnType<typeof vi.fn> };
-  invoices: { retrieve: ReturnType<typeof vi.fn> };
+  invoices: { retrieve: ReturnType<typeof vi.fn>; listLineItems: ReturnType<typeof vi.fn> };
   disputes: { retrieve: ReturnType<typeof vi.fn> };
   payouts: { retrieve: ReturnType<typeof vi.fn> };
   creditNotes: { retrieve: ReturnType<typeof vi.fn> };
@@ -18,16 +18,25 @@ function makeMockStripe(overrides: {
   payout?: object;
   creditNote?: object;
   refundPages?: object[];
+  invoicePages?: object[];
 }): MockStripe {
+  // Even minimal mocked invoices carry the required inline line-list envelope.
+  for (const object of [overrides.invoice,
+    (overrides.charge as { invoice?: object } | undefined)?.invoice,
+    (overrides.creditNote as { invoice?: object } | undefined)?.invoice]) {
+    if (object && !('lines' in object)) Object.assign(object, { lines: { data: [], has_more: false } });
+  }
   const listRefunds = vi.fn();
   for (const page of overrides.refundPages ?? []) {
     listRefunds.mockResolvedValueOnce(page);
   }
+  const listLines = vi.fn();
+  for (const page of overrides.invoicePages ?? []) listLines.mockResolvedValueOnce(page);
 
   return {
     charges: { retrieve: vi.fn().mockResolvedValue(overrides.charge ?? {}) },
     refunds: { list: listRefunds },
-    invoices: { retrieve: vi.fn().mockResolvedValue(overrides.invoice ?? {}) },
+    invoices: { retrieve: vi.fn().mockResolvedValue(overrides.invoice ?? {}), listLineItems: listLines },
     disputes: { retrieve: vi.fn().mockResolvedValue(overrides.dispute ?? {}) },
     payouts: { retrieve: vi.fn().mockResolvedValue(overrides.payout ?? {}) },
     creditNotes: { retrieve: vi.fn().mockResolvedValue(overrides.creditNote ?? {}) },
@@ -139,7 +148,7 @@ describe('expandEvent', () => {
 
     expect(mock.invoices.retrieve).toHaveBeenCalledWith('in_1', {
       expand: ['charge.balance_transaction'],
-    });
+    }, { apiVersion: '2024-06-20' });
     expect(out.data.object).toBe(expanded);
   });
 
@@ -230,5 +239,56 @@ describe('expandEvent', () => {
     await expandEvent(mock as unknown as Stripe, original);
 
     expect(original.data.object).toBe(originalObject);
+  });
+
+  it.each(['invoice.payment_succeeded', 'invoice.finalized', 'invoice.voided', 'invoice.marked_uncollectible'])(
+    'loads every invoice line for %s', async (type) => {
+      const lines = Array.from({ length: 11 }, (_, index) => ({ id: `il_${String(index)}`, amount: 100 }));
+      const invoice = { id: 'in_many', lines: { data: lines.slice(0, 10), has_more: true } };
+      const mock = makeMockStripe({ invoice, invoicePages: [
+        { data: lines.slice(0, 10), has_more: true }, { data: lines.slice(10), has_more: false },
+      ] });
+      const out = await expandEvent(mock as unknown as Stripe, makeEvent(type, invoice));
+      expect((out.data.object as Stripe.Invoice).lines.data).toHaveLength(11);
+      expect((out.data.object as Stripe.Invoice).lines.has_more).toBe(false);
+      expect(mock.invoices.listLineItems).toHaveBeenLastCalledWith('in_many', {
+        limit: 100, starting_after: 'il_9',
+      }, { apiVersion: '2024-06-20' });
+      expect(invoice.lines.has_more).toBe(true);
+    },
+  );
+
+  it.each(['charge.refunded', 'credit_note.created', 'credit_note.voided'])(
+    'completes an embedded invoice for %s', async (type) => {
+      const invoice = { id: 'in_many', lines: { data: [], has_more: true } };
+      const object = { id: 'obj_1', invoice };
+      const mock = makeMockStripe({ charge: object, creditNote: object,
+        invoicePages: [{ data: [{ id: 'il_1' }], has_more: false }],
+      });
+      const out = await expandEvent(mock as unknown as Stripe, makeEvent(type, object));
+      expect(((out.data.object as Stripe.Charge).invoice as Stripe.Invoice).lines.data).toHaveLength(1);
+    },
+  );
+
+  it.each(['invoice.finalized', 'invoice.voided', 'invoice.marked_uncollectible'])(
+    'retrieves newer %s payloads in the supported schema without dropping tax', async (type) => {
+      const invoice = { id: 'in_tax', tax: 100, lines: { data: [], has_more: false } };
+      const mock = makeMockStripe({ invoice });
+      const out = await expandEvent(mock as unknown as Stripe, makeEvent(type, {
+        id: 'in_tax', total_taxes: [{ amount: 100 }], parent: null,
+      }));
+      expect((out.data.object as Stripe.Invoice).tax).toBe(100);
+      expect(mock.invoices.retrieve).toHaveBeenCalledWith('in_tax', {}, { apiVersion: '2024-06-20' });
+    },
+  );
+
+  it.each([
+    [{ data: [], has_more: true }],
+    [{ data: [{ id: 'il_repeat' }], has_more: true }, { data: [{ id: 'il_repeat' }], has_more: true }],
+  ])('rejects invoice pagination that cannot advance', async (...invoicePages) => {
+    const invoice = { id: 'in_broken', lines: { data: [], has_more: true } };
+    const mock = makeMockStripe({ invoice, invoicePages });
+    await expect(expandEvent(mock as unknown as Stripe, makeEvent('invoice.finalized', invoice)))
+      .rejects.toThrow(/pagination/i);
   });
 });

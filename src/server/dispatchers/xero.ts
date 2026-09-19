@@ -4,6 +4,7 @@ import { consoleLogger } from '../logger.js';
 import type { Logger } from '../logger.js';
 import type { Dispatcher } from '../scheduler.js';
 import type { SavedScheduledEntry } from '../storage/types.js';
+import { dispatchIdentity } from './identity.js';
 
 export interface XeroDispatcherConfig {
   /** Xero OAuth2 access token (caller is responsible for refresh). */
@@ -28,9 +29,9 @@ const MAX_BODY_PREVIEW_CHARS = 500;
 /**
  * Dispatcher that posts scheduled entries to Xero's ManualJournals endpoint.
  *
- * Idempotency: every POST includes the `Idempotency-Key` header set to
- * `String(entry.id)`. Xero natively deduplicates on this header, so scheduler
- * retries after a partial failure are safe.
+ * Idempotency: source-based keys protect short retries. Xero expires those keys
+ * after six minutes, so also look for a durable narration marker before sending.
+ * The scheduler must retain its documented single-writer deployment model.
  *
  * OAuth is out of scope: the caller supplies a live `accessToken` and is
  * responsible for refreshing it before expiry (Xero access tokens expire in
@@ -50,17 +51,32 @@ export function xeroDispatcher(config: XeroDispatcherConfig): Dispatcher {
   return async (entry: SavedScheduledEntry): Promise<void> => {
     const xeroJournal = toXero(entry.entry, config.accountMap, status);
     const url = `${apiBase}/api.xro/2.0/ManualJournals`;
+    const identity = dispatchIdentity(entry);
+    const marker = `[Ledgerly:${identity}]`;
+    const narration = `${xeroJournal.Narration} ${marker}`;
+    const lookup = await fetchImpl(`${url}?where=${encodeURIComponent(`Narration==${JSON.stringify(narration)}`)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Xero-Tenant-Id': config.tenantId,
+        Accept: 'application/json',
+      },
+    });
+    if (!lookup.ok) throw new Error(`Xero API returned ${String(lookup.status)} during duplicate check`);
+    const existing = await lookup.json() as { ManualJournals?: { Narration?: string; ManualJournalID?: string }[] };
+    if (!Array.isArray(existing.ManualJournals)) throw new Error('Xero duplicate check returned an invalid response');
+    if (existing.ManualJournals.some((journal) => journal.Narration === narration && journal.ManualJournalID)) return;
 
     const response = await fetchImpl(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.accessToken}`,
         'Xero-Tenant-Id': config.tenantId,
-        'Idempotency-Key': String(entry.id),
+        'Idempotency-Key': identity,
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify({ ManualJournals: [xeroJournal] }),
+      body: JSON.stringify({ ManualJournals: [{ ...xeroJournal, Narration: narration }] }),
     });
 
     if (!response.ok) {
@@ -79,6 +95,14 @@ export function xeroDispatcher(config: XeroDispatcherConfig): Dispatcher {
       throw new Error(
         `Xero API returned ${String(response.status)} for entry id=${String(entry.id)}: ${truncated}${retryNote}`,
       );
+    }
+
+    const posted = await response.json() as {
+      ManualJournals?: { ManualJournalID?: string; HasErrors?: boolean }[];
+    };
+    const journal = posted.ManualJournals?.[0];
+    if (!journal?.ManualJournalID || journal.HasErrors) {
+      throw new Error('Xero did not confirm a saved manual journal');
     }
 
     log.info(

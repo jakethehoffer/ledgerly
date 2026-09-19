@@ -49,6 +49,24 @@ export function buildReducedSchedule(
   const n = sorted.length;
   const base = Math.floor(newDeferred / n);
   const remainder = newDeferred - base * n;
+  const anchors = sorted.map((row) => row.fxContext).filter((anchor) => anchor !== undefined);
+  const anchor = anchors[0];
+  if (
+    anchor &&
+    (anchors.length !== sorted.length ||
+      anchors.some(
+        (current) =>
+          current.customerCurrency !== anchor.customerCurrency ||
+          current.settlementCurrency !== meta.currency,
+      ))
+  ) {
+    throw new Error('Cannot rebuild a recognition schedule with inconsistent FX history');
+  }
+  const oldDeferred = sorted.reduce((sum, row) => sum + recognitionAmount(row), 0);
+  const customerTotal = anchors.reduce((sum, current) => sum + current.customerAmount, 0);
+  const newCustomerTotal =
+    anchor && oldDeferred > 0 ? Math.round((customerTotal * newDeferred) / oldDeferred) : 0;
+  const customerBase = Math.floor(newCustomerTotal / n);
   const entries: JournalEntry[] = sorted.map((row, i) => {
     const amount = cents(i === n - 1 ? base + remainder : base);
     return {
@@ -58,6 +76,18 @@ export function buildReducedSchedule(
       sourceEventId: meta.sourceEventId,
       sourceEventType: meta.sourceEventType,
       sourceObjectId: meta.invoiceId,
+      ...(anchor
+        ? {
+            fxContext: {
+              customerCurrency: anchor.customerCurrency,
+              customerAmount: cents(
+                i === n - 1 ? newCustomerTotal - customerBase * (n - 1) : customerBase,
+              ),
+              settlementCurrency: meta.currency,
+              settlementAmount: amount,
+            },
+          }
+        : {}),
       lines: sortLines([
         { accountCode: '2100', side: 'debit', amount, memo: 'Recognize from deferred' },
         { accountCode: '4000', side: 'credit', amount, memo: 'Subscription revenue' },

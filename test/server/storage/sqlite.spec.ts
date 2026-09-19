@@ -16,6 +16,22 @@ runStorageSuite('sqliteStorage', () => {
 // truly rolls back on failure. We use a `:memory:` database so no temp file
 // is created.
 describe('sqliteStorage durability and atomicity', () => {
+  it('holds ambiguous legacy sends once without holding new sends on later opens', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    db.prepare("DELETE FROM storage_metadata WHERE key = 'dispatch_identity'").run();
+    db.prepare(`INSERT INTO scheduled_entries (event_id, subscription_id, scheduled_date, payload, attempts)
+      VALUES ('evt_old', 'sub_old', '2025-01-01', '{}', 1),
+      ('evt_fresh', 'sub_fresh', '2025-01-01', '{}', 0)`).run();
+    applyMigrations(db);
+    expect(db.prepare('SELECT status FROM scheduled_entries WHERE event_id = ?').get('evt_old')).toEqual({ status: 'held' });
+    expect(db.prepare('SELECT status FROM scheduled_entries WHERE event_id = ?').get('evt_fresh')).toEqual({ status: 'pending' });
+    db.prepare("UPDATE scheduled_entries SET attempts = 1 WHERE event_id = 'evt_fresh'").run();
+    applyMigrations(db);
+    expect(db.prepare('SELECT status FROM scheduled_entries WHERE event_id = ?').get('evt_fresh')).toEqual({ status: 'pending' });
+    db.close();
+  });
+
   it('survives a fresh store instance backed by the same Database', () => {
     const db = new Database(':memory:');
     applyMigrations(db);

@@ -2,6 +2,8 @@ import Database from 'better-sqlite3';
 import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal.js';
 import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
 import { applyMigrations } from './migrations.js';
+import { bookedRefundIds, isBookedRefund } from './refunds.js';
+import { sqliteWebhookInbox } from './inbox.js';
 import type {
   CreditReconcileInput,
   CreditVoidReconcileInput,
@@ -243,6 +245,12 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
       WHERE id = ? AND status = 'failed'`,
   );
 
+  const quarantineUnreadable = db.prepare<[number]>(
+    `UPDATE scheduled_entries SET status = 'failed', next_attempt_at = NULL,
+       last_error = 'Saved entry is unreadable; repair it before retrying'
+     WHERE id = ? AND status = 'pending'`,
+  );
+
   function scheduledRowToSaved(row: ScheduledEntryRow): SavedScheduledEntry {
     return {
       id: row.id,
@@ -333,7 +341,16 @@ export function sqliteJournalEntryStore(db: Database.Database): JournalEntryStor
 
     findPendingScheduled(asOfDate: string, now: number = Date.now()): SavedScheduledEntry[] {
       const rows = selectPendingScheduled.all(asOfDate, now);
-      return rows.map(scheduledRowToSaved);
+      const saved: SavedScheduledEntry[] = [];
+      for (const row of rows) {
+        try {
+          saved.push(scheduledRowToSaved(row));
+        } catch {
+          // Keep the original payload for repair, but let healthy rows run.
+          quarantineUnreadable.run(row.id);
+        }
+      }
+      return saved;
     },
 
     findScheduledBySubscription(subscriptionId: string): SavedScheduledEntry[] {
@@ -568,6 +585,7 @@ export function sqliteOAuthTokenStore(db: Database.Database): OAuthTokenStore {
  * and pushes the entry to QBO/Xero.
  */
 export function sqliteStorage(db: Database.Database): Storage {
+  const inbox = sqliteWebhookInbox(db);
   const dedup = sqliteDeduplicator(db);
   const entries = sqliteJournalEntryStore(db);
   const oauth = sqliteOAuthTokenStore(db);
@@ -638,6 +656,7 @@ export function sqliteStorage(db: Database.Database): Storage {
         return { duplicate: true };
       }
       for (const entry of result.entries) {
+        if (isBookedRefund(entries, entry)) continue;
         insertImmediate.run(
           eventId,
           now,
@@ -752,14 +771,18 @@ export function sqliteStorage(db: Database.Database): Storage {
       if (claim.changes === 0) {
         return { duplicate: true };
       }
-      // Same read-build-cancel-reissue shape as persistCreditTxn, minus the "no
-      // rows yet" refusal: a refund against an invoice this ledger never saw
-      // still has to book (see RefundReconcileInput), and build() degrades to
-      // the engine's own entries when both arrays are empty.
+      // As with credit reversals, a missing schedule is not proof that all
+      // revenue was recognized. A throw also rolls back the event claim.
       const rows = selectBySubscriptionForVoid
         .all(input.subscriptionId)
         .map((row) => ({ row, entry: JSON.parse(row.payload) as JournalEntry }))
         .filter(({ entry }) => entry.sourceObjectId === input.invoiceId);
+      if (rows.length === 0) {
+        throw new Error(
+          `Cannot reconcile refund for invoice ${input.invoiceId}: ` +
+            `no recognition rows exist yet; refusing until the invoice event arrives`,
+        );
+      }
       const posted = rows.filter(({ row }) => row.status === 'posted').map(({ entry }) => entry);
       const unposted = rows.filter(
         ({ row }) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
@@ -771,7 +794,10 @@ export function sqliteStorage(db: Database.Database): Storage {
         );
       }
       const pending = unposted.map(({ entry }) => entry);
-      const { reversals, reducedSchedule } = input.build(posted, pending);
+      const { reversals, reducedSchedule } = input.build(
+        posted, pending, bookedRefundIds(entries, input.refundIds ?? []),
+      );
+      if (reversals.length === 0) return { duplicate: false };
       for (const { row } of unposted) {
         cancelForVoid.run(row.id);
       }
@@ -1027,6 +1053,7 @@ export function sqliteStorage(db: Database.Database): Storage {
   const pingStmt = db.prepare('SELECT 1 AS ok');
 
   return {
+    inbox,
     dedup,
     entries,
     oauth,

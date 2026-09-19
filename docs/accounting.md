@@ -472,6 +472,14 @@ multi-refund charge. Only the classification of the revenue-side debit moves, so
 refund against an invoice that never deferred anything books exactly as it always
 has.
 
+**Out-of-order delivery:** if the deferred invoice has no recognition rows yet,
+the receiver retains the refund and returns a retryable error without booking it.
+After the invoice event creates the schedule, redelivery or protected operator
+retry applies the refund against that schedule exactly once. A fully recognized
+or fully cancelled schedule still has historical rows and remains refundable.
+Invoices predating Ledgerly need their opening balances and recognition history
+reconciled before retry. Missing history is not proof that all revenue was earned.
+
 **Cross-currency is supported here**, unlike the credit-note draw-down. Both sides
 of this subtraction are already in the same money: the recognition schedule is
 booked in the paying charge's settlement currency, and the refund's revenue-side
@@ -695,11 +703,10 @@ These are deliberate gaps, documented rather than approximated:
   excess, remaining months re-spread. A caller using the pure engine on its own
   still gets the flat 4900 treatment and must post the 2100 reclass by hand. See
   [Refunding a deferred-schedule invoice](#refunding-a-deferred-schedule-invoice).
-  Bounded residual: if the refund arrives **before** the invoice event that
-  creates the schedule, there is nothing to draw down yet and the refund books the
-  old 4900 way — the receiver books it rather than refusing, because an invoice
-  predating ledgerly is the commoner cause of an empty schedule than an
-  out-of-order delivery.
+  If the refund arrives **before** the invoice event that creates the schedule,
+  the receiver retains it for retry after that invoice is processed. An invoice
+  predating Ledgerly requires opening-balance and recognition-history
+  reconciliation rather than an automatic guess at earned revenue.
 - **Multi-period FX revaluation** — exposed via `fxContext`, not auto-posted (see
   above).
 - **Cross-currency payouts** — rejected with a clear error (see above).

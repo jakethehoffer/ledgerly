@@ -1,7 +1,8 @@
-import express, { type Express, type Request, type Response } from 'express';
+import express, { type Express, type Request, type Response, type NextFunction } from 'express';
 import type Stripe from 'stripe';
 import { mapEvent } from '../engine.js';
-import type { JournalEntry, RecognitionSchedule } from '../journal.js';
+import { assertBalanced, type JournalEntry, type RecognitionSchedule } from '../journal.js';
+import { handleChargeRefunded } from '../events/charges/chargeRefunded.js';
 import { UnhandledEventError } from '../errors.js';
 import { voidHasDeferredSchedule } from '../events/invoices/invoiceVoided.js';
 import { adminAuthMiddleware } from './admin.js';
@@ -25,6 +26,7 @@ import type { OAuthClientConfig, OAuthProvider } from './oauth/types.js';
 import { OAuthError } from './oauth/types.js';
 import { buildXeroAuthUrl, exchangeXeroCode, getXeroConnections } from './oauth/xero.js';
 import { inMemoryStorage } from './storage/inMemory.js';
+import { bookedRefundIds, isBookedRefund } from './storage/refunds.js';
 import type { Deduplicator, PersistResult, SavedScheduledEntry, Storage } from './storage/types.js';
 import {
   buildSubscriptionCancellationInput,
@@ -129,6 +131,7 @@ function resolveStorage(config: ServerConfig): Storage {
       }
     };
     return {
+      inbox: base.inbox,
       dedup: customDedup,
       entries: base.entries,
       oauth: base.oauth,
@@ -143,7 +146,12 @@ function resolveStorage(config: ServerConfig): Storage {
         // doesn't mark the event processed.
         if (customDedup.has(eventId)) return { duplicate: true };
         for (const entry of result.entries) {
+          if (isBookedRefund(base.entries, entry)) continue;
           base.entries.saveImmediate(entry, eventId);
+          base.entries.saveScheduled(entry, {
+            subscriptionId: `immediate:${entry.sourceEventId}`,
+            sourceEventId: entry.sourceEventId,
+          });
         }
         if (result.schedule) {
           for (const entry of result.schedule.entries) {
@@ -233,13 +241,18 @@ function resolveStorage(config: ServerConfig): Storage {
         return { duplicate: false };
       },
       persistRefundReversal(eventId, input, now = Date.now()): PersistResult {
-        // Mirrors the first-class backends' refund draw-down against the caller's
-        // deduplicator. Unlike the credit path, an invoice with no recognition
-        // rows is not refused — build() falls back to the engine's own entries.
+        // Mirrors the first-class backends' refund draw-down, including keeping
+        // an early refund retryable until its invoice's schedule exists.
         if (customDedup.has(eventId)) return { duplicate: true };
         const rows = base.entries
           .findScheduledBySubscription(input.subscriptionId)
           .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+        if (rows.length === 0) {
+          throw new Error(
+            `Cannot reconcile refund for invoice ${input.invoiceId}: ` +
+              `no recognition rows exist yet; refusing until the invoice event arrives`,
+          );
+        }
         const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
         const unposted = rows.filter(
           (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
@@ -251,7 +264,13 @@ function resolveStorage(config: ServerConfig): Storage {
           );
         }
         const pending = unposted.map((row) => row.entry);
-        const { reversals, reducedSchedule } = input.build(posted, pending);
+        const { reversals, reducedSchedule } = input.build(
+          posted, pending, bookedRefundIds(base.entries, input.refundIds ?? []),
+        );
+        if (reversals.length === 0) {
+          customDedup.record(eventId, now);
+          return { duplicate: false };
+        }
         for (const row of unposted) {
           base.entries.cancelScheduled(row.id);
         }
@@ -426,6 +445,35 @@ export function createServer(config: ServerConfig): ServerInstance {
   const log: Logger = config.log ?? consoleLogger();
   const metrics: Metrics = config.metrics ?? inMemoryMetrics();
   const app = express();
+  const activeEvents = new Map<string, number>();
+
+  function failRequest(res: Response, error: unknown): void {
+    try {
+      log.error('Webhook request failed', { error: error instanceof Error ? error.name : 'unknown' });
+    } catch {
+      if (!res.headersSent) res.status(500).json({ error: 'Processing failed' });
+      return;
+    }
+    if (!res.headersSent) res.status(500).json({ error: 'Processing failed' });
+  }
+
+  async function runEvent(event: Stripe.Event, res: Response): Promise<void> {
+    activeEvents.set(event.id, (activeEvents.get(event.id) ?? 0) + 1);
+    try {
+      storage.inbox.receive(event);
+      try {
+        await processEvent(event, res);
+      } catch (error) {
+        failRequest(res, error);
+      }
+      if (res.statusCode < 300) storage.inbox.remove(event.id);
+      else storage.inbox.fail(event.id, 'Processing failed; retry after correcting the cause');
+    } finally {
+      const remaining = (activeEvents.get(event.id) ?? 1) - 1;
+      if (remaining > 0) activeEvents.set(event.id, remaining);
+      else activeEvents.delete(event.id);
+    }
+  }
 
   // OAuth wiring. `oauth.stateSecret` builds a state signer; per-provider
   // config controls whether the corresponding endpoints are mounted at all.
@@ -439,13 +487,18 @@ export function createServer(config: ServerConfig): ServerInstance {
   const oauthFetch = oauthConfig?.fetch ?? globalThis.fetch;
 
   app.get('/health', (_req: Request, res: Response) => {
-    res.json({
-      ok: true,
-      dedupSize: storage.dedup.size(),
-      journalEntries: storage.entries.countImmediate(),
-      pendingScheduled: storage.entries.countPendingScheduled(),
-      failedScheduled: storage.entries.countFailedScheduled(),
-    });
+    try {
+      res.json({
+        ok: true,
+        pendingWebhooks: storage.inbox.count(),
+        dedupSize: storage.dedup.size(),
+        journalEntries: storage.entries.countImmediate(),
+        pendingScheduled: storage.entries.countPendingScheduled(),
+        failedScheduled: storage.entries.countFailedScheduled(),
+      });
+    } catch {
+      res.json({ ok: true, storage: 'unavailable' });
+    }
   });
 
   // Readiness probe distinct from /health: returns 503 (not 200) when the
@@ -471,6 +524,7 @@ export function createServer(config: ServerConfig): ServerInstance {
     metrics.setGauge('journal_entries', storage.entries.countImmediate());
     metrics.setGauge('scheduled_pending', storage.entries.countPendingScheduled());
     metrics.setGauge('scheduled_failed', storage.entries.countFailedScheduled());
+    metrics.setGauge('webhooks_pending', storage.inbox.count());
     res.setHeader('Content-Type', 'text/plain; version=0.0.4');
     res.status(200).send(metrics.render());
   });
@@ -494,6 +548,10 @@ export function createServer(config: ServerConfig): ServerInstance {
       return;
     }
 
+    await runEvent(event, res);
+  }
+
+  async function processEvent(event: Stripe.Event, res: Response): Promise<void> {
     // Cheap pre-check: if we've already processed this event, ack-and-skip
     // *before* spending an expansion call on it. The record happens later,
     // bundled with persistence, so a crash mid-flight doesn't poison the
@@ -615,8 +673,9 @@ export function createServer(config: ServerConfig): ServerInstance {
           persistResult = storage.persistRefundReversal(event.id, {
             subscriptionId: refundInput.subscriptionId,
             invoiceId: refundInput.invoiceId,
-            build: (posted, pending) => {
-              const built = refundInput.build(posted, pending);
+            refundIds: refundInput.refundIds ?? [],
+            build: (posted, pending, booked) => {
+              const built = refundInput.build(posted, pending, booked);
               reversalCount = built.reversals.length;
               return built;
             },
@@ -631,7 +690,12 @@ export function createServer(config: ServerConfig): ServerInstance {
         scheduleEntryCount = 0;
         hasSchedule = false;
       } else {
-        const result = mapEvent(expanded);
+        const result = expanded.type === 'charge.refunded'
+          ? handleChargeRefunded(expanded, bookedRefundIds(
+            storage.entries, expanded.data.object.refunds?.data.map((refund) => refund.id) ?? [],
+          ))
+          : mapEvent(expanded);
+        for (const entry of result.entries) assertBalanced(entry);
         try {
           if (subscriptionChangeNeedsReconcile(expanded, result)) {
             // A paid mid-term annual change carries a new deferred delta while
@@ -712,7 +776,7 @@ export function createServer(config: ServerConfig): ServerInstance {
     '/webhook',
     express.raw({ type: 'application/json' }),
     (req: Request, res: Response): void => {
-      void handleWebhook(req, res);
+      void handleWebhook(req, res).catch((error: unknown) => { failRequest(res, error); });
     },
   );
 
@@ -956,6 +1020,33 @@ export function createServer(config: ServerConfig): ServerInstance {
       return n;
     };
 
+    app.get('/admin/webhooks', requireAdmin, (req: Request, res: Response): void => {
+      const limit = parseLimit(req);
+      if (typeof limit !== 'number') {
+        res.status(400).json(limit);
+        return;
+      }
+      const events = storage.inbox.list(limit).map((stored) => ({
+        eventId: stored.event.id, type: stored.event.type, receivedAt: stored.receivedAt,
+        status: stored.status, lastError: stored.lastError,
+      }));
+      res.json({ events });
+    });
+
+    app.post('/admin/webhooks/:id/retry', requireAdmin, (req: Request, res: Response): void => {
+      const eventId = req.params['id'] ?? '';
+      if (activeEvents.has(eventId)) {
+        res.status(409).json({ error: 'event is already being processed' });
+        return;
+      }
+      const stored = storage.inbox.get(eventId);
+      if (!stored) {
+        res.status(404).json({ error: 'not found' });
+        return;
+      }
+      void runEvent(stored.event, res).catch((error: unknown) => { failRequest(res, error); });
+    });
+
     // Connected accounting companies. The operator needs to see which books
     // this receiver is posting into, and to remove a row that should not be
     // there: two rows for one provider is exactly the state that stops every
@@ -1067,6 +1158,12 @@ export function createServer(config: ServerConfig): ServerInstance {
   } else {
     log.info('Admin endpoints disabled (no adminToken configured)');
   }
+
+  // Express catches synchronous route failures, including unreadable stored
+  // records. Keep its default development handler from exposing their contents.
+  app.use((error: unknown, _req: Request, res: Response, _next: NextFunction): void => {
+    failRequest(res, error);
+  });
 
   return { app, storage, dedup: storage.dedup, metrics };
 }

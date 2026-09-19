@@ -4,6 +4,7 @@ import { consoleLogger } from '../logger.js';
 import type { Logger } from '../logger.js';
 import type { Dispatcher } from '../scheduler.js';
 import type { SavedScheduledEntry } from '../storage/types.js';
+import { dispatchIdentity } from './identity.js';
 
 export interface QboDispatcherConfig {
   /** QBO OAuth2 access token (caller is responsible for refresh). */
@@ -27,11 +28,8 @@ const MAX_BODY_PREVIEW_CHARS = 500;
 /**
  * Dispatcher that posts scheduled entries to QuickBooks Online's JournalEntry endpoint.
  *
- * Idempotency: callers should provide a stable DocNumber via the existing toQbo
- * truncation (last 21 chars of event ID). QBO does NOT enforce DocNumber uniqueness
- * by default, so a redelivery would create a duplicate entry. For strict idempotency,
- * either use QBO's Idempotency-Key header (this dispatcher could add it as the entry's
- * sourceEventId) or implement deduplication via a query before POST. Future iteration.
+ * Idempotency: the requestid query parameter identifies the posting across
+ * retries. It includes the source, date and lines, not a reusable local row ID.
  *
  * OAuth is out of scope: the caller supplies a live `accessToken` and is responsible
  * for refreshing it before expiry (QBO access tokens expire hourly).
@@ -43,7 +41,7 @@ export function qboDispatcher(config: QboDispatcherConfig): Dispatcher {
 
   return async (entry: SavedScheduledEntry): Promise<void> => {
     const qboEntry = toQbo(entry.entry, config.accountMap);
-    const url = `${apiBase}/v3/company/${encodeURIComponent(config.realmId)}/journalentry?minorversion=${QBO_MINOR_VERSION}`;
+    const url = `${apiBase}/v3/company/${encodeURIComponent(config.realmId)}/journalentry?minorversion=${QBO_MINOR_VERSION}&requestid=${dispatchIdentity(entry)}`;
 
     const response = await fetchImpl(url, {
       method: 'POST',

@@ -7,7 +7,10 @@ import { buildFxContext, withFx } from '../../util/fxContext.js';
 import { sortLines } from '../../util/lines.js';
 import { refundMemo } from '../../util/memo.js';
 
-export function handleChargeRefunded(event: Stripe.Event): MapResult {
+export function handleChargeRefunded(
+  event: Stripe.Event,
+  bookedRefundIds: ReadonlySet<string> = new Set(),
+): MapResult {
   if (event.type !== 'charge.refunded') {
     throw new Error(`handleChargeRefunded received wrong event type: ${event.type}`);
   }
@@ -94,9 +97,15 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
   // existing fixtures stay byte-identical.
   const cumulativeCustomerBeforeById = new Map<string, number>();
   {
-    const ordered = [...refundsList.data].sort((a, b) =>
-      a.created !== b.created ? a.created - b.created : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
-    );
+    const ordered = [...refundsList.data].sort((a, b) => {
+      if (a.created !== b.created) return a.created - b.created;
+      // A later same-second refund must not move ahead of money whose rounded
+      // tax/FX basis has already been booked from an earlier snapshot.
+      if (bookedRefundIds.has(a.id) !== bookedRefundIds.has(b.id)) {
+        return bookedRefundIds.has(a.id) ? -1 : 1;
+      }
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
     let running = 0;
     for (const r of ordered) {
       cumulativeCustomerBeforeById.set(r.id, running);
@@ -111,122 +120,132 @@ export function handleChargeRefunded(event: Stripe.Event): MapResult {
     }
   }
 
-  const entries: JournalEntry[] = targetRefunds.map((refund) => {
-    const bt = requireExpanded<Stripe.BalanceTransaction>(
-      refund.balance_transaction,
-      `refund[${refund.id}].balance_transaction`,
-      event.id,
-    );
-
-    // Sanity invariant: a refund BT should have no fee (net == amount). If
-    // they differ, Stripe is doing something we don't yet model (e.g.,
-    // partial fee clawback). Comparing within the BT currency stays valid
-    // under FX, where comparing bt.net to -refund.amount would not.
-    if (bt.net !== bt.amount) {
-      throw new Error(
-        `Refund ${refund.id} balance_transaction net (${String(bt.net)}) does not equal ` +
-          `amount (${String(bt.amount)}); fee clawback or unmodeled case`,
+  const unbookedRefunds = targetRefunds.filter((refund) => !bookedRefundIds.has(refund.id));
+  // An unsettled earlier refund can still fail and change the tax/FX basis.
+  // Hold dependent refunds too until that history is final.
+  for (const refund of unbookedRefunds.length > 0 ? refundsList.data : []) {
+    if (refund.status === 'pending' || refund.status === 'requires_action') {
+      throw new Error(`Refund ${refund.id} has not succeeded yet; retry after it settles`);
+    }
+  }
+  const entries: JournalEntry[] = unbookedRefunds
+    .filter((refund) => refund.status !== 'failed' && refund.status !== 'canceled')
+    .map((refund) => {
+      const bt = requireExpanded<Stripe.BalanceTransaction>(
+        refund.balance_transaction,
+        `refund[${refund.id}].balance_transaction`,
+        event.id,
       );
-    }
 
-    // FX-aware refund booking. The revenue offset (4900) and tax drain
-    // (2000) post at the ORIGINAL rate so they cleanly offset the
-    // original revenue/tax booking. The cash leg (1010) posts at the
-    // refund-time rate (what Stripe actually clawed back from the
-    // balance). The difference between expected and actual settlement
-    // is realized FX gain/loss → account 7000.
-    //
-    // Same-currency case: originalRate = refundRate = 1.0 (both ratios
-    // are |bt.amount| / refund.amount in matching units), so
-    // expectedSettlement = actualSettlement and fxDelta = 0 → no 7000
-    // line, byte-identical to the pre-FX-gain/loss behavior. The
-    // existing same-currency refund fixtures pass unchanged.
-    const cumCustomerBefore = cumulativeCustomerBeforeById.get(refund.id) ?? 0;
-    const cumCustomerThrough = cumCustomerBefore + refund.amount;
-    const actualSettlement = Math.abs(bt.amount);
-    const expectedSettlement =
-      Math.round(cumCustomerThrough * originalRate) -
-      Math.round(cumCustomerBefore * originalRate);
-    const fxDelta = actualSettlement - expectedSettlement;
+      // Sanity invariant: a refund BT should have no fee (net == amount). If
+      // they differ, Stripe is doing something we don't yet model (e.g.,
+      // partial fee clawback). Comparing within the BT currency stays valid
+      // under FX, where comparing bt.net to -refund.amount would not.
+      if (bt.net !== bt.amount) {
+        throw new Error(
+          `Refund ${refund.id} balance_transaction net (${String(bt.net)}) does not equal ` +
+            `amount (${String(bt.amount)}); fee clawback or unmodeled case`,
+        );
+      }
 
-    // Tax share uses the same cumulative customer basis, folding the settlement
-    // rate into the factor so the 2000 reversals across a multi-refund sequence
-    // sum to exactly the tax collected at charge time — under FX as well as
-    // same-currency.
-    const taxPortion =
-      taxRatio > 0
-        ? Math.round(cumCustomerThrough * originalRate * taxRatio) -
-          Math.round(cumCustomerBefore * originalRate * taxRatio)
-        : 0;
-    const revenuePortion = expectedSettlement - taxPortion;
+      // FX-aware refund booking. The revenue offset (4900) and tax drain
+      // (2000) post at the ORIGINAL rate so they cleanly offset the
+      // original revenue/tax booking. The cash leg (1010) posts at the
+      // refund-time rate (what Stripe actually clawed back from the
+      // balance). The difference between expected and actual settlement
+      // is realized FX gain/loss → account 7000.
+      //
+      // Same-currency case: originalRate = refundRate = 1.0 (both ratios
+      // are |bt.amount| / refund.amount in matching units), so
+      // expectedSettlement = actualSettlement and fxDelta = 0 → no 7000
+      // line, byte-identical to the pre-FX-gain/loss behavior. The
+      // existing same-currency refund fixtures pass unchanged.
+      const cumCustomerBefore = cumulativeCustomerBeforeById.get(refund.id) ?? 0;
+      const cumCustomerThrough = cumCustomerBefore + refund.amount;
+      const actualSettlement = Math.abs(bt.amount);
+      const expectedSettlement =
+        Math.round(cumCustomerThrough * originalRate) -
+        Math.round(cumCustomerBefore * originalRate);
+      const fxDelta = actualSettlement - expectedSettlement;
 
-    const draft: JournalLine[] = [];
-    if (revenuePortion > 0) {
+      // Tax share uses the same cumulative customer basis, folding the settlement
+      // rate into the factor so the 2000 reversals across a multi-refund sequence
+      // sum to exactly the tax collected at charge time — under FX as well as
+      // same-currency.
+      const taxPortion =
+        taxRatio > 0
+          ? Math.round(cumCustomerThrough * originalRate * taxRatio) -
+            Math.round(cumCustomerBefore * originalRate * taxRatio)
+          : 0;
+      const revenuePortion = expectedSettlement - taxPortion;
+
+      const draft: JournalLine[] = [];
+      if (revenuePortion > 0) {
+        draft.push({
+          accountCode: '4900',
+          side: 'debit',
+          amount: cents(revenuePortion),
+          memo: 'Refund issued',
+        });
+      }
+      if (taxPortion > 0) {
+        draft.push({
+          accountCode: '2000',
+          side: 'debit',
+          amount: cents(taxPortion),
+          memo: 'Sales tax portion refunded',
+        });
+      }
       draft.push({
-        accountCode: '4900',
-        side: 'debit',
-        amount: cents(revenuePortion),
-        memo: 'Refund issued',
+        accountCode: '1010',
+        side: 'credit',
+        amount: cents(actualSettlement),
+        memo: 'Refund deducted from Stripe balance',
       });
-    }
-    if (taxPortion > 0) {
-      draft.push({
-        accountCode: '2000',
-        side: 'debit',
-        amount: cents(taxPortion),
-        memo: 'Sales tax portion refunded',
-      });
-    }
-    draft.push({
-      accountCode: '1010',
-      side: 'credit',
-      amount: cents(actualSettlement),
-      memo: 'Refund deducted from Stripe balance',
+
+      if (fxDelta !== 0) {
+        // Positive fxDelta means we paid back MORE settlement-currency than
+        // the original revenue booking (rate moved against us between charge
+        // and refund) — realized FX loss → 7000 debit. Negative means we
+        // paid back less — realized FX gain → 7000 credit. Either way, the
+        // magnitude is the absolute delta; the side balances the entry.
+        draft.push({
+          accountCode: '7000',
+          side: fxDelta > 0 ? 'debit' : 'credit',
+          amount: cents(Math.abs(fxDelta)),
+          memo:
+            fxDelta > 0
+              ? 'FX loss on refund (rate moved against us)'
+              : 'FX gain on refund (rate moved in our favor)',
+        });
+      }
+
+      const lines: ReadonlyArray<JournalLine> = sortLines(draft);
+
+      // FX provenance: settlementAmount is the actual refund clawback in
+      // settlement currency (refund-time rate), customerAmount is the
+      // refund's customer-facing amount. For same-currency refunds the
+      // helper returns undefined and the entry omits the field.
+      const fxContext = buildFxContext(
+        refund.currency,
+        refund.amount,
+        bt.currency,
+        Math.abs(bt.amount),
+      );
+
+      return withFx(
+        {
+          date: epochToUtcDate(refund.created),
+          currency: bt.currency.toUpperCase(),
+          memo: refundMemo(charge, refund.id),
+          sourceEventId: event.id,
+          sourceEventType: event.type,
+          sourceObjectId: refund.id,
+          lines,
+        },
+        fxContext,
+      );
     });
-
-    if (fxDelta !== 0) {
-      // Positive fxDelta means we paid back MORE settlement-currency than
-      // the original revenue booking (rate moved against us between charge
-      // and refund) — realized FX loss → 7000 debit. Negative means we
-      // paid back less — realized FX gain → 7000 credit. Either way, the
-      // magnitude is the absolute delta; the side balances the entry.
-      draft.push({
-        accountCode: '7000',
-        side: fxDelta > 0 ? 'debit' : 'credit',
-        amount: cents(Math.abs(fxDelta)),
-        memo:
-          fxDelta > 0
-            ? 'FX loss on refund (rate moved against us)'
-            : 'FX gain on refund (rate moved in our favor)',
-      });
-    }
-
-    const lines: ReadonlyArray<JournalLine> = sortLines(draft);
-
-    // FX provenance: settlementAmount is the actual refund clawback in
-    // settlement currency (refund-time rate), customerAmount is the
-    // refund's customer-facing amount. For same-currency refunds the
-    // helper returns undefined and the entry omits the field.
-    const fxContext = buildFxContext(
-      refund.currency,
-      refund.amount,
-      bt.currency,
-      Math.abs(bt.amount),
-    );
-
-    return withFx(
-      {
-        date: epochToUtcDate(refund.created),
-        currency: bt.currency.toUpperCase(),
-        memo: refundMemo(charge, refund.id),
-        sourceEventId: event.id,
-        sourceEventType: event.type,
-        sourceObjectId: refund.id,
-        lines,
-      },
-      fxContext,
-    );
-  });
 
   return { entries, schedule: null };
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { cents } from '../../../src/money.js';
+import { dispatchIdentity } from '../../../src/server/dispatchers/identity.js';
 import { toXero } from '../../../src/exporters/xero.js';
 import type { XeroAccountMap } from '../../../src/exporters/types.js';
 import { xeroDispatcher } from '../../../src/server/dispatchers/xero.js';
@@ -73,7 +74,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok_abc',
         tenantId: '70784a6d-c1c5-4f3c-bf3a-1a2b3c4d5e6f',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       const entry = makeEntry();
@@ -90,12 +93,12 @@ describe('xeroDispatcher', () => {
       const headers = init.headers as Record<string, string>;
       expect(headers['Authorization']).toBe('Bearer tok_abc');
       expect(headers['Xero-Tenant-Id']).toBe('70784a6d-c1c5-4f3c-bf3a-1a2b3c4d5e6f');
-      expect(headers['Idempotency-Key']).toBe('42');
+      expect(headers['Idempotency-Key']).toBe(dispatchIdentity(entry));
       expect(headers['Content-Type']).toBe('application/json');
       expect(headers['Accept']).toBe('application/json');
 
       const sentBody = JSON.parse(init.body as string) as unknown;
-      expect(sentBody).toEqual({ ManualJournals: [toXero(entry.entry, accountMap, 'DRAFT')] });
+      expect(sentBody).toEqual({ ManualJournals: [{ ...toXero(entry.entry, accountMap, 'DRAFT'), Narration: `${entry.entry.memo} [Ledgerly:${dispatchIdentity(entry)}]` }] });
     });
   });
 
@@ -107,7 +110,9 @@ describe('xeroDispatcher', () => {
         tenantId: 'tenant-xyz',
         accountMap,
         apiBase: 'https://xero-proxy.example.com',
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       await dispatch(makeEntry());
@@ -124,7 +129,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'eyJhbGciOiJSUzI1NiIsImtpZCI6IkExQjJDMyJ9.Long.Token',
         tenantId: 'tenant-uuid-1234',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       await dispatch(makeEntry({ id: 7 }));
@@ -135,7 +142,7 @@ describe('xeroDispatcher', () => {
         'Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IkExQjJDMyJ9.Long.Token',
       );
       expect(headers['Xero-Tenant-Id']).toBe('tenant-uuid-1234');
-      expect(headers['Idempotency-Key']).toBe('7');
+      expect(headers['Idempotency-Key']).toBe(dispatchIdentity(makeEntry({ id: 7 })));
     });
   });
 
@@ -146,7 +153,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       const entry = makeEntry();
@@ -154,7 +163,7 @@ describe('xeroDispatcher', () => {
 
       const [, calledInit] = fetchImpl.mock.calls[0] ?? [];
       const sent = JSON.parse((calledInit as RequestInit).body as string) as unknown;
-      expect(sent).toEqual({ ManualJournals: [toXero(entry.entry, accountMap, 'DRAFT')] });
+      expect(sent).toEqual({ ManualJournals: [{ ...toXero(entry.entry, accountMap, 'DRAFT'), Narration: `${entry.entry.memo} [Ledgerly:${dispatchIdentity(entry)}]` }] });
     });
   });
 
@@ -166,7 +175,9 @@ describe('xeroDispatcher', () => {
         tenantId: 'tnt',
         accountMap,
         status: 'POSTED',
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       const entry = makeEntry();
@@ -177,7 +188,7 @@ describe('xeroDispatcher', () => {
         ManualJournals: { Status: string }[];
       };
       expect(sent.ManualJournals[0]?.Status).toBe('POSTED');
-      expect(sent).toEqual({ ManualJournals: [toXero(entry.entry, accountMap, 'POSTED')] });
+      expect(sent).toEqual({ ManualJournals: [{ ...toXero(entry.entry, accountMap, 'POSTED'), Narration: `${entry.entry.memo} [Ledgerly:${dispatchIdentity(entry)}]` }] });
     });
   });
 
@@ -191,7 +202,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       await expect(dispatch(makeEntry())).rejects.toThrow(/401/);
@@ -205,7 +218,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       try {
@@ -228,7 +243,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       await expect(dispatch(makeEntry())).rejects.toThrow(/Retry-After: 30/);
@@ -242,7 +259,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       try {
@@ -269,7 +288,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       await expect(dispatch(makeEntry())).rejects.toThrow(/503/);
@@ -292,7 +313,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       const entry = makeEntry();
@@ -310,7 +333,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
       });
 
       await expect(dispatch(makeEntry())).rejects.toThrow(/ECONNRESET/);
@@ -325,7 +350,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
         log: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
       });
 
@@ -346,7 +373,9 @@ describe('xeroDispatcher', () => {
         accessToken: 'tok',
         tenantId: 'tnt',
         accountMap,
-        fetch: fetchImpl,
+        fetch: (url, init) => init?.method === 'GET'
+          ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+          : fetchImpl(url, init) as Promise<Response>,
         log: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
       });
 

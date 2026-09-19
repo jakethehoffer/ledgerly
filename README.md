@@ -13,7 +13,7 @@ Built for indie SaaS founders who want clean books without paying an accountant 
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-810 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+912 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -114,7 +114,7 @@ Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsh
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.15.1
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.16.0
 ```
 
 ### Use the engine as a library
@@ -449,10 +449,12 @@ When the variable is unset (or empty), the receiver falls back to in-memory and 
 
 #### Schema
 
-The SQLite backend manages five tables. `openSqliteDatabase(path)` applies the schema on open (idempotent via `CREATE TABLE IF NOT EXISTS`):
+The SQLite backend manages the following tables. `openSqliteDatabase(path)` applies the schema on open (idempotent via `CREATE TABLE IF NOT EXISTS`):
 
 | Table | Purpose |
 |---|---|
+| `storage_metadata` | One-time upgrade markers, including protection for uncertain legacy dispatches. |
+| `webhook_inbox` | Signed events awaiting successful processing, retained for operator retry. |
 | `processed_events` | One row per Stripe `event.id` we've successfully processed. Backs the deduplicator. |
 | `journal_entries` | One row per emitted immediate `JournalEntry`. Full entry JSON in `payload`; `date`, `currency`, `memo`, `source_event_type`, `source_object_id` denormalized for indexed querying. |
 | `scheduled_entries` | Future-dated entries from a `RecognitionSchedule` (e.g. monthly draws against an annual subscription's deferred-revenue balance). `status` starts as `'pending'`, transitions to `'posted'` after dispatch, or becomes `'held'` when it falls after an ended subscription's last service date. |
@@ -517,7 +519,7 @@ LEDGERLY_SCHEDULER_INTERVAL_MS=60000 \
 pnpm start
 ```
 
-The default dispatcher logs each due entry to console. Production deployments will replace it with a QBO/Xero API pusher. See `src/server/dispatchers/` for the contract.
+The CLI requires a complete QBO or Xero dispatcher configuration before starting the scheduler. Missing or partial setup stops startup before any row can be marked posted. For deliberate local log-only development, set `LEDGERLY_DISPATCHER=console`. That explicit mode marks logged rows posted and does not send them to accounting software.
 
 **Contract:** dispatchers must be idempotent. The scheduler may invoke a dispatcher more than once for the same entry if a prior attempt failed after dispatch but before the database recorded the success.
 
@@ -554,13 +556,13 @@ LEDGERLY_QBO_API_BASE=https://sandbox-quickbooks.api.intuit.com \
 pnpm start
 ```
 
-All three of `LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_QBO_REALM_ID`, and `LEDGERLY_QBO_ACCOUNT_MAP_JSON` must be set to enable the QBO dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_QBO_API_BASE` is optional and defaults to the QBO production base URL. Point it at `https://sandbox-quickbooks.api.intuit.com` for testing.
+All three of `LEDGERLY_QBO_ACCESS_TOKEN`, `LEDGERLY_QBO_REALM_ID`, and `LEDGERLY_QBO_ACCOUNT_MAP_JSON` must be set to enable the QBO dispatcher; if only some are set the CLI stops before dispatching. The OAuth path also requires an account map. `LEDGERLY_QBO_API_BASE` is optional and defaults to the QBO production base URL. Point it at `https://sandbox-quickbooks.api.intuit.com` for testing.
 
 The `LEDGERLY_QBO_ACCOUNT_MAP_JSON` maps ledgerly's 14 account codes to your real QBO account IDs and display names. All 14 codes must be present.
 
 **OAuth is not handled by ledgerly.** The access token must be obtained out-of-band (via QBO's OAuth 2.0 authorization code flow) and refreshed before expiry (QBO tokens expire hourly). For a real SaaS deployment, you'll need a separate OAuth service that stores refresh tokens per-tenant and rotates access tokens; that's a future iteration.
 
-**Idempotency caveat:** QBO does not enforce `DocNumber` uniqueness by default. A scheduler retry after a partial failure could create duplicate journal entries. Mitigations: use QBO's idempotency support (currently in beta), or query for an existing entry by `DocNumber` before posting.
+**Idempotency:** QBO requests carry a stable `requestid` based on the source event, object, posting date and lines. Retries reuse it, while separate recognition months have different IDs. This uses [QBO request IDs](https://developer.intuit.com/app/developer/qbo/docs/learn/learn-basic-field-definitions#request-id), rather than relying on `DocNumber` uniqueness.
 
 #### Xero API dispatcher
 
@@ -578,7 +580,7 @@ LEDGERLY_XERO_STATUS=DRAFT \
 pnpm start
 ```
 
-All three of `LEDGERLY_XERO_ACCESS_TOKEN`, `LEDGERLY_XERO_TENANT_ID`, and `LEDGERLY_XERO_ACCOUNT_MAP_JSON` must be set to enable the Xero dispatcher; if only some are set the CLI logs a warning and falls back to the console dispatcher. `LEDGERLY_XERO_API_BASE` is optional and defaults to `https://api.xero.com`. Xero has no separate sandbox base, since the demo company is a flag on the user's tenant.
+All three of `LEDGERLY_XERO_ACCESS_TOKEN`, `LEDGERLY_XERO_TENANT_ID`, and `LEDGERLY_XERO_ACCOUNT_MAP_JSON` must be set to enable the Xero dispatcher; if only some are set the CLI stops before dispatching. The OAuth path also requires an account map. `LEDGERLY_XERO_API_BASE` is optional and defaults to `https://api.xero.com`. Xero has no separate sandbox base, since the demo company is a flag on the user's tenant.
 
 The `LEDGERLY_XERO_ACCOUNT_MAP_JSON` maps ledgerly's 14 account codes to your Xero account codes. All 14 codes must be present.
 
@@ -586,7 +588,7 @@ The `LEDGERLY_XERO_ACCOUNT_MAP_JSON` maps ledgerly's 14 account codes to your Xe
 
 **OAuth is not handled by ledgerly.** Obtain access tokens via Xero's OAuth 2.0 authorization code flow out-of-band, store refresh tokens per-tenant, and refresh access tokens before they expire (Xero tokens expire in 30 minutes). For a real SaaS deployment, you'll need a separate OAuth service; that's a future iteration.
 
-**Idempotency:** Xero supports a native `Idempotency-Key` header which ledgerly populates with `scheduled_entry.id`. A scheduler retry after a partial failure is safe, since Xero will deduplicate.
+**Idempotency:** Xero sends use a stable source-based key and add a Ledgerly marker to the narration. Before each send, the dispatcher checks for that narration in the connected company. This also covers retries after [Xero's six-minute key lifetime](https://developer.xero.com/documentation/guides/idempotent-requests/idempotency/). A failed lookup prevents the send. Keep one scheduler writer, and preserve these narrations when editing journals in Xero. At first open after this upgrade, SQLite holds attempted but unposted legacy rows for manual reconciliation. They cannot be retried through the admin route. This prevents replaying an old send whose remote result is unknown; newer attempts remain eligible for normal retries.
 
 **Precedence:** if both QBO and Xero env vars are configured, the QBO dispatcher wins (CLI selects the first match). For multi-target deployments, run two ledgerly processes, one per target, each with its own env config.
 
@@ -679,7 +681,7 @@ From this point on, the background scheduler dispatches due scheduled entries to
 The persistence layer is intentionally minimal. It keeps you from losing events on restart and gives you a queryable audit log of every journal entry, without dragging in a separate database server. Things it does not do:
 
 - **No automatic backups.** `cp ledgerly.db ledgerly.db.bak` while the receiver is running is safe (SQLite WAL mode supports concurrent readers), but you need to schedule it yourself.
-- **No schema migrations beyond the initial DDL.** The schema is set in stone for v0; future changes will need a versioned migration runner.
+- **Local schema upgrades.** Opening SQLite applies additive tables and indexes, upgrades legacy schedule columns, and records one-time upgrade markers. Back up persistent storage before a production upgrade.
 - **Single-writer.** SQLite is fine for one webhook receiver process. Horizontal scaling with multiple instances behind a load balancer will need a real database. Implement the `Storage` interface against Postgres, MySQL, or DynamoDB to do that.
 - **No retention policy.** `processed_events` and `journal_entries` grow without bound. For a small SaaS that's many years of data before it matters, but plan for it.
 - **No PII redaction.** `JournalEntry.memo` may contain customer references inherited from Stripe (`subscriptionId`, `chargeId`). The receiver does not redact, encrypt, or otherwise sanitize. Treat the database with the same care you'd give a Stripe export.
@@ -781,14 +783,22 @@ Override the namespace prefix (`ledgerly_`) by setting `LEDGERLY_METRICS_NAMESPA
   };
   ```
 
+Signed notices are saved before expansion or mapping. SQLite retains failures across restarts. The in-memory backend retains them only for the life of the process. `/health` reports `pendingWebhooks`, and `/metrics` reports `webhooks_pending`. Invalid signatures are rejected before storage. Unreadable scheduled payloads are kept as failed rows for repair while healthy rows continue.
+
+The receiver fetches every page of invoice lines, including invoices nested in refund and credit-note events. Newer raw invoice payloads are retrieved in the mapper's supported Stripe schema before use. Pending refunds are retained for retry after settlement, and failed or canceled refunds are not booked.
+
+A refund of a deferred-revenue invoice that arrives before its invoice schedule is retained with a retryable error, without changing the books. After the invoice event is processed, Stripe can redeliver the refund or an operator can retry the saved notice. If the invoice predates Ledgerly, reconcile its opening balance and recognition history before retrying rather than assuming that all revenue was earned.
+
 ### Admin endpoints
 
 When `LEDGERLY_ADMIN_TOKEN` is set (min 32 characters), the receiver mounts
-four operator-facing endpoints, all gated behind a constant-time bearer
+operator-facing endpoints, all gated behind a constant-time bearer
 comparison. When the env var is unset, the routes are not mounted at all, so
 unauthenticated requests get a generic 404 and the admin surface is invisible
 to scanners.
 
+- `GET /admin/webhooks?limit=N` lists retained notices by ID, type and failure status, without exposing their payment payloads.
+- `POST /admin/webhooks/:id/retry` reprocesses a retained notice. Successful processing removes it. Failed attempts retain it. Concurrent retries return 409.
 - `GET /admin/entries?limit=N` lists immediate journal entries, newest-first.
   `limit` defaults to 50, capped at 500.
 - `GET /admin/oauth` lists the connected QBO / Xero companies — provider, tenant
@@ -823,6 +833,23 @@ to scanners.
 
 ## Deployment
 
+### Upgrading to 0.16.0
+
+Back up the database before upgrading. The first startup holds old attempted
+sends whose outcome is uncertain. Check those entries against QuickBooks or
+Xero before releasing or recreating them. The upgrade does not correct old
+entries already sent to your books.
+
+Configure a complete QBO or Xero dispatcher before enabling the scheduler.
+The receiver can collect events with `LEDGERLY_SCHEDULER_ENABLED=false`.
+OAuth connections require `LEDGERLY_ADMIN_TOKEN`. Custom `Storage` backends
+must implement the new `inbox` and `persistRefundReversal` contracts.
+
+Failed verified webhook payloads remain in SQLite until handled successfully.
+Protect this database and its backups as payment data. Refunds for deferred
+invoices from before Ledgerly need reconciled opening balances and recognition
+history before retry. See the [release notes](./CHANGELOG.md#0160--2026-09-19).
+
 ### Docker
 
 Pre-built multi-arch images (linux/amd64 + linux/arm64) are published to
@@ -831,7 +858,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.15.1
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.16.0
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -848,7 +875,8 @@ locally from source:
 docker build -t ledgerly:local .
 ```
 
-Run it with persistent SQLite state:
+Run the receiver with persistent SQLite state, collecting events without
+dispatching to an accounting provider yet:
 
 ```bash
 docker volume create ledgerly-data
@@ -860,14 +888,16 @@ docker run -d --name ledgerly \
   -e STRIPE_WEBHOOK_SECRET=whsec_... \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
-  -e LEDGERLY_SCHEDULER_ENABLED=true \
-  ghcr.io/jakethehoffer/ledgerly:v0.15.1
+  -e LEDGERLY_SCHEDULER_ENABLED=false \
+  ghcr.io/jakethehoffer/ledgerly:v0.16.0
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
-mount point above. Add QBO/Xero env vars from `.env.example` to enable the
-corresponding dispatchers. Without them, the scheduler falls back to a
-console dispatcher that logs entries instead of posting.
+mount point above. Add a complete QBO/Xero configuration from `.env.example`,
+including the account map, before setting `LEDGERLY_SCHEDULER_ENABLED=true`.
+Missing or partial dispatcher setup stops startup when the scheduler is enabled.
+For deliberate log-only development, explicitly set `LEDGERLY_DISPATCHER=console`.
+That mode marks logged rows posted without sending them to accounting software.
 
 ### Docker Compose (local dev)
 
@@ -917,7 +947,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.15.1 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.16.0 \
   --repo jakethehoffer/ledgerly
 ```
 

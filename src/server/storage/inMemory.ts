@@ -1,5 +1,7 @@
 import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal.js';
 import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
+import { bookedRefundIds, isBookedRefund } from './refunds.js';
+import { inMemoryWebhookInbox } from './inbox.js';
 import type {
   CreditReconcileInput,
   CreditVoidReconcileInput,
@@ -333,6 +335,7 @@ export function inMemoryOAuthTokenStore(): OAuthTokenStore {
  * journal-entries row remains the canonical audit record.
  */
 export function inMemoryStorage(ttlMs?: number): Storage {
+  const inbox = inMemoryWebhookInbox();
   const dedup = inMemoryDeduplicator(ttlMs);
   const entries = inMemoryJournalEntryStore();
   const oauth = inMemoryOAuthTokenStore();
@@ -351,6 +354,7 @@ export function inMemoryStorage(ttlMs?: number): Storage {
     return saved;
   }
   return {
+    inbox,
     dedup,
     entries,
     oauth,
@@ -368,6 +372,7 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       // to roll back), leaving Stripe's redelivery free to retry cleanly.
       if (dedup.has(eventId)) return { duplicate: true };
       for (const entry of result.entries) {
+        if (isBookedRefund(entries, entry)) continue;
         entries.saveImmediate(entry, eventId);
         // Also enqueue for dispatch. Synthetic subscriptionId distinguishes
         // immediate dispatch rows from real recognition-schedule rows.
@@ -477,14 +482,18 @@ export function inMemoryStorage(ttlMs?: number): Storage {
       input: RefundReconcileInput,
       now: number = Date.now(),
     ): PersistResult {
-      // Same shape as persistCreditReversal, minus the "no rows yet" refusal: a
-      // refund against an invoice this ledger never saw still has to book (see
-      // RefundReconcileInput), and build() degrades to the engine's own entries
-      // when both arrays are empty.
+      // As with credit reversals, a missing schedule is not proof that all
+      // revenue was recognized. Keep an early refund retryable until it exists.
       if (dedup.has(eventId)) return { duplicate: true };
       const rows = entries
         .findScheduledBySubscription(input.subscriptionId)
         .filter((row) => row.entry.sourceObjectId === input.invoiceId);
+      if (rows.length === 0) {
+        throw new Error(
+          `Cannot reconcile refund for invoice ${input.invoiceId}: ` +
+            `no recognition rows exist yet; refusing until the invoice event arrives`,
+        );
+      }
       const posted = rows.filter((row) => row.status === 'posted').map((row) => row.entry);
       const unposted = rows.filter(
         (row) => row.status === 'pending' || row.status === 'failed' || row.status === 'held',
@@ -496,7 +505,13 @@ export function inMemoryStorage(ttlMs?: number): Storage {
         );
       }
       const pending = unposted.map((row) => row.entry);
-      const { reversals, reducedSchedule } = input.build(posted, pending);
+      const { reversals, reducedSchedule } = input.build(
+        posted, pending, bookedRefundIds(entries, input.refundIds ?? []),
+      );
+      if (reversals.length === 0) {
+        dedup.record(eventId, now);
+        return { duplicate: false };
+      }
       for (const row of unposted) {
         entries.cancelScheduled(row.id);
       }

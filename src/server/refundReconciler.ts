@@ -65,14 +65,16 @@ export function buildRefundReconcileInput(event: Stripe.Event): RefundReconcileI
   return {
     subscriptionId,
     invoiceId: invoice.id,
+    refundIds: charge.refunds?.data.map((refund) => refund.id) ?? [],
     build(
       posted,
       pending,
+      bookedRefundIds = new Set(),
     ): { reversals: ReadonlyArray<JournalEntry>; reducedSchedule: RecognitionSchedule | null } {
       // The engine owns the whole refund calculation — amounts, tax share, FX,
       // and the cumulative basis across every refund on this charge. We only
       // reclassify its revenue-side debit.
-      const engine = handleChargeRefunded(event);
+      const engine = handleChargeRefunded(event, bookedRefundIds);
       if (engine.entries.length === 0) {
         return { reversals: [], reducedSchedule: null };
       }
@@ -151,8 +153,9 @@ export function buildRefundReconcileInput(event: Stripe.Event): RefundReconcileI
  *
  * This is a shape gate on the Stripe object, exactly like `voidHasDeferredSchedule`
  * and `creditNoteHasDeferredSchedule`. Whether anything is actually still deferred
- * is decided by the ledger read inside `build`, which degrades to the engine's own
- * entries when the schedule is fully recognized or absent.
+ * is decided by the ledger read inside `build`, which uses the engine's own
+ * entries when the schedule is fully recognized. Storage refuses a missing
+ * schedule until the invoice event arrives rather than assuming it was earned.
  */
 export function refundNeedsReconcile(event: Stripe.Event): boolean {
   if (event.type !== 'charge.refunded') return false;

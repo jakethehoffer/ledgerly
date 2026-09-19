@@ -1,5 +1,6 @@
 import type { JournalEntry, MapResult, RecognitionSchedule } from '../../journal.js';
 import type { ConnectedTokens, OAuthProvider } from '../oauth/types.js';
+import type { WebhookInbox } from './inbox.js';
 
 /**
  * Event deduplication interface.
@@ -339,24 +340,23 @@ export interface CreditVoidReconcileInput {
  * to build both the refund entries and the reduced (re-spread) schedule from the
  * ledger's current recognition rows.
  *
- * The same read-build-cancel-reissue shape as {@link CreditReconcileInput}, with
- * two differences that the refund case needs:
+ * The same read-build-cancel-reissue shape as {@link CreditReconcileInput}, but
+ * `build` returns an array: one `charge.refunded` event can carry several refunds
+ * created at the same instant, and the engine books one entry per refund.
  *
- *   - `build` returns an **array** of entries, because one `charge.refunded`
- *     event can carry several refunds created at the same instant and the engine
- *     books one entry per refund.
- *   - An invoice with **no** recognition rows is not an error. A credit note is
- *     refused until the invoice event arrives, but a refund must still book: the
- *     ledger may simply predate ledgerly. `build` receives two empty arrays and
- *     is expected to fall back to the stateless engine's entries, which is what
- *     the ledger would have recorded anyway.
+ * Storage must refuse an invoice with no recognition rows before calling build
+ * or recording the event. A missing schedule may mean its invoice event has not
+ * arrived yet, not that its revenue was fully recognized. Posted or cancelled
+ * rows still prove the schedule existed, even when no deferred balance remains.
  */
 export interface RefundReconcileInput {
   readonly subscriptionId: string;
   readonly invoiceId: string;
+  readonly refundIds?: ReadonlyArray<string>;
   readonly build: (
     postedRecognition: ReadonlyArray<JournalEntry>,
     pendingRecognition: ReadonlyArray<JournalEntry>,
+    bookedRefundIds?: ReadonlySet<string>,
   ) => { reversals: ReadonlyArray<JournalEntry>; reducedSchedule: RecognitionSchedule | null };
 }
 
@@ -406,6 +406,7 @@ export interface SubscriptionCancellationInput {
  * backend runs sequentially (atomic under JS single-threaded semantics).
  */
 export interface Storage {
+  readonly inbox: WebhookInbox;
   readonly dedup: Deduplicator;
   readonly entries: JournalEntryStore;
   readonly oauth: OAuthTokenStore;
@@ -505,8 +506,8 @@ export interface Storage {
    * rows; persist each returned entry as an immediate posting (audit log +
    * dispatch queue); and enqueue the returned `reducedSchedule`.
    *
-   * Unlike {@link persistCreditReversal} this does not refuse an invoice with no
-   * recognition rows — see {@link RefundReconcileInput}.
+   * Refuse without recording the event if this invoice has no recognition rows,
+   * so an out-of-order refund remains retryable. See {@link RefundReconcileInput}.
    */
   persistRefundReversal(eventId: string, input: RefundReconcileInput, now?: number): PersistResult;
 

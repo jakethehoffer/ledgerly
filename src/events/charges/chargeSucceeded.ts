@@ -12,6 +12,9 @@ export function handleChargeSucceeded(event: Stripe.Event): MapResult {
     throw new Error(`handleChargeSucceeded received wrong event type: ${event.type}`);
   }
   const charge = event.data.object;
+  if (charge.invoice) {
+    return { entries: [], schedule: null };
+  }
   if (charge.amount === 0) {
     return { entries: [], schedule: null };
   }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { cents } from '../../../src/money.js';
+import { dispatchIdentity } from '../../../src/server/dispatchers/identity.js';
 import { toQbo } from '../../../src/exporters/qbo.js';
 import type { QboAccountMap } from '../../../src/exporters/types.js';
 import { qboDispatcher } from '../../../src/server/dispatchers/qbo.js';
@@ -82,7 +83,7 @@ describe('qboDispatcher', () => {
       const [calledUrl, calledInit] = fetchImpl.mock.calls[0] ?? [];
 
       expect(calledUrl).toBe(
-        'https://quickbooks.api.intuit.com/v3/company/9341452813409184/journalentry?minorversion=70',
+        `https://quickbooks.api.intuit.com/v3/company/9341452813409184/journalentry?minorversion=70&requestid=${dispatchIdentity(entry)}`,
       );
 
       const init = calledInit as RequestInit;
@@ -114,7 +115,7 @@ describe('qboDispatcher', () => {
 
       const [calledUrl] = fetchImpl.mock.calls[0] ?? [];
       expect(calledUrl).toBe(
-        'https://sandbox-quickbooks.api.intuit.com/v3/company/tenant%2Fwith%20space/journalentry?minorversion=70',
+        `https://sandbox-quickbooks.api.intuit.com/v3/company/tenant%2Fwith%20space/journalentry?minorversion=70&requestid=${dispatchIdentity(makeEntry())}`,
       );
     });
   });

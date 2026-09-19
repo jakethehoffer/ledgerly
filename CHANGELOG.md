@@ -8,6 +8,35 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-09-19
+
+### Upgrade notes
+
+- Back up SQLite before upgrading. The first startup holds previously attempted,
+  unposted sends whose outcome is uncertain. Reconcile those rows with the
+  accounting provider before releasing or recreating them. This release does
+  not repair entries already sent by older versions.
+- Custom `Storage` implementations now require `inbox` and
+  `persistRefundReversal`. Use a bundled backend or implement the updated
+  contract before upgrading. This is a pre-1.0 interface change.
+- Configure the accounting dispatcher before enabling the scheduler. There is
+  no automatic console fallback. The receiver can collect events with
+  `LEDGERLY_SCHEDULER_ENABLED=false`. OAuth setup also requires an admin token.
+- Failed verified webhook payloads remain in SQLite until successfully handled.
+  Protect that database and its backups as payment data. Refunds of deferred
+  invoices from before Ledgerly require reconciled opening balances and
+  recognition history before retry.
+
+### Fixed
+
+- Keep deferred-invoice refunds retryable until their invoice schedule exists. Out-of-order refunds no longer reverse unearned revenue or leave the full schedule to be recognized later. Applies to both bundled storage backends and the legacy deduplicator path.
+- Count invoice payments once across charge and invoice notices, and deduplicate refunds by refund ID in every bundled storage path. Preserve FX context when reducing recognition schedules.
+- Retain failed signed webhooks for protected operator retry. Contain storage errors and keep unreadable scheduled rows for repair without blocking healthy rows.
+- Fetch complete invoice line lists and retrieve newer invoice payloads in the supported schema. Keep unsettled refunds pending instead of prematurely booking them.
+- Stop incomplete accounting setup before dispatch. Console-only posting now requires explicit opt-in, and the sample configuration starts with the scheduler disabled.
+- Hold uncertain pre-upgrade dispatch attempts for manual reconciliation instead of automatically replaying them with new request identities.
+- Give QBO sends stable request IDs and check Xero narration markers before retries, including retries after Xero's short idempotency window. Reject Xero responses that do not confirm a saved journal.
+
 ### Security
 
 - **Only the operator can connect an accounting company now.**
@@ -1232,6 +1261,8 @@ structured logging, and a deployable Docker image.
 - Schedule output is exercised by per-entry assertions; full `.schedule.*.json`
   goldens are a future addition.
 
+[Unreleased]: https://github.com/jakethehoffer/ledgerly/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.16.0
 [0.15.1]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.15.1
 [0.15.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.15.0
 [0.4.0]: https://github.com/jakethehoffer/ledgerly/releases/tag/v0.4.0

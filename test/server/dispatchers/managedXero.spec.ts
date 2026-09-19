@@ -115,7 +115,9 @@ describe('managedXeroDispatcher', () => {
       oauthClient,
       storage,
       accountMap,
-      fetch: fetchImpl,
+      fetch: (url, init) => init?.method === 'GET'
+        ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+        : fetchImpl(url, init) as Promise<Response>,
     });
     await dispatch(makeEntry());
 
@@ -143,7 +145,9 @@ describe('managedXeroDispatcher', () => {
       oauthClient,
       storage,
       accountMap,
-      fetch: fetchImpl,
+      fetch: (url, init) => init?.method === 'GET'
+        ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+        : fetchImpl(url, init) as Promise<Response>,
     });
     await dispatch(makeEntry());
 
@@ -172,7 +176,9 @@ describe('managedXeroDispatcher', () => {
       oauthClient,
       storage,
       accountMap,
-      fetch: fetchImpl,
+      fetch: (url, init) => init?.method === 'GET'
+        ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+        : fetchImpl(url, init) as Promise<Response>,
     });
     await dispatch(makeEntry());
 
@@ -192,7 +198,9 @@ describe('managedXeroDispatcher', () => {
       oauthClient,
       storage,
       accountMap,
-      fetch: fetchImpl,
+      fetch: (url, init) => init?.method === 'GET'
+        ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+        : fetchImpl(url, init) as Promise<Response>,
     });
     await dispatch(makeEntry());
 
@@ -213,7 +221,9 @@ describe('managedXeroDispatcher', () => {
       oauthClient,
       storage,
       accountMap,
-      fetch: fetchImpl,
+      fetch: (url, init) => init?.method === 'GET'
+        ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+        : fetchImpl(url, init) as Promise<Response>,
     });
     await expect(dispatch(makeEntry())).rejects.toThrow(/500/);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -229,7 +239,9 @@ describe('managedXeroDispatcher', () => {
       storage,
       accountMap,
       status: 'POSTED',
-      fetch: fetchImpl,
+      fetch: (url, init) => init?.method === 'GET'
+        ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+        : fetchImpl(url, init) as Promise<Response>,
     });
     await dispatch(makeEntry());
 
@@ -248,12 +260,13 @@ describe('managedXeroDispatcher', () => {
     // is the seedStorage default (+1800s) so ensureFresh returns early.
     const storage = inMemoryStorage();
     seedStorage(storage);
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(apiOkResponse());
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => Promise.resolve(
+      init?.method === 'GET' ? new Response(JSON.stringify({ ManualJournals: [] })) : apiOkResponse()));
     try {
       const dispatch = managedXeroDispatcher({ oauthClient, storage, accountMap });
       await dispatch(makeEntry());
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const [url] = fetchSpy.mock.calls[0] ?? [];
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const [url] = fetchSpy.mock.calls[1] ?? [];
       expect(String(url)).toBe('https://api.xero.com/api.xro/2.0/ManualJournals');
     } finally {
       fetchSpy.mockRestore();
@@ -271,7 +284,9 @@ describe('managedXeroDispatcher', () => {
       storage,
       accountMap,
       apiBase: 'https://proxy.internal.example.com',
-      fetch: fetchImpl,
+      fetch: (url, init) => init?.method === 'GET'
+        ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+        : fetchImpl(url, init) as Promise<Response>,
     });
     await dispatch(makeEntry());
 
@@ -294,7 +309,9 @@ describe('managedXeroDispatcher', () => {
       oauthClient,
       storage,
       accountMap,
-      fetch: fetchImpl,
+      fetch: (url, init) => init?.method === 'GET'
+        ? Promise.resolve(new Response(JSON.stringify({ ManualJournals: [] })))
+        : fetchImpl(url, init) as Promise<Response>,
     });
     await expect(dispatch(makeEntry())).rejects.toBe('network glitch');
   });

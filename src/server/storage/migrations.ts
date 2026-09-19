@@ -34,6 +34,19 @@ import type Database from 'better-sqlite3';
  *   event still has every post-end row inserted as `held`.
  */
 const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS storage_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS webhook_inbox (
+  event_id TEXT PRIMARY KEY,
+  received_at INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  last_error TEXT
+);
+
 CREATE TABLE IF NOT EXISTS processed_events (
   event_id TEXT PRIMARY KEY,
   processed_at INTEGER NOT NULL
@@ -54,6 +67,9 @@ CREATE TABLE IF NOT EXISTS journal_entries (
 CREATE INDEX IF NOT EXISTS idx_journal_entries_event_id
   ON journal_entries(event_id);
 
+CREATE INDEX IF NOT EXISTS idx_journal_entries_source_object_id
+  ON journal_entries(source_object_id);
+
 CREATE TABLE IF NOT EXISTS scheduled_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id TEXT NOT NULL,
@@ -70,6 +86,9 @@ CREATE TABLE IF NOT EXISTS scheduled_entries (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_pending
   ON scheduled_entries(status, scheduled_date);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_subscription
+  ON scheduled_entries(subscription_id);
 
 CREATE TABLE IF NOT EXISTS subscription_ends (
   subscription_id TEXT PRIMARY KEY,
@@ -161,4 +180,17 @@ export function applyMigrations(db: Database.Database): void {
     rebuildScheduledEntries(db);
   }
   db.exec(SCHEMA_SQL);
+  // Old dispatches have neither the new provider request IDs nor Xero's
+  // narration marker. Their remote result cannot safely be inferred. Freeze
+  // only attempted, unposted rows at this one-time upgrade boundary.
+  db.transaction(() => {
+    const claimed = db.prepare(
+      "INSERT OR IGNORE INTO storage_metadata (key, value) VALUES ('dispatch_identity', '1')",
+    ).run();
+    if (claimed.changes > 0) {
+      db.prepare(`UPDATE scheduled_entries SET status = 'held', next_attempt_at = NULL,
+        last_error = 'Legacy dispatch outcome unknown; reconcile with accounting provider before release'
+        WHERE status IN ('pending', 'failed') AND attempts > 0`).run();
+    }
+  })();
 }

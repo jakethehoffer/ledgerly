@@ -282,11 +282,11 @@ function buildDispatcher(): Dispatcher {
     return qboDispatcher(cfg);
   }
 
-  if (anyQboVarSet) {
-    log.warn(
-      'Partial QBO configuration detected (need ALL of LEDGERLY_QBO_ACCESS_TOKEN, LEDGERLY_QBO_REALM_ID, LEDGERLY_QBO_ACCOUNT_MAP_JSON); falling back to console dispatcher.',
+  if (anyQboVarSet || qboOAuthClient !== null) {
+    log.error(
+      'Incomplete QBO dispatcher configuration. Set an account map and either OAuth credentials or an access token with realm ID. No entries were dispatched.',
     );
-    return consoleDispatcher(log);
+    process.exit(1);
   }
 
   const xeroToken = process.env['LEDGERLY_XERO_ACCESS_TOKEN'];
@@ -358,15 +358,19 @@ function buildDispatcher(): Dispatcher {
     return xeroDispatcher(cfg);
   }
 
-  if (anyXeroVarSet) {
-    log.warn(
-      'Partial Xero configuration detected (need ALL of LEDGERLY_XERO_ACCESS_TOKEN, LEDGERLY_XERO_TENANT_ID, LEDGERLY_XERO_ACCOUNT_MAP_JSON); falling back to console dispatcher.',
+  if (anyXeroVarSet || xeroOAuthClient !== null) {
+    log.error(
+      'Incomplete Xero dispatcher configuration. Set an account map and either OAuth credentials or an access token with tenant ID. No entries were dispatched.',
     );
-    return consoleDispatcher(log);
+    process.exit(1);
   }
 
-  log.info('No QBO/Xero env vars set; using console dispatcher.');
-  return consoleDispatcher(log);
+  if (process.env['LEDGERLY_DISPATCHER'] === 'console') {
+    log.warn('Explicit console dispatch enabled. Entries will be marked posted after logging only.');
+    return consoleDispatcher(log);
+  }
+  log.error('Scheduler requires a configured QBO/Xero dispatcher. For log-only development, explicitly set LEDGERLY_DISPATCHER=console.');
+  process.exit(1);
 }
 
 let scheduler: Scheduler | null = null;

@@ -1,5 +1,41 @@
 import type Stripe from 'stripe';
 
+// The mapper uses the schema shipped with our supported Stripe SDK. Webhook
+// endpoints can use a newer schema, so retrieve those invoices explicitly in
+// the supported format instead of silently treating missing fields as zero.
+const INVOICE_API_VERSION = '2024-06-20';
+
+async function completeInvoice(stripe: Stripe, original: Stripe.Invoice): Promise<Stripe.Invoice> {
+  let invoice = original;
+  if ('total_taxes' in invoice || 'parent' in invoice) {
+    invoice = await stripe.invoices.retrieve(invoice.id, {}, { apiVersion: INVOICE_API_VERSION });
+  }
+  if (!invoice.lines.has_more) return invoice;
+
+  const lines: Stripe.InvoiceLineItem[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  let hasMore = true;
+  while (hasMore) {
+    const page = await stripe.invoices.listLineItems(invoice.id, {
+      limit: 100,
+      ...(cursor ? { starting_after: cursor } : {}),
+    }, { apiVersion: INVOICE_API_VERSION });
+    for (const line of page.data) {
+      if (seen.has(line.id)) throw new Error('Invoice pagination repeated a line');
+      seen.add(line.id);
+      lines.push(line);
+    }
+    hasMore = page.has_more;
+    if (hasMore) {
+      const last = page.data.at(-1);
+      if (!last) throw new Error('Invoice pagination did not advance');
+      cursor = last.id;
+    }
+  }
+  return { ...invoice, lines: { ...invoice.lines, data: lines, has_more: false } };
+}
+
 /**
  * For each event type the engine handles, fetch the nested objects the engine
  * requires (per the design spec's expansion table). Returns a new event with
@@ -26,9 +62,12 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
       // `invoice` is expanded so the engine can drain 2000 Sales Tax Payable
       // proportionally for refunds of Stripe Tax-bearing charges.
       const charge = event.data.object;
-      const expanded = await stripe.charges.retrieve(charge.id, {
+      let expanded = await stripe.charges.retrieve(charge.id, {
         expand: ['balance_transaction', 'refunds.data.balance_transaction', 'invoice'],
       });
+      if (expanded.invoice && typeof expanded.invoice === 'object') {
+        expanded = { ...expanded, invoice: await completeInvoice(stripe, expanded.invoice) };
+      }
       const embeddedRefunds = expanded.refunds;
       if (!embeddedRefunds?.has_more) {
         return cloneEventWithObject(event, expanded);
@@ -73,8 +112,8 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
       const invoice = event.data.object;
       const expanded = await stripe.invoices.retrieve(invoice.id, {
         expand: ['charge.balance_transaction'],
-      });
-      return cloneEventWithObject(event, expanded);
+      }, { apiVersion: INVOICE_API_VERSION });
+      return cloneEventWithObject(event, await completeInvoice(stripe, expanded));
     }
 
     case 'credit_note.created':
@@ -87,6 +126,13 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
       const expanded = await stripe.creditNotes.retrieve(creditNote.id, {
         expand: ['invoice'],
       });
+      if (expanded.invoice && typeof expanded.invoice === 'object') {
+        const invoice = await completeInvoice(stripe, expanded.invoice);
+        if (invoice === expanded.invoice) return cloneEventWithObject(event, expanded);
+        return cloneEventWithObject(event, {
+          ...expanded, invoice,
+        });
+      }
       return cloneEventWithObject(event, expanded);
     }
 
@@ -125,6 +171,7 @@ export async function expandEvent(stripe: Stripe, event: Stripe.Event): Promise<
     case 'invoice.finalized':
     case 'invoice.marked_uncollectible':
     case 'invoice.voided':
+      return cloneEventWithObject(event, await completeInvoice(stripe, event.data.object));
     case 'charge.failed':
     case 'charge.dispute.created':
     case 'invoice.payment_failed':

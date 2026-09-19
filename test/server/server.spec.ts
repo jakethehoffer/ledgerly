@@ -69,6 +69,7 @@ describe('createServer', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
         ok: true,
+        pendingWebhooks: 0,
         dedupSize: 0,
         journalEntries: 0,
         pendingScheduled: 0,
