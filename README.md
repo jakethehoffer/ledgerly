@@ -15,6 +15,12 @@ Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 
 912 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
+**Release status (2026-09-19):** the corrected `v0.17.0` Docker image is available
+and its downloaded amd64 build has been checked. npm publication is waiting on
+publishing access, so `npm install ledgerly` still gets `0.15.1`, without these
+fixes. Use the pinned Docker image below for the corrected receiver. See the
+[release status](https://github.com/jakethehoffer/ledgerly/releases/tag/v0.17.0).
+
 ## What it does
 
 Given a Stripe `charge.succeeded` event:
