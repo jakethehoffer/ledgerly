@@ -1,12 +1,28 @@
 import Database from 'better-sqlite3';
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { applyMigrations } from '../../../src/server/storage/migrations.js';
 import { sqliteStorage } from '../../../src/server/storage/sqlite.js';
 import { cents } from '../../../src/money.js';
 import { runStorageSuite } from './suite.js';
 
-runStorageSuite('sqliteStorage', () => {
+const databases: Database.Database[] = [];
+
+function testDatabase(): Database.Database {
   const db = new Database(':memory:');
+  databases.push(db);
+  return db;
+}
+
+afterEach(() => {
+  // Do not leave native statements to be collected after Vitest's VM context
+  // is gone. Node 24 on Linux can abort in the native cleanup hook then.
+  for (const db of databases.splice(0)) {
+    if (db.open) db.close();
+  }
+});
+
+runStorageSuite('sqliteStorage', () => {
+  const db = testDatabase();
   applyMigrations(db);
   return sqliteStorage(db);
 });
@@ -17,7 +33,7 @@ runStorageSuite('sqliteStorage', () => {
 // is created.
 describe('sqliteStorage durability and atomicity', () => {
   it('holds ambiguous legacy sends once without holding new sends on later opens', () => {
-    const db = new Database(':memory:');
+    const db = testDatabase();
     applyMigrations(db);
     db.prepare("DELETE FROM storage_metadata WHERE key = 'dispatch_identity'").run();
     db.prepare(`INSERT INTO scheduled_entries (event_id, subscription_id, scheduled_date, payload, attempts)
@@ -33,7 +49,7 @@ describe('sqliteStorage durability and atomicity', () => {
   });
 
   it('survives a fresh store instance backed by the same Database', () => {
-    const db = new Database(':memory:');
+    const db = testDatabase();
     applyMigrations(db);
 
     const first = sqliteStorage(db);
@@ -45,7 +61,7 @@ describe('sqliteStorage durability and atomicity', () => {
   });
 
   it('keeps a subscription end across fresh store instances', () => {
-    const db = new Database(':memory:');
+    const db = testDatabase();
     applyMigrations(db);
     sqliteStorage(db).persistSubscriptionCancellation('evt_end', {
       subscriptionId: 'sub_ended',
@@ -81,7 +97,7 @@ describe('sqliteStorage durability and atomicity', () => {
   it('migrates a legacy v0 scheduled_entries table (CHECK + missing retry columns)', () => {
     // Simulate a pre-existing v0 database: original CHECK constraint, no
     // retry-tracking columns. Seed a few rows to verify they survive the rebuild.
-    const db = new Database(':memory:');
+    const db = testDatabase();
     db.exec(`
       CREATE TABLE processed_events (
         event_id TEXT PRIMARY KEY,
@@ -147,7 +163,7 @@ describe('sqliteStorage durability and atomicity', () => {
   });
 
   it('persistMapResult is atomic — a write failure rolls back dedup record', () => {
-    const db = new Database(':memory:');
+    const db = testDatabase();
     applyMigrations(db);
     const storage = sqliteStorage(db);
 
