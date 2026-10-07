@@ -7,7 +7,7 @@
 
 A pure TypeScript engine that converts Stripe webhook events into balanced double-entry journal entries, ready to export as **QuickBooks Online `JournalEntry`** JSON or **Xero `ManualJournal`** JSON.
 
-Built for indie SaaS founders who want clean books without paying an accountant $500 to $2,000 a month to reconcile Stripe data by hand.
+For developers who want to run and inspect their own Stripe-to-accounting connection. Start with a sample payment or annual plan, check the entries, then decide whether it fits your bookkeeping. Ledgerly creates journal entries, not customer invoices, and does not replace accounting advice.
 
 ```
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
@@ -44,7 +44,27 @@ Then renders it as QBO JournalEntry JSON or Xero ManualJournal JSON, ready to pu
 
 ## Try it
 
-**Fastest, zero install.** Pipe any (pre-expanded) Stripe event through the CLI and watch it become a balanced journal entry:
+**Start with a complete sample.** You need Node.js 22 or newer and internet access. Run this from an empty folder outside a cloned Ledgerly project. No Stripe, Xero or QuickBooks account is needed, and the sample does not move money or write to your books. `npx` downloads Ledgerly to its local cache. If you already cloned this project, use `pnpm demo` below instead.
+
+On macOS or Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jakethehoffer/ledgerly/v0.17.0/test/fixtures/invoice_payment_succeeded_annual.event.json | npx --yes ledgerly@0.17.0
+```
+
+On Windows PowerShell:
+
+```powershell
+curl.exe -fsSL https://raw.githubusercontent.com/jakethehoffer/ledgerly/v0.17.0/test/fixtures/invoice_payment_succeeded_annual.event.json | npx --yes ledgerly@0.17.0
+```
+
+You should see a $1,200 annual payment, a sample $36 fee, $1,164 left in Stripe, and 12 monthly entries of $100 each. The $36 is example data, not a quote for your Stripe fees. The schedule totals $1,200. Add `--xero` or `--qbo` to inspect the initial payment export with placeholder account codes. Those options omit the monthly schedule. Nothing is sent to either service.
+
+[See what changes when the customer upgrades or cancels](./docs/annual-plan-changes.md). That guide also explains why a cancellation does not itself issue a refund. The single-event command above shows the initial annual schedule. Changes to an existing schedule require the bundled receiver and its saved history.
+
+**Tell us whether it helped.** [Share a trial result](https://github.com/jakethehoffer/ledgerly/issues/new): did the sample run, which recurring task would you use it for, and what stopped you from taking the next step? You can describe the task in plain words. Do not include customer details, keys, or real payment records. A report that it did not fit is useful too.
+
+**Use your own prepared event.** Once the sample works, pipe a pre-expanded Stripe event through the CLI:
 
 ```bash
 cat event.json | npx ledgerly          # readable table
@@ -53,7 +73,7 @@ cat event.json | npx ledgerly --qbo     # QuickBooks JournalEntry JSON
 cat event.json | npx ledgerly --xero    # Xero ManualJournal JSON
 ```
 
-`ledgerly` reads a Stripe event on stdin (or a file argument) and prints the entry it maps to — as a readable table, or the exact JSON you'd POST to QuickBooks or Xero (with placeholder account codes you swap for your own). Pipe a JSON array of events or a `stripe events list` export (`{ "data": [...] }`) to map a whole batch at once — handy for backfilling books from Stripe history. The engine never calls Stripe, so expand nested objects (`balance_transaction`, `invoice.charge`, `credit_note.invoice`) first. Any of the [57 fixtures](./test/fixtures) is a ready-made input: `cat test/fixtures/charge_succeeded_standard.event.json | npx ledgerly`.
+`ledgerly` reads a Stripe event on stdin (or a file argument) and prints the entry it maps to — as a readable table, or the exact JSON you'd POST to QuickBooks or Xero (with placeholder account codes you swap for your own). Pipe a JSON array of events or a `stripe events list` export (`{ "data": [...] }`) to map a whole batch at once. Stripe only lists events from the last 30 days, so this can catch up recent history but not older payments. The engine never calls Stripe, so expand nested objects (`balance_transaction`, `invoice.charge`, `credit_note.invoice`) first. Any of the [57 fixtures](./test/fixtures) is a ready-made input: `cat test/fixtures/charge_succeeded_standard.event.json | npx ledgerly`.
 
 **Or clone and run the demo.** No Stripe account needed. It runs two events through the engine, a one-time charge and an annual subscription with revenue recognition.
 
@@ -99,7 +119,7 @@ Want the accounting behind the annual schedule? Read [Stripe annual subscription
 
 ## Why ledgerly?
 
-Indie SaaS founders reconcile Stripe a few different ways. By hand in a spreadsheet, with a hosted sync tool like A2X or Synder, with Stripe's own reporting exports, or by paying a bookkeeper $500 to $2,000 a month. ledgerly fills the gap between those.
+Stripe bookkeeping can involve a spreadsheet, a hosted sync tool, Stripe's own reports, or a bookkeeper. Ledgerly is for people who want to run and inspect the event-to-journal mapping themselves. Setup and accounting review are still needed.
 
 - **vs. a hosted sync tool.** Those are managed SaaS with a monthly fee, and the mapping from Stripe events to journal entries is a closed box you can't inspect or change. ledgerly is open source and runs on your own infrastructure. The mapping engine is under 3,000 lines of TypeScript, every entry shape is pinned by a fixture test, and you own the chart of accounts. No monthly fee, no third party in your financial data path.
 - **vs. Stripe's native reporting.** Stripe gives you summaries, CSV exports, and a separate paid Revenue Recognition product. ledgerly emits actual balanced double-entry journal entries, ready to POST to the QuickBooks Online or Xero API. Deferred revenue is released month by month, sales tax is drained proportionally on refunds, and realized FX gain/loss is booked when rates move between a charge and its refund. Credit notes reverse revenue whether the money is refunded to the card or kept as a customer credit balance, and net-terms (B2B) invoices recognize revenue at finalization against a receivable.
