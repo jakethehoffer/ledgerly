@@ -4,7 +4,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Stripe from 'stripe';
 import { mapEvent } from '../src/engine.js';
-import { formatMapResult, formatQbo, formatXero, mapEventJson, mapEventsJson } from '../src/cli.js';
+import {
+  createPreviewClient,
+  formatMapResult,
+  formatQbo,
+  formatXero,
+  mapEventJson,
+  mapEventsBatch,
+  mapEventsJson,
+  parseArgs,
+} from '../src/cli.js';
+import { UnhandledEventError } from '../src/errors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = path.join(__dirname, 'fixtures');
@@ -29,6 +39,15 @@ describe('cli: formatMapResult', () => {
     expect(out).toMatch(/RECOGNITION SCHEDULE/i);
     expect(out).toContain('12 future entries');
     expect(out).toContain('total recognized');
+  });
+
+  it('labels amounts with the currency code when the books are not in US dollars', () => {
+    const result = mapEvent(JSON.parse(rawFixture('charge_succeeded_eur')) as Stripe.Event);
+    const currency = result.entries[0]?.currency ?? '';
+    expect(currency).not.toBe('USD');
+    const out = formatMapResult(result);
+    expect(out).toContain(` ${currency}`);
+    expect(out).not.toContain('$');
   });
 
   it('states plainly when an event has no accounting impact', () => {
@@ -106,5 +125,80 @@ describe('cli: mapEventsJson (batch)', () => {
 
   it('throws a clear error on invalid JSON', () => {
     expect(() => mapEventsJson('not json')).toThrow(/not valid JSON/i);
+  });
+});
+
+describe('cli: mapEventsBatch (raw exports)', () => {
+  const customerCreated = { id: 'evt_cus', type: 'customer.created', created: 1736942400, data: { object: {} } };
+
+  it('skips event types Ledgerly does not map in a batch and counts them', () => {
+    const charge = JSON.parse(rawFixture('charge_succeeded_standard')) as unknown;
+    const { results, skipped } = mapEventsBatch(
+      JSON.stringify({ object: 'list', data: [customerCreated, charge, customerCreated] }),
+    );
+    expect(results).toHaveLength(1);
+    expect(skipped).toEqual({ 'customer.created': 2 });
+  });
+
+  it('still reports an unmapped type when it is the only event', () => {
+    expect(() => mapEventsBatch(JSON.stringify(customerCreated))).toThrow(UnhandledEventError);
+  });
+});
+
+describe('cli: parseArgs', () => {
+  it('reads --stripe with a day count and no file', () => {
+    expect(parseArgs(['--stripe', '--days', '7'])).toMatchObject({ stripe: true, days: 7, file: undefined });
+  });
+
+  it('defaults --stripe to 30 days', () => {
+    expect(parseArgs(['--stripe'])).toMatchObject({ stripe: true, days: 30 });
+  });
+
+  it('accepts --days=N', () => {
+    expect(parseArgs(['--stripe', '--days=14'])).toMatchObject({ days: 14 });
+  });
+
+  it('keeps reading a file argument and output flags', () => {
+    expect(parseArgs(['events.json', '--qbo'])).toMatchObject({ file: 'events.json', qbo: true, stripe: false });
+  });
+
+  it('rejects --days without --stripe', () => {
+    expect(parseArgs(['--days', '7']).error).toMatch(/--days only works with --stripe/);
+  });
+
+  it('rejects a day count Stripe cannot supply', () => {
+    expect(parseArgs(['--stripe', '--days', 'abc']).error).toMatch(/between 1 and 30/);
+    expect(parseArgs(['--stripe', '--days', '31']).error).toMatch(/between 1 and 30/);
+    expect(parseArgs(['--stripe', '--days']).error).toMatch(/between 1 and 30/);
+  });
+
+  it('rejects a file together with --stripe', () => {
+    expect(parseArgs(['--stripe', 'events.json']).error).toMatch(/--stripe reads from Stripe/);
+  });
+});
+
+describe('cli: createPreviewClient', () => {
+  class FakeStripe {
+    constructor(public readonly key: string) {}
+  }
+  const importFake = (): Promise<{ default: unknown }> => Promise.resolve({ default: FakeStripe as unknown });
+
+  it('explains how to supply a key when none is set', async () => {
+    const out = await createPreviewClient({}, importFake);
+    expect(out.error).toMatch(/STRIPE_SECRET_KEY/);
+    expect(out.error).toMatch(/restricted key/i);
+  });
+
+  it('explains how to add the Stripe package when it is missing', async () => {
+    const out = await createPreviewClient({ STRIPE_SECRET_KEY: 'rk_test_x' }, () =>
+      Promise.reject(Object.assign(new Error("Cannot find package 'stripe'"), { code: 'ERR_MODULE_NOT_FOUND' })),
+    );
+    expect(out.error).toMatch(/npx -p ledgerly -p stripe@16 ledgerly --stripe/);
+  });
+
+  it('builds a client from the key in the environment', async () => {
+    const out = await createPreviewClient({ STRIPE_SECRET_KEY: 'rk_test_x' }, importFake);
+    expect(out.error).toBeUndefined();
+    expect((out.stripe as unknown as FakeStripe).key).toBe('rk_test_x');
   });
 });

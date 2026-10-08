@@ -8,6 +8,29 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-10-08
+
+### Added
+
+- `ledgerly --stripe [--days N]` previews your own recent Stripe activity. It
+  lists the last 1 to 30 days of events Ledgerly maps, fetches the nested
+  objects each one needs with the same expansion the receiver uses, and prints
+  the entries with a summary. It only reads, stores nothing, and sends nothing
+  to QuickBooks or Xero. Use a restricted key with Read access in
+  `STRIPE_SECRET_KEY`. One event that cannot be mapped is reported and the rest
+  continue. Each event is mapped on its own, so later annual plan changes and
+  refunds can differ from the receiver, which uses saved history.
+
+### Changed
+
+- Piping a batch of events now skips event types Ledgerly does not map and
+  lists them, instead of stopping at the first one. A single unmapped event is
+  still reported as an error.
+- The readable table shows a currency code for amounts that are not in US
+  dollars, instead of a `$` sign on every amount.
+- The README no longer describes a `stripe events list` export as a way to
+  backfill older history. Stripe only lists the last 30 days of events.
+
 ## [0.17.0] — 2026-09-19
 
 ### Fixed

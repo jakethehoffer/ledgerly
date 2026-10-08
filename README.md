@@ -13,7 +13,7 @@ For developers who want to run and inspect their own Stripe-to-accounting connec
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero
 ```
 
-912 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
+934 tests · 18 event types · 57 fixtures · `pnpm typecheck` and `pnpm lint` clean.
 
 ## What it does
 
@@ -49,18 +49,37 @@ Then renders it as QBO JournalEntry JSON or Xero ManualJournal JSON, ready to pu
 On macOS or Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jakethehoffer/ledgerly/v0.17.0/test/fixtures/invoice_payment_succeeded_annual.event.json | npx --yes ledgerly@0.17.0
+curl -fsSL https://raw.githubusercontent.com/jakethehoffer/ledgerly/v0.18.0/test/fixtures/invoice_payment_succeeded_annual.event.json | npx --yes ledgerly@0.18.0
 ```
 
 On Windows PowerShell:
 
 ```powershell
-curl.exe -fsSL https://raw.githubusercontent.com/jakethehoffer/ledgerly/v0.17.0/test/fixtures/invoice_payment_succeeded_annual.event.json | npx --yes ledgerly@0.17.0
+curl.exe -fsSL https://raw.githubusercontent.com/jakethehoffer/ledgerly/v0.18.0/test/fixtures/invoice_payment_succeeded_annual.event.json | npx --yes ledgerly@0.18.0
 ```
 
 You should see a $1,200 annual payment, a sample $36 fee, $1,164 left in Stripe, and 12 monthly entries of $100 each. The $36 is example data, not a quote for your Stripe fees. The schedule totals $1,200. Add `--xero` or `--qbo` to inspect the initial payment export with placeholder account codes. Those options omit the monthly schedule. Nothing is sent to either service.
 
 [See what changes when the customer upgrades or cancels](./docs/annual-plan-changes.md). That guide also explains why a cancellation does not itself issue a refund. The single-event command above shows the initial annual schedule. Changes to an existing schedule require the bundled receiver and its saved history.
+
+**See your own recent Stripe payments.** Once the sample works, Ledgerly can read the last 30 days of your Stripe activity and show the entries it would make. It only reads. Nothing is stored, and nothing is sent to QuickBooks or Xero. Create a [restricted key](https://docs.stripe.com/keys/restricted-api-keys) in the Stripe Dashboard with **Read** access and no **Write** access, so it cannot change anything in your account. If the key is missing a permission, Stripe's error message names it.
+
+On macOS or Linux (the key is typed without showing and stays out of your shell history):
+
+```bash
+read -rsp "Stripe restricted key: " STRIPE_SECRET_KEY; echo
+STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" npx --yes ledgerly@0.18.0 --stripe --days 30
+```
+
+On Windows PowerShell 7:
+
+```powershell
+$env:STRIPE_SECRET_KEY = Read-Host "Stripe restricted key" -MaskInput
+npx --yes ledgerly@0.18.0 --stripe --days 30
+Remove-Item Env:STRIPE_SECRET_KEY
+```
+
+Stripe keeps events for 30 days, so older payments are not shown. Amounts appear in your Stripe settlement currency. Each event is mapped on its own. The receiver also uses saved history for later plan changes, cancellations and refunds of annual plans, so its entries for those can differ. Add `--qbo` or `--xero` to print the export JSON instead.
 
 **Tell us whether it helped.** [Share a trial result](https://github.com/jakethehoffer/ledgerly/issues/new): did the sample run, which recurring task would you use it for, and what stopped you from taking the next step? You can describe the task in plain words. Do not include customer details, keys, or real payment records. A report that it did not fit is useful too.
 
@@ -73,7 +92,7 @@ cat event.json | npx ledgerly --qbo     # QuickBooks JournalEntry JSON
 cat event.json | npx ledgerly --xero    # Xero ManualJournal JSON
 ```
 
-`ledgerly` reads a Stripe event on stdin (or a file argument) and prints the entry it maps to — as a readable table, or the exact JSON you'd POST to QuickBooks or Xero (with placeholder account codes you swap for your own). Pipe a JSON array of events or a `stripe events list` export (`{ "data": [...] }`) to map a whole batch at once. Stripe only lists events from the last 30 days, so this can catch up recent history but not older payments. The engine never calls Stripe, so expand nested objects (`balance_transaction`, `invoice.charge`, `credit_note.invoice`) first. Any of the [57 fixtures](./test/fixtures) is a ready-made input: `cat test/fixtures/charge_succeeded_standard.event.json | npx ledgerly`.
+`ledgerly` reads a Stripe event on stdin (or a file argument) and prints the entry it maps to — as a readable table, or the exact JSON you'd POST to QuickBooks or Xero (with placeholder account codes you swap for your own). Pipe a JSON array of events or a Stripe list response (`{ "data": [...] }`) to map a whole batch at once. Event types Ledgerly does not map are skipped. Piped events must already have their nested objects expanded (`balance_transaction`, `invoice.charge`, `credit_note.invoice`), because the engine never calls Stripe. To have Ledgerly fetch and expand your recent events, use `--stripe` above. Any of the [57 fixtures](./test/fixtures) is a ready-made input: `cat test/fixtures/charge_succeeded_standard.event.json | npx ledgerly`.
 
 **Or clone and run the demo.** No Stripe account needed. It runs two events through the engine, a one-time charge and an annual subscription with revenue recognition.
 
@@ -134,7 +153,7 @@ Stripe bookkeeping can involve a spreadsheet, a hosted sync tool, Stripe's own r
 ledgerly's primary form is a webhook receiver and scheduler that maps Stripe events and posts to QBO/Xero. The published Docker image carries a signed build provenance attestation and is the fastest path. See [Deployment](#deployment) for the full `docker run` and Docker Compose setup:
 
 ```bash
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.17.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.18.0
 ```
 
 ### Use the engine as a library
@@ -889,7 +908,7 @@ on every tagged release:
 
 ```bash
 # Pull a specific release (recommended for production):
-docker pull ghcr.io/jakethehoffer/ledgerly:v0.17.0
+docker pull ghcr.io/jakethehoffer/ledgerly:v0.18.0
 
 # Or track latest stable:
 docker pull ghcr.io/jakethehoffer/ledgerly:latest
@@ -920,7 +939,7 @@ docker run -d --name ledgerly \
   -e LEDGERLY_OAUTH_STATE_SECRET="$(openssl rand -base64 48)" \
   -e LEDGERLY_ADMIN_TOKEN="$(openssl rand -base64 48)" \
   -e LEDGERLY_SCHEDULER_ENABLED=false \
-  ghcr.io/jakethehoffer/ledgerly:v0.17.0
+  ghcr.io/jakethehoffer/ledgerly:v0.18.0
 ```
 
 The image's default `LEDGERLY_DB_PATH=/data/ledger.db` matches the volume
@@ -978,7 +997,7 @@ that produced it. No long-lived signing key, nothing to rotate.
 Verify before pulling into production:
 
 ```bash
-gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.17.0 \
+gh attestation verify oci://ghcr.io/jakethehoffer/ledgerly:v0.18.0 \
   --repo jakethehoffer/ledgerly
 ```
 

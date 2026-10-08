@@ -3,85 +3,31 @@
 // double-entry journal entry and print it. A zero-install way to see the engine
 // work on your own event: `cat event.json | npx ledgerly`.
 //
-// This is the pure mapping CLI; the webhook receiver is the separate
-// `ledgerly-server` bin. The engine never calls Stripe, so pre-expand nested
-// objects (balance_transaction, invoice.charge, credit_note.invoice) first.
+// This is the mapping CLI; the webhook receiver is the separate
+// `ledgerly-server` bin. The engine never calls Stripe, so piped events must
+// have nested objects (balance_transaction, invoice.charge, credit_note.invoice)
+// expanded first. `--stripe` instead reads recent events with a read-only key,
+// expands them the way the receiver does, and prints the entries.
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type Stripe from 'stripe';
 import { mapEvent } from './engine.js';
-import { checkBalance } from './journal.js';
-import type { JournalEntry, MapResult } from './journal.js';
+import { HANDLERS } from './events/index.js';
+import {
+  PREVIEW_MAX_DAYS,
+  formatPreview,
+  previewRecentEvents,
+  type PreviewItem,
+} from './preview.js';
+import type { MapResult } from './journal.js';
+import { formatMapResult } from './format.js';
 import { ACCOUNTS } from './accounts.js';
 import { MissingExpansionError, UnhandledEventError } from './errors.js';
 import { toQbo } from './exporters/qbo.js';
 import { toXero } from './exporters/xero.js';
 import type { QboAccountMap, XeroAccountMap } from './exporters/types.js';
 
-const usd = (c: number): string => `$${(c / 100).toFixed(2)}`;
-const rule = (n = 60): string => '-'.repeat(n);
-
-function formatEntry(entry: JournalEntry): string {
-  const out: string[] = [];
-  out.push(`${entry.date}  ${entry.memo}`);
-  out.push(rule());
-  out.push('Account'.padEnd(34) + 'Debit'.padStart(13) + 'Credit'.padStart(13));
-  out.push(rule());
-  let debitTotal = 0;
-  let creditTotal = 0;
-  for (const line of entry.lines) {
-    const label = `${line.accountCode} ${ACCOUNTS[line.accountCode].name}`;
-    const debit = line.side === 'debit' ? usd(line.amount) : '';
-    const credit = line.side === 'credit' ? usd(line.amount) : '';
-    if (line.side === 'debit') debitTotal += line.amount;
-    else creditTotal += line.amount;
-    out.push(label.padEnd(34) + debit.padStart(13) + credit.padStart(13));
-  }
-  out.push(rule());
-  out.push('Totals'.padEnd(34) + usd(debitTotal).padStart(13) + usd(creditTotal).padStart(13));
-  const report = checkBalance(entry);
-  out.push(
-    report.balanced
-      ? `balanced: debits ${usd(report.debitTotal)} == credits ${usd(report.creditTotal)}`
-      : `NOT BALANCED: difference ${usd(report.difference)}`,
-  );
-  return out.join('\n');
-}
-
-function formatSchedule(schedule: NonNullable<MapResult['schedule']>): string {
-  const total = schedule.entries.reduce(
-    (sum, e) => sum + (e.lines.find((l) => l.side === 'credit')?.amount ?? 0),
-    0,
-  );
-  const out: string[] = [];
-  out.push(`RECOGNITION SCHEDULE — ${String(schedule.entries.length)} future entries releasing ${usd(total)} deferred`);
-  out.push('each entry: Dr 2100 Deferred Revenue  /  Cr 4000 Subscription Revenue');
-  out.push(rule(40));
-  for (const e of schedule.entries) {
-    const amount = e.lines.find((l) => l.side === 'credit')?.amount ?? 0;
-    out.push(e.date.padEnd(28) + usd(amount).padStart(12));
-  }
-  out.push(rule(40));
-  out.push('total recognized'.padEnd(28) + usd(total).padStart(12));
-  return out.join('\n');
-}
-
-/**
- * Render a {@link MapResult} as human-readable text: one balanced table per
- * immediate entry, plus a summary of the recognition schedule when present. An
- * event with no accounting impact (informational, or a documented no-op) is
- * stated plainly rather than printing an empty table.
- */
-export function formatMapResult(result: MapResult): string {
-  if (result.entries.length === 0 && (result.schedule === null || result.schedule.entries.length === 0)) {
-    return 'No journal entry — this event is acknowledged with no accounting impact (informational, or a documented no-op).';
-  }
-  const blocks: string[] = result.entries.map(formatEntry);
-  if (result.schedule && result.schedule.entries.length > 0) {
-    blocks.push(formatSchedule(result.schedule));
-  }
-  return blocks.join('\n\n');
-}
+export { formatMapResult };
 
 // Placeholder account maps so `--qbo` / `--xero` can render the export shape
 // without configuration. The IDs/codes are stand-ins — a real deployment maps
@@ -173,37 +119,219 @@ export function mapEventsJson(input: string): MapResult[] {
   return extractEvents(parsed).map((event) => mapEvent(event as Stripe.Event));
 }
 
-const HELP = `ledgerly — map a Stripe event to double-entry journal entries
+/**
+ * Map a batch the way a raw Stripe export needs: event types Ledgerly does not
+ * map are skipped and counted instead of stopping the run. A lone event of an
+ * unmapped type still throws, so a single mistaken input is reported clearly.
+ */
+export function mapEventsBatch(input: string): { results: MapResult[]; skipped: Record<string, number> } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch (err) {
+    throw new Error(
+      `Input is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const events = extractEvents(parsed);
+  if (events.length === 1) return { results: [mapEvent(events[0] as Stripe.Event)], skipped: {} };
+
+  const results: MapResult[] = [];
+  const skipped: Record<string, number> = {};
+  for (const raw of events) {
+    const event = raw as Stripe.Event;
+    if (!HANDLERS[event.type]) {
+      skipped[event.type] = (skipped[event.type] ?? 0) + 1;
+      continue;
+    }
+    results.push(mapEvent(event));
+  }
+  return { results, skipped };
+}
+
+export interface CliArgs {
+  help: boolean;
+  json: boolean;
+  qbo: boolean;
+  xero: boolean;
+  stripe: boolean;
+  days: number;
+  file: string | undefined;
+  error?: string;
+}
+
+/** Parse the CLI flags. Problems come back in `error` rather than throwing. */
+export function parseArgs(argv: readonly string[]): CliArgs {
+  const args: CliArgs = {
+    help: argv.includes('-h') || argv.includes('--help'),
+    json: argv.includes('--json'),
+    qbo: argv.includes('--qbo'),
+    xero: argv.includes('--xero'),
+    stripe: argv.includes('--stripe'),
+    days: PREVIEW_MAX_DAYS,
+    file: undefined,
+  };
+  let daysText: string | undefined;
+  let daysGiven = false;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] ?? '';
+    if (arg === '--days') {
+      daysGiven = true;
+      const next = argv[i + 1];
+      daysText = next !== undefined && !next.startsWith('-') ? next : '';
+      if (daysText !== '') i++;
+    } else if (arg.startsWith('--days=')) {
+      daysGiven = true;
+      daysText = arg.slice('--days='.length);
+    } else if (!arg.startsWith('-') && args.file === undefined) {
+      args.file = arg;
+    }
+  }
+  if (daysGiven) {
+    if (!args.stripe) return { ...args, error: '--days only works with --stripe' };
+    const days = /^\d+$/.test(daysText ?? '') ? Number(daysText) : NaN;
+    if (!Number.isInteger(days) || days < 1 || days > PREVIEW_MAX_DAYS) {
+      return { ...args, error: `--days must be a whole number between 1 and ${String(PREVIEW_MAX_DAYS)}` };
+    }
+    args.days = days;
+  }
+  if (args.stripe && args.file !== undefined) {
+    return { ...args, error: '--stripe reads from Stripe, so leave out the file argument' };
+  }
+  return args;
+}
+
+/**
+ * Build a Stripe client for `--stripe` from STRIPE_SECRET_KEY. The `stripe`
+ * package is an optional peer dependency, so it is loaded only here.
+ */
+export async function createPreviewClient(
+  env: Readonly<Record<string, string | undefined>>,
+  importStripe: () => Promise<{ default: unknown }> = () => import('stripe'),
+): Promise<{ stripe?: Stripe; error?: string }> {
+  const key = env['STRIPE_SECRET_KEY'];
+  if (!key) {
+    return {
+      error:
+        '--stripe needs a Stripe key in STRIPE_SECRET_KEY. Use a restricted key with Read access ' +
+        'so the preview cannot change anything in your account.',
+    };
+  }
+  let StripeClass: new (key: string) => Stripe;
+  try {
+    StripeClass = (await importStripe()).default as new (key: string) => Stripe;
+  } catch {
+    return {
+      error:
+        '--stripe needs the stripe package next to ledgerly. Run it as:\n' +
+        '  npx -p ledgerly -p stripe@16 ledgerly --stripe',
+    };
+  }
+  return { stripe: new StripeClass(key) };
+}
+
+const HELP = `ledgerly — map Stripe events to double-entry journal entries
 
 Usage:
   cat event.json | ledgerly [--json|--qbo|--xero]
   ledgerly events.json
+  STRIPE_SECRET_KEY=rk_... npx ledgerly --stripe [--days N]
 
 Reads a Stripe event — or a JSON array of events, or a Stripe list response
 (\`{ "data": [...] }\`, what \`stripe events list\` prints) — from stdin or a file
-argument, and prints the balanced journal entries. Pre-expand nested objects
-(balance_transaction, invoice.charge, credit_note.invoice) — the engine never
-calls Stripe.
+argument, and prints the balanced journal entries. Event types Ledgerly does not
+map are skipped when a batch is piped in. Piped events must already have their
+nested objects expanded (balance_transaction, invoice.charge, credit_note.invoice).
+
+--stripe instead reads your account's recent events from Stripe, fetches the
+nested objects each one needs, and prints the entries. It only reads. Nothing is
+stored, and nothing is sent to QuickBooks or Xero. Use a restricted key with Read
+access. Stripe keeps events for 30 days.
 
 Options:
+  --stripe    Preview your recent Stripe events (needs STRIPE_SECRET_KEY).
+  --days N    With --stripe, how many days back to read (1 to 30, default 30).
   --json      Print the raw MapResult JSON instead of the readable table.
   --qbo       Print QuickBooks Online JournalEntry JSON (placeholder account IDs).
   --xero      Print Xero ManualJournal JSON (placeholder account codes).
   -h, --help  Show this help.
 `;
 
-function main(argv: string[]): number {
-  if (argv.includes('-h') || argv.includes('--help')) {
+function renderResults(results: MapResult[], args: CliArgs): string {
+  if (args.qbo || args.xero) {
+    // Placeholder note goes to stderr so stdout stays pipeable JSON.
+    process.stderr.write(
+      `ledgerly: account ${args.qbo ? 'IDs' : 'codes'} below are placeholders — ` +
+        `map ledgerly's codes to your real ${args.qbo ? 'QuickBooks' : 'Xero'} accounts ` +
+        `(see the README).\n`,
+    );
+    const scheduleEntries = results.reduce((n, r) => n + (r.schedule?.entries.length ?? 0), 0);
+    if (scheduleEntries > 0) {
+      process.stderr.write(
+        `ledgerly: ${String(scheduleEntries)} recognition-schedule entries are not shown — ` +
+          `render them with the library's ${args.qbo ? 'toQboSchedule' : 'toXeroSchedule'}.\n`,
+      );
+    }
+    const allEntries = results.flatMap((r) => r.entries);
+    return JSON.stringify(
+      allEntries.map((entry) =>
+        args.qbo ? toQbo(entry, PLACEHOLDER_QBO) : toXero(entry, PLACEHOLDER_XERO),
+      ),
+      null,
+      2,
+    );
+  }
+  if (args.json) {
+    // A single event keeps its object shape; a batch becomes an array of results.
+    return JSON.stringify(results.length === 1 ? results[0] : results, null, 2);
+  }
+  return results.map(formatMapResult).join(`\n\n${'='.repeat(60)}\n\n`);
+}
+
+async function runStripePreview(args: CliArgs): Promise<number> {
+  const client = await createPreviewClient(process.env);
+  if (!client.stripe) {
+    process.stderr.write(`ledgerly: ${client.error ?? 'could not create a Stripe client'}\n`);
+    return 1;
+  }
+  let items: PreviewItem[];
+  try {
+    items = await previewRecentEvents(client.stripe, { days: args.days });
+  } catch (err) {
+    process.stderr.write(
+      `ledgerly: could not read events from Stripe: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 1;
+  }
+  const failed = items.filter((i) => !i.result);
+  if (args.qbo || args.xero || args.json) {
+    for (const item of failed) {
+      process.stderr.write(`ledgerly: could not map ${item.event.id} (${item.event.type}): ${item.error ?? ''}\n`);
+    }
+    const results = items.flatMap((i) => (i.result ? [i.result] : []));
+    process.stdout.write(renderResults(results, args) + '\n');
+  } else {
+    process.stdout.write(formatPreview(items, args.days) + '\n');
+  }
+  return failed.length > 0 ? 1 : 0;
+}
+
+async function main(argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  if (args.help) {
     process.stdout.write(HELP);
     return 0;
   }
-  const jsonOut = argv.includes('--json');
-  const fileArg = argv.find((a) => !a.startsWith('-'));
+  if (args.error) {
+    process.stderr.write(`ledgerly: ${args.error}\nRun ledgerly --help for usage.\n`);
+    return 1;
+  }
+  if (args.stripe) return runStripePreview(args);
 
   let input: string;
   try {
     // fd 0 is stdin; readFileSync reads it to EOF for piped/redirected input.
-    input = fileArg ? readFileSync(fileArg, 'utf8') : readFileSync(0, 'utf8');
+    input = args.file ? readFileSync(args.file, 'utf8') : readFileSync(0, 'utf8');
   } catch (err) {
     process.stderr.write(
       `ledgerly: could not read input: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -220,10 +348,16 @@ function main(argv: string[]): number {
   }
 
   // Accepts a single event, a JSON array, or a Stripe list ({ data: [...] }), so
-  // a whole history export maps in one call.
+  // a whole export maps in one call.
   let results: MapResult[];
   try {
-    results = mapEventsJson(input);
+    const batch = mapEventsBatch(input);
+    results = batch.results;
+    const skipped = Object.entries(batch.skipped);
+    if (skipped.length > 0) {
+      const list = skipped.map(([type, n]) => `${type} (${String(n)})`).join(', ');
+      process.stderr.write(`ledgerly: skipped event types Ledgerly does not map: ${list}\n`);
+    }
   } catch (err) {
     if (err instanceof UnhandledEventError) {
       process.stderr.write(
@@ -236,7 +370,8 @@ function main(argv: string[]): number {
       process.stderr.write(
         `ledgerly: ${err.message}\n` +
           `Expand the nested Stripe objects (balance_transaction, invoice.charge, ` +
-          `credit_note.invoice) before piping the event — the engine does not call Stripe.\n`,
+          `credit_note.invoice) before piping the event, or use --stripe to read and ` +
+          `expand your recent events straight from Stripe.\n`,
       );
       return 1;
     }
@@ -244,43 +379,15 @@ function main(argv: string[]): number {
     return 1;
   }
 
-  const qboOut = argv.includes('--qbo');
-  const xeroOut = argv.includes('--xero');
-  let output: string;
-  if (qboOut || xeroOut) {
-    // Placeholder note goes to stderr so stdout stays pipeable JSON.
-    process.stderr.write(
-      `ledgerly: account ${qboOut ? 'IDs' : 'codes'} below are placeholders — ` +
-        `map ledgerly's codes to your real ${qboOut ? 'QuickBooks' : 'Xero'} accounts ` +
-        `(see the README).\n`,
-    );
-    const scheduleEntries = results.reduce((n, r) => n + (r.schedule?.entries.length ?? 0), 0);
-    if (scheduleEntries > 0) {
-      process.stderr.write(
-        `ledgerly: ${String(scheduleEntries)} recognition-schedule entries are not shown — ` +
-          `render them with the library's ${qboOut ? 'toQboSchedule' : 'toXeroSchedule'}.\n`,
-      );
-    }
-    const allEntries = results.flatMap((r) => r.entries);
-    output = JSON.stringify(
-      allEntries.map((entry) =>
-        qboOut ? toQbo(entry, PLACEHOLDER_QBO) : toXero(entry, PLACEHOLDER_XERO),
-      ),
-      null,
-      2,
-    );
-  } else if (jsonOut) {
-    // A single event keeps its object shape; a batch becomes an array of results.
-    output = JSON.stringify(results.length === 1 ? results[0] : results, null, 2);
-  } else {
-    output = results.map(formatMapResult).join(`\n\n${'='.repeat(60)}\n\n`);
-  }
-  process.stdout.write(output + '\n');
+  process.stdout.write(renderResults(results, args) + '\n');
   return 0;
 }
 
 // Run main() only when this module is the process entry point (the bin), not
 // when it is imported (e.g. by tests importing the pure functions above).
+// exitCode rather than exit() lets piped output finish writing first.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exit(main(process.argv.slice(2)));
+  void main(process.argv.slice(2)).then((code) => {
+    process.exitCode = code;
+  });
 }
