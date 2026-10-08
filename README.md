@@ -5,9 +5,11 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-jakethehoffer%2Fledgerly-blue?logo=docker&logoColor=white)](https://github.com/jakethehoffer/ledgerly/pkgs/container/ledgerly)
 
-A pure TypeScript engine that converts Stripe webhook events into balanced double-entry journal entries, ready to export as **QuickBooks Online `JournalEntry`** JSON or **Xero `ManualJournal`** JSON.
+**Writing your own Stripe to QuickBooks or Xero code?** Ledgerly is a free, open-source TypeScript library that turns Stripe events into balanced double-entry journal entries, ready to post as a **QuickBooks Online `JournalEntry`** or a **Xero `ManualJournal`**. Call [`mapEvent` inside your own webhook handler](#use-the-engine-as-a-library), or run the bundled self-hosted receiver.
 
-For developers who want to run and inspect their own Stripe-to-accounting connection. Start with a sample payment or annual plan, check the entries, then decide whether it fits your bookkeeping. Ledgerly creates journal entries, not customer invoices, and does not replace accounting advice.
+It covers the cases hand-written sync code tends to get wrong. The engine handles net payouts through a Stripe clearing account, annual plans spread month by month, disputes won and lost, and sales tax and currency changes on refunds. The receiver adds the cases that need saved history: refunds of a partly used annual plan, duplicate webhook deliveries, and a refund that arrives before its invoice. Before wiring anything up, you can [preview your own last 30 days](#try-it) of Stripe activity with a read-only key.
+
+Ledgerly creates journal entries, not customer invoices, and does not replace accounting advice.
 
 ```
 Stripe event  ─▶  mapEvent  ─▶  JournalEntry[]  ─▶  toQbo / toXero

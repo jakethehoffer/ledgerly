@@ -8,6 +8,14 @@ Pre-1.0 means breaking changes can happen in any minor release.
 
 ## [Unreleased]
 
+## [0.18.1] — 2026-10-08
+
+### Changed
+
+- The package description, keywords and README opening now speak to developers
+  writing their own Stripe to QuickBooks or Xero code, and name the cases the
+  engine and receiver already handle. No code changes.
+
 ## [0.18.0] — 2026-10-08
 
 ### Added

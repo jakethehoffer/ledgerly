@@ -1,7 +1,7 @@
 {
   "name": "ledgerly",
-  "version": "0.18.0",
-  "description": "Stripe-to-double-entry mapping engine for indie SaaS",
+  "version": "0.18.1",
+  "description": "Turn Stripe events into balanced QuickBooks Online and Xero journal entries. Tested TypeScript library for your own webhook handler, plus a self-hosted receiver.",
   "keywords": [
     "stripe",
     "accounting",
@@ -12,7 +12,16 @@
     "webhooks",
     "fintech",
     "journal-entries",
-    "revenue-recognition"
+    "revenue-recognition",
+    "quickbooks-online",
+    "qbo",
+    "xero-api",
+    "stripe-webhooks",
+    "deferred-revenue",
+    "reconciliation",
+    "refunds",
+    "disputes",
+    "payouts"
   ],
   "homepage": "https://github.com/jakethehoffer/ledgerly#readme",
   "bugs": {
