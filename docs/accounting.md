@@ -636,6 +636,13 @@ isn't handled yet.
 
 These are deliberate gaps, documented rather than approximated:
 
+- **Refunds that change a Stripe fee** (`charge.refunded`). The common case is
+  modeled: Stripe keeps the original processing fee and the refund leaves your
+  balance at its full amount. A refund whose own balance transaction carries a
+  fee, such as Stripe returning part of the original fee or charging a fee for
+  the refund, is refused with a clear error instead of being guessed. Modeling it
+  needs a real payload to confirm how Stripe signs those fees.
+
 - **Mid-term annual subscription changes — pure engine vs. bundled server.** A
   paid, positive, same-currency proration invoice is merged into the original
   term's unposted recognition dates by the bundled receiver. Already-posted
